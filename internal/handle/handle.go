@@ -53,6 +53,25 @@ func IsRef(s string) bool {
 	return strings.HasPrefix(s, Prefix)
 }
 
+// Normalize validates a bare name and returns its canonical form.
+//
+// This is the single source of truth for what a name may be. Parse is defined in
+// terms of it, and the vault uses it to key stored secrets, so a reference can
+// never resolve to a name the vault would refuse.
+func Normalize(name string) (string, error) {
+	name = strings.ToLower(name)
+	switch {
+	case name == "":
+		return "", ErrEmptyName
+	case len(name) > MaxNameLen:
+		return "", fmt.Errorf("%d characters, limit is %d: %w", len(name), MaxNameLen, ErrNameTooLong)
+	}
+	if err := validateName(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
 // Parse validates s and returns its canonical Handle. Names are lowercased, so
 // parsing is idempotent over String.
 //
@@ -62,15 +81,8 @@ func Parse(s string) (Handle, error) {
 	if !IsRef(s) {
 		return Handle{}, ErrNotHandle
 	}
-
-	name := strings.ToLower(s[len(Prefix):])
-	switch {
-	case name == "":
-		return Handle{}, ErrEmptyName
-	case len(name) > MaxNameLen:
-		return Handle{}, fmt.Errorf("%d characters, limit is %d: %w", len(name), MaxNameLen, ErrNameTooLong)
-	}
-	if err := validateName(name); err != nil {
+	name, err := Normalize(s[len(Prefix):])
+	if err != nil {
 		return Handle{}, err
 	}
 	return Handle{Name: name}, nil

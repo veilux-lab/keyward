@@ -117,6 +117,75 @@ func TestIsRef(t *testing.T) {
 	}
 }
 
+// Normalize is the single source of truth for what a name may be, shared by
+// Parse and by the vault. If the two disagreed, a reference could resolve to a
+// name the vault refuses to store.
+func TestNormalize(t *testing.T) {
+	valid := []struct{ in, want string }{
+		{"token", "token"},
+		{"splunk-mcp-token", "splunk-mcp-token"},
+		{"github_token", "github_token"},
+		{"db.primary", "db.primary"},
+		{"SPLUNK_MCP_TOKEN", "splunk_mcp_token"},
+		{"Db.Primary", "db.primary"},
+		{"a", "a"},
+		{strings.Repeat("a", handle.MaxNameLen), strings.Repeat("a", handle.MaxNameLen)},
+	}
+	for _, tt := range valid {
+		got, err := handle.Normalize(tt.in)
+		if err != nil {
+			t.Errorf("Normalize(%q) returned error: %v", tt.in, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("Normalize(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+
+	invalid := []struct {
+		in      string
+		wantErr error
+	}{
+		{"", handle.ErrEmptyName},
+		{"foo bar", handle.ErrInvalidName},
+		{" token", handle.ErrInvalidName},
+		{"token ", handle.ErrInvalidName},
+		{"foo/bar", handle.ErrInvalidName},
+		{"-token", handle.ErrInvalidName},
+		{"token-", handle.ErrInvalidName},
+		{".token", handle.ErrInvalidName},
+		{"_token", handle.ErrInvalidName},
+		{"foo$bar", handle.ErrInvalidName},
+		{"tökén", handle.ErrInvalidName},
+		{"cap://token", handle.ErrInvalidName}, // a full reference is not a name
+		{strings.Repeat("a", handle.MaxNameLen+1), handle.ErrNameTooLong},
+	}
+	for _, tt := range invalid {
+		if _, err := handle.Normalize(tt.in); !errors.Is(err, tt.wantErr) {
+			t.Errorf("Normalize(%q) error = %v, want errors.Is(_, %v)", tt.in, err, tt.wantErr)
+		}
+	}
+}
+
+// Parse must agree with Normalize on every name, since Parse is defined as the
+// prefix check plus normalization.
+func TestParseAgreesWithNormalize(t *testing.T) {
+	names := []string{"token", "SPLUNK_MCP_TOKEN", "db.primary", "a-b_c.d"}
+	for _, n := range names {
+		want, err := handle.Normalize(n)
+		if err != nil {
+			t.Fatalf("Normalize(%q): %v", n, err)
+		}
+		h, err := handle.Parse(handle.Prefix + n)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", handle.Prefix+n, err)
+		}
+		if h.Name != want {
+			t.Errorf("Parse(%q).Name = %q, Normalize(%q) = %q", handle.Prefix+n, h.Name, n, want)
+		}
+	}
+}
+
 // Parse is called on values that may turn out to be real secrets rather than
 // references. If ErrNotHandle embedded its input, every such call would risk
 // writing a live credential into a log or error message.

@@ -1,30 +1,31 @@
 # Status
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 ## Where things stand
 
-One commit. The reference format is specified and implemented; nothing is
-installable yet.
+The reference format and the storage seam are implemented. Nothing is installable
+yet: there is no `cmd/` and no real Keychain access.
 
-```
-dd7d9a2  Add reference parsing for keyward
-```
-
-`make test`: 7 test functions, 29 subtests, all passing. `go vet` and `gofmt`
-clean.
+`make verify` — `go vet`, `gofmt`, and `go test -race`: 19 test functions, 41
+subtests, all passing. 100% statement coverage in both `internal/handle` and
+`internal/vault`.
 
 ## Component status
 
 | Component | State | Notes |
 | --- | --- | --- |
-| `internal/handle` | **Done** | Parse, validate, format. Errors proven not to leak their input. |
-| `internal/vault` | Not started | Next. cgo against Security.framework. |
-| `internal/resolve` | Not started | Needs `vault.Store`. |
-| `cmd/keyward run` | Not started | Needs resolve. |
-| `internal/migrate` | Not started | Needs vault. The adoption-critical piece. |
-| `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
+| `internal/handle` | **Done** | Parse, `Normalize`, format. Errors proven not to leak their input. |
+| `vault.Secret` | **Done** | Redacts through every fmt verb and through JSON. Proven by test. |
+| `vault.Store` | **Done** | Interface plus sentinel errors. The seam that keeps everything above it testable. |
+| `vault.Memory` | **Done** | In-process fake, concurrency-safe, passes the contract suite under `-race`. |
+| `vault/vaulttest` | **Done** | Contract suite. The real Keychain store will be held to exactly this. |
+| Keychain store | Not started | **Next.** cgo against `SecItemAdd` / `SecItemCopyMatching`, build-tagged integration test running `vaulttest.Run`. |
+| `internal/resolve` | Not started | Unblocked — `vault.Store` exists, so it can be written entirely against `Memory`. |
 | `internal/audit` | Not started | Independent; can land any time. |
+| `cmd/keyward run` | Not started | Needs resolve. |
+| `internal/migrate` | Not started | Needs a real vault. The adoption-critical piece. |
+| `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
 
@@ -35,15 +36,16 @@ available to work on.
 
 **Nothing gates these:**
 
-- `internal/vault` — the `Store` interface, the in-memory fake, and the cgo
-  implementation behind it.
+- **Keychain store** — the cgo implementation behind `vault.Store`. Verified by
+  running `vaulttest.Run` against it under a build tag.
+- `internal/resolve` — environment scanning and reference resolution. Unblocked
+  now that `vault.Store` and `vault.Memory` exist; needs no real Keychain.
 - `internal/audit` — append-only JSONL. No dependencies.
 
-**Gated on `vault.Store` existing:**
+**Gated on the Keychain store and resolve:**
 
-- `internal/resolve` — environment scanning and reference resolution, tested
-  entirely against the fake.
-- `cmd/keyward run` — resolve plus `syscall.Exec`.
+- `cmd/keyward run` — resolve plus `syscall.Exec`. Needs a real vault to be
+  useful, though it can be exercised against `Memory` first.
 
 **Gated on `keyward run` working end to end:**
 
@@ -76,6 +78,11 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-09-28** — `vault.Secret`, `vault.Store`, and `vault.Memory` implemented
+test-first, plus the `vaulttest` contract suite that the real Keychain store will
+also have to pass. `handle.Normalize` extracted so the vault and the reference
+parser share one definition of a valid name. MIT licensed. `make verify` added.
 
 **2026-09-27** — Repository created. `internal/handle` implemented test-first.
 Design, mission, obstacles, and landscape documented. Scope narrowed from a

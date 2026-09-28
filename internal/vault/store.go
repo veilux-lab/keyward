@@ -1,0 +1,57 @@
+// Package vault stores and retrieves secret values.
+//
+// Store is the seam that keeps the rest of keyward testable. The real
+// implementation talks to the macOS Keychain through cgo, which cannot be
+// meaningfully unit tested: it touches live OS state, may prompt, and would
+// pollute the developer's own Keychain. So every piece of logic above this
+// interface is tested against Memory, the cgo layer is kept thin enough to be
+// nearly declarative, and both are held to the same contract by the vaulttest
+// package.
+package vault
+
+import "errors"
+
+var (
+	// ErrNotFound means no secret is stored under that name.
+	ErrNotFound = errors.New("secret not found")
+
+	// ErrExists means Put was called for a name that already has a value.
+	ErrExists = errors.New("secret already exists")
+
+	// ErrEmptyValue means the value was empty. Storing one is nearly always an
+	// upstream bug, and it produces a uniquely unhelpful failure downstream: a
+	// variable that is present but blank, and a connect timeout with no
+	// visible cause.
+	ErrEmptyValue = errors.New("secret value is empty")
+)
+
+// Store holds secret values keyed by name.
+//
+// Names are normalised by handle.Normalize, so a Store is keyed by exactly the
+// names a cap:// reference can carry. Implementations must reject a name that
+// does not normalise.
+//
+// Errors may quote a name. They must never quote a value.
+type Store interface {
+	// Get returns the secret stored under name, or ErrNotFound.
+	//
+	// The returned Secret is independent of the Store's own storage: a caller may
+	// Destroy it without affecting what is stored.
+	Get(name string) (Secret, error)
+
+	// Put stores a new secret, returning ErrExists if name is already taken.
+	//
+	// Put never overwrites. Silently replacing a credential is how a working
+	// setup breaks with no trace of what changed, so overwriting is Replace's
+	// job and a caller has to say which it means.
+	Put(name string, value Secret) error
+
+	// Replace overwrites an existing secret, returning ErrNotFound if absent.
+	Replace(name string, value Secret) error
+
+	// Delete removes a secret, returning ErrNotFound if absent.
+	Delete(name string) error
+
+	// List returns every stored name, sorted.
+	List() ([]string, error)
+}
