@@ -11,8 +11,14 @@ yet: there is no `cmd/` and no real Keychain access.
 additionally exercises the real Keychain; it is kept separate because it touches
 live OS state.
 
-Storage works end to end: secrets round-trip through the macOS Keychain, survive
-the process, and are scoped so one service cannot see another's items.
+Storage and resolution both work end to end: secrets round-trip through the macOS
+Keychain, survive the process, are scoped so one service cannot see another's
+items, and an environment of `cap://` references resolves to real values.
+
+Coverage is 100% of statements in `handle`, `resolve`, and the pure-Go half of
+`vault`. The package figure for `vault` reads lower under `make test` because the
+cgo Keychain file is excluded without the `integration` tag; it is covered by
+`make test-integration`.
 
 ## Component status
 
@@ -24,9 +30,9 @@ the process, and are scoped so one service cannot see another's items.
 | `vault.Memory` | **Done** | In-process fake, concurrency-safe, passes the contract suite under `-race`. |
 | `vault/vaulttest` | **Done** | Contract suite. The real Keychain store will be held to exactly this. |
 | Keychain store | **Done** | cgo against `SecItem*`. Passes the same contract suite as the fake, plus persistence and service-isolation tests. `make test-integration`. |
-| `internal/resolve` | Not started | **Next.** Unblocked, and testable entirely against `Memory` with no cgo. |
+| `internal/resolve` | **Done** | Environment scanning, caching, all-or-nothing resolution, aggregate errors. 100% covered. |
 | `internal/audit` | Not started | Independent; can land any time. |
-| `cmd/keyward run` | Not started | Needs resolve. |
+| `cmd/keyward run` | Not started | **Next.** Everything it needs exists. First point at which the tool does something useful. |
 | `internal/migrate` | Not started | Needs a real vault. The adoption-critical piece. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
@@ -39,14 +45,11 @@ available to work on.
 
 **Nothing gates these:**
 
-- `internal/resolve` — environment scanning and reference resolution. Testable
-  entirely against `Memory`; needs no cgo and no real Keychain.
+- `cmd/keyward run` — resolve plus `syscall.Exec`. Every dependency exists; this
+  is the last piece before the tool is usable at all.
+- `cmd/keyward add` / `ls` / `rm` — thin CLI over `vault.Store`. Needed before
+  `migrate` has anywhere to put values.
 - `internal/audit` — append-only JSONL. No dependencies.
-
-**Gated on resolve:**
-
-- `cmd/keyward run` — resolve plus `syscall.Exec`. The vault behind it is real
-  now, so this is the last piece before the tool does something useful.
 
 **Gated on `keyward run` working end to end:**
 
@@ -79,6 +82,13 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-09-28 (later still)** — `internal/resolve` implemented test-first and fully
+covered. Resolution is all or nothing, because a partly resolved environment runs a
+command with some values real and some still references — an authentication failure
+with no visible cause, which is the confusion this tool exists to remove. Failures
+are aggregated so a user sees every broken reference at once rather than one per
+rerun.
 
 **2026-09-28 (later)** — Keychain store implemented, passing the same contract
 suite as the in-memory fake. The CoreFoundation plumbing sits in C rather than Go
