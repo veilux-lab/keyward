@@ -26,7 +26,7 @@ credentials that are not there.
 
 ## The reference format
 
-```
+```text
 cap://<name>
 ```
 
@@ -84,6 +84,60 @@ This puts real values into the environment of *every* shell, which the agent's
 own shell tool then inherits. It reintroduces the exact leak keyward exists to
 close. References must stay references in the environment; only a deliberate
 `run`, `inject`, or `shell` resolves them.
+
+## What migrates, and what does not
+
+keyward is a filter over the environment, not a replacement for it. `resolve`
+acts only on values matching `cap://` and passes everything else through
+byte-for-byte. Migration is opt-in per variable.
+
+So ordinary exports are untouched and stay plaintext — `EDITOR`, `PATH`,
+`AWS_PROFILE`, `LANG`, locale and tooling settings, anything that is not a
+credential. There is no ambition to manage the whole environment.
+
+### Secrets you want in an interactive shell
+
+The harder case. A credential may be wanted at the prompt for ad-hoc work — for
+example curling the Jira REST API with `$ATLASSIAN_MCP_AUTH`. Once migrated, that
+variable holds a reference, and the request sends the literal string.
+
+Three answers, in order of preference:
+
+1. **`keyward shell`** — a time-boxed subshell holding real values, where the
+   command works exactly as typed. This is the primary reason the command exists.
+2. **A wrapper function** for anything done repeatedly.
+3. **An explicit shell-visible list**, for a secret that genuinely must be
+   plaintext in every shell. This forfeits the protection for those variables,
+   which is occasionally the right trade. Keep the list short, deliberate, and
+   documented; never make it the default.
+
+### The expansion-order trap
+
+Wrapper functions have a footgun worth stating once, clearly. 1Password documents
+the same problem for `op run`:
+
+```sh
+# WRONG — the outer shell expands the variable before keyward runs,
+# so curl receives the literal cap:// string
+jira() { keyward run -- curl -H "Authorization: $ATLASSIAN_MCP_AUTH" "$@" }
+
+# RIGHT — expansion happens inside the child, after resolution
+jira() { keyward run -- sh -c 'curl -H "Authorization: $ATLASSIAN_MCP_AUTH" "$@"' _ "$@" }
+```
+
+`keyward doctor` should detect the wrong form where it can, because the failure
+mode is a confusing 401 rather than an obvious error.
+
+### Why the interactive/agent split holds
+
+An agent's shell tool typically does not source `~/.zshrc` — reaching those
+variables requires an explicit interactive invocation such as `zsh -ic`. So a
+`keyward shell` session in a terminal and the agent's own shells are already
+separate environments: real values can sit in one while the other sees only
+references.
+
+Migration closes both routes the agent had to the rc file's contents — reading
+the file, and sourcing it via `zsh -ic`.
 
 ## Trust model: reference-only
 
