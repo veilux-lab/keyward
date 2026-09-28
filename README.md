@@ -36,20 +36,54 @@ an agent that deliberately sets out to obtain a credential — any process that 
 run commands can run the resolver. Tools that claim otherwise on a developer
 machine are usually overselling.
 
+## Usage
+
+```sh
+# store a secret — piped, so it never appears in argv or shell history
+pbpaste | keyward add splunk-mcp-token
+
+keyward ls                      # names only, never values
+keyward rm splunk-mcp-token
+
+# run a command with references resolved into its environment
+keyward run -- npm test
+```
+
+Nothing else changes. `keyward` only touches values beginning with `cap://`;
+`PATH`, `EDITOR`, and everything else passes through untouched, so migration is
+opt-in per variable.
+
+If a reference cannot be resolved, nothing runs and the error says what to do:
+
+```text
+keyward run: 1 reference(s) could not be resolved:
+  SPLUNK_MCP_TOKEN=cap://splunk-mcp-token
+    keychain get "splunk-mcp-token": secret not found
+    add it with: keyward add splunk-mcp-token
+```
+
+Starting a command with a literal `cap://` string where a credential belongs would
+fail as though the token were wrong rather than missing, so it is refused outright.
+
+Set `KEYWARD_SERVICE` to scope items to a different Keychain service name — useful
+for trying it out without touching real entries.
+
 ## Status
 
-Early. Nothing is installable yet.
+Working, not yet packaged. There is no installer or Homebrew formula; build it with
+`go build ./cmd/keyward`.
 
 Implemented:
 
-- `internal/handle` — reference parsing and validation
+- `keyward add` / `ls` / `rm` / `run`
+- macOS Keychain storage
+- reference parsing and environment resolution
 
 Next:
 
-- Keychain vault (cgo, Security.framework)
-- `keyward run` — resolve references into a child process environment
 - `keyward migrate` — rewrite an rc file, moving values into the Keychain
 - MCP server config rewriting
+- audit log
 
 ## Development
 

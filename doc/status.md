@@ -11,9 +11,18 @@ yet: there is no `cmd/` and no real Keychain access.
 additionally exercises the real Keychain; it is kept separate because it touches
 live OS state.
 
-Storage and resolution both work end to end: secrets round-trip through the macOS
-Keychain, survive the process, are scoped so one service cannot see another's
-items, and an environment of `cap://` references resolves to real values.
+**The tool works.** Verified by hand against the real Keychain: a secret is added
+from a pipe, listed by name, resolved into a child process environment, and removed.
+Non-references pass through untouched, a missing reference refuses to execute and
+says how to fix itself, and the child's exit code propagates.
+
+```sh
+$ SPLUNK_MCP_TOKEN='cap://splunk-mcp-token' keyward run -- printenv SPLUNK_MCP_TOKEN
+eyJraWQiOiJzcGx1bmsi...
+```
+
+What remains before it is worth keeping installed is `migrate`, so moving an rc file
+over is not a manual job.
 
 Coverage is 100% of statements in `handle`, `resolve`, and the pure-Go half of
 `vault`. The package figure for `vault` reads lower under `make test` because the
@@ -32,7 +41,7 @@ cgo Keychain file is excluded without the `integration` tag; it is covered by
 | Keychain store | **Done** | cgo against `SecItem*`. Passes the same contract suite as the fake, plus persistence and service-isolation tests. `make test-integration`. |
 | `internal/resolve` | **Done** | Environment scanning, caching, all-or-nothing resolution, aggregate errors. 100% covered. |
 | `internal/audit` | Not started | Independent; can land any time. |
-| `cmd/keyward run` | Not started | **Next.** Everything it needs exists. First point at which the tool does something useful. |
+| `cmd/keyward` | **Done** | `add`, `ls`, `rm`, `run`. Logic in `internal/cli` with store, streams, environ, and exec injected. |
 | `internal/migrate` | Not started | Needs a real vault. The adoption-critical piece. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
@@ -45,11 +54,11 @@ available to work on.
 
 **Nothing gates these:**
 
-- `cmd/keyward run` — resolve plus `syscall.Exec`. Every dependency exists; this
-  is the last piece before the tool is usable at all.
-- `cmd/keyward add` / `ls` / `rm` — thin CLI over `vault.Store`. Needed before
-  `migrate` has anywhere to put values.
+- `internal/migrate` — the adoption-critical piece, and what the go/no-go test
+  needs. Every dependency now exists.
 - `internal/audit` — append-only JSONL. No dependencies.
+- `internal/mcpconfig` — `run` works, so MCP configs can be rewritten to use it.
+  Delivers the Finder-launch fix.
 
 **Gated on `keyward run` working end to end:**
 
@@ -82,6 +91,12 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-09-28 (end of day)** — `cmd/keyward` and `internal/cli`: `add`, `ls`, `rm`,
+`run`. The tool does something useful for the first time. `add` reads from stdin
+only — a secret in argv is visible to `ps` and lands in shell history, which would
+make keyward a worse place for a credential than the file it came from.
+`golang.org/x/term` added as the only dependency, for disabling terminal echo.
 
 **2026-09-28 (later still)** — `internal/resolve` implemented test-first and fully
 covered. Resolution is all or nothing, because a partly resolved environment runs a
