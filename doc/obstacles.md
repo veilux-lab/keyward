@@ -128,17 +128,64 @@ that would hang on a dialog the user may never see, with the editor waiting on i
 A tool that intermittently blocks on an invisible prompt is worse than the problem
 it solves.
 
-### The fix
+### Attempted fixes, all measured, none working
 
-**Code-sign the binary with a stable identity.** There is no alternative that holds:
+A self-signed code-signing certificate was created, imported, and used. It signs
+correctly and produces a designated requirement that is stable across rebuilds:
 
-- A **self-signed code-signing certificate** is free, created in Keychain Access,
-  and sufficient for a personal tool on one machine.
-- An **Apple Developer ID** is needed for anyone else to install it, and for
-  notarisation.
+```text
+designated => identifier com.nwokolo24.keyward and certificate root = H"65cfc41d…"
+```
 
-Signing is also the prerequisite for the data protection keychain, and therefore for
-the biometric gating in obstacle 2, so it turns two blockers into one.
+Two builds of the same source produced byte-different binaries with **identical**
+requirements. Despite that, every combination still blocks:
+
+| Attempt | Cross-build read |
+| --- | --- |
+| Default ACL, unsigned, different paths | blocked |
+| Default ACL, unsigned, **same path**, rebuilt in place | blocked |
+| Signed with the self-signed cert, same identifier, different paths | blocked |
+| Signed, **same path**, rebuilt and re-signed in place | blocked |
+| Explicit `SecTrustedApplicationCreateFromPath(NULL)` access, both builds signed | blocked |
+| `SecAccessCreate` with NULL / empty trusted list | blocked |
+| `SecACLSetContents(acl, NULL, …)` — documented "any application" | blocked |
+
+So neither path stability nor a stable signing identity is sufficient. The ACL pins
+something binary-specific regardless.
+
+The most likely remaining variable is trust: the certificate evaluates as
+`CSSMERR_TP_NOT_TRUSTED`, so a requirement naming it may be unsatisfiable.
+`security add-trusted-cert` in the user domain returned success but changed nothing;
+system-domain trust needs `sudo` and was not attempted.
+
+### Unverified paths
+
+- **System-level trust for the self-signed certificate** (`sudo security
+  add-trusted-cert -d`). Invasive, and may still not work.
+- **An Apple Developer ID.** A real trust anchor, so the requirement would validate.
+  Untested, and worth checking whether an employer account is already available
+  before paying for one.
+
+### What this means for the storage decision
+
+This weakens the case for using the Keychain at all, which was argued in
+[design.md](design.md) on the grounds that it avoids writing any cryptography. That
+argument still holds, but it now comes with a platform behaviour that has no
+demonstrated fix.
+
+HASP writes its own encrypted vault, which was attributed here to Linux
+portability. This is an equally good reason, and quite possibly the real one.
+
+Three ways forward, in the order worth trying:
+
+1. **Check for an Apple Developer ID** through an employer account. Cheapest if it
+   exists, and it is the only attempt with a clear mechanism behind it.
+2. **Move storage to an encrypted file**, as HASP does. Removes the entire problem
+   class. Costs the "no cryptography to get wrong" advantage.
+3. **A long-lived local daemon** holding the only Keychain access, with `keyward run`
+   as a thin client over a Unix socket. One approval at login rather than one per
+   command, so a rebuild never blocks a non-interactive run. The most work, and
+   probably what a mature version looks like.
 
 ### Corrections to an earlier version of this entry
 
