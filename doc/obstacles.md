@@ -95,6 +95,118 @@ So biometric gating probably means code signing and provisioning, not just a few
 extra lines of cgo. That is a materially larger undertaking than obstacle 2
 implied, and another reason to leave it until last.
 
+## 2a. An unsigned binary loses Keychain access when rebuilt — BLOCKING
+
+**Severity: blocking. keyward must be code-signed to be usable at all.**
+
+### The mechanism
+
+A Keychain item carries an access control list: which programs may read its value.
+A program not on the list triggers the familiar "X wants to use your confidential
+information stored in Y" dialog.
+
+The list does not store a filename. It stores a *code requirement*. For a
+code-signed program that requirement derives from the signing identity, which is
+stable across rebuilds — this is why a password manager can update itself and still
+read your vault. For an **unsigned** program there is no identity to point at, so
+the requirement pins the binary itself. `go build` produces a different binary every
+time, so every build of keyward is a program the Keychain has never seen.
+
+### Measured
+
+| Case | Result |
+| --- | --- |
+| Same binary reads its own item | instant |
+| Rebuilt binary reads the same item | **blocks on a GUI dialog** (exit 124, SecurityAgent running) |
+| `/usr/bin/security` reads a keyward item | blocked |
+| `/usr/bin/security` deletes someone else's item | **succeeds, no authorisation** |
+
+### Why blocking rather than annoying
+
+The flagship use case launches MCP servers through `keyward run`. After any upgrade
+that would hang on a dialog the user may never see, with the editor waiting on it.
+A tool that intermittently blocks on an invisible prompt is worse than the problem
+it solves.
+
+### The fix
+
+**Code-sign the binary with a stable identity.** There is no alternative that holds:
+
+- A **self-signed code-signing certificate** is free, created in Keychain Access,
+  and sufficient for a personal tool on one machine.
+- An **Apple Developer ID** is needed for anyone else to install it, and for
+  notarisation.
+
+Signing is also the prerequisite for the data protection keychain, and therefore for
+the biometric gating in obstacle 2, so it turns two blockers into one.
+
+### Corrections to an earlier version of this entry
+
+Both were tested rather than reasoned about, and both were wrong:
+
+- **A permissive ACL is not available.** `SecAccessCreate` with a NULL trusted list,
+  with an empty array, and `SecACLSetContents(acl, NULL, ...)` — the documented "any
+  application" form — were all tried. Every one still prompts. So there is no option
+  to trade the ACL away for convenience, which is just as well.
+- **Delete needs no authorisation.** `/usr/bin/security` removes an item it did not
+  create, without a prompt. keyward's OSStatus -25244 on a cross-binary delete is
+  therefore a defect in keyward, not a Keychain limitation. Likely `SecItemDelete`
+  behaving differently from the legacy `SecKeychainItemDelete` that `security` uses.
+  Tracked separately below.
+
+The ACL turns out to be doing real work: `/usr/bin/security` could not read a keyward
+value. That is a protection layer worth keeping rather than bargaining away.
+
+## 2a-bis. Cross-binary delete fails with OSStatus -25244
+
+**Severity: medium. A keyward bug, not a platform limit.**
+
+`keyward rm` on an item created by a different build fails with -25244,
+errSecInvalidOwnerEdit, while `/usr/bin/security delete-generic-password` removes the
+same item with no authorisation at all. Deleting is evidently not gated the way
+reading is, so the current implementation is asking for something it does not need.
+
+Worth resolving alongside 2a: once the binary is signed, the same-identity case stops
+arising in normal use, but the error would still surface for items created before
+signing was introduced.
+
+## 2b. The legacy Keychain races under concurrent enumeration
+
+**Severity: low intra-process (fixed), open across processes.**
+
+Found by running the contract suite's concurrency case against the real Keychain:
+`SecItemCopyMatching` with `kSecMatchLimitAll` returns OSStatus **-67701**
+(`errSecInvalidRecord`) when another thread adds or deletes an item mid-walk. The
+legacy file-based keychain is not safe for concurrent enumeration and mutation.
+
+Fixed for one process by a package-scoped mutex serialising every `SecItem` call.
+The lock is package scoped rather than per-store deliberately: the keychain file is
+a single shared resource, so two `Keychain` values in one process would otherwise
+still collide.
+
+**Residual:** nothing orders operations *between* processes. Two keyward processes
+listing and mutating simultaneously can still hit this. Rare in the intended usage
+— one interactive command at a time — but it is a real hole, and the fix if it ever
+bites is a file lock or a single long-lived daemon owning all Keychain access.
+
+Worth noting this is the kind of defect only an integration test finds. Every unit
+test passed while it was present.
+
+## 2c. The data protection keychain needs an entitlement
+
+**Severity: medium. Constrains the biometric plan.**
+
+keyward uses the default file-based keychain. The modern data protection keychain
+(`kSecUseDataProtectionKeychain`) is where access-control flags including biometry
+live, but it requires the calling binary to be signed with a keychain-access-group
+entitlement. An unsigned Go binary should expect OSStatus -34018
+(`errSecMissingEntitlement`), which is mapped to `ErrDenied` for exactly this
+reason.
+
+So biometric gating probably means code signing and provisioning, not just a few
+extra lines of cgo. That is a materially larger undertaking than obstacle 2
+implied, and another reason to leave it until last.
+
 ## 2a. Keychain item ACLs are bound to the creating binary — BLOCKING
 
 **Severity: blocking. Must be solved before keyward is usable beyond one build.**
