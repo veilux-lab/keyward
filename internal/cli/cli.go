@@ -7,6 +7,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"flag"
@@ -39,6 +40,10 @@ type CLI struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
+	// Stdin answers confirmation prompts. Secret values are read through
+	// ReadSecret instead, so nothing reads both in one command.
+	Stdin io.Reader
+
 	// Environ supplies the environment to resolve, normally os.Environ.
 	Environ func() []string
 
@@ -61,16 +66,16 @@ commands:
   ls                    list stored secret names
   rm <name>             remove a secret
   run [--] <cmd>...     resolve cap:// references and run a command
-  migrate <file>        describe moving a file's secrets into the Keychain
-  migrate -apply <file> actually move them
+  migrate <file>        move a file's secrets into the Keychain (asks first)
+  migrate --dry-run <f> describe what would move, and stop
   version               print the version
   help                  print this message
 
 examples:
   pbpaste | keyward add splunk-mcp-token
   keyward run -- npm test
-  keyward migrate ~/.zshrc          # dry run: describes, changes nothing
-  keyward migrate -apply ~/.zshrc   # make the changes
+  keyward migrate --dry-run ~/.zshrc   # describe, change nothing
+  keyward migrate ~/.zshrc             # describe, then confirm with "yes"
 `
 
 // Run dispatches a command and returns a process exit code.
@@ -221,28 +226,28 @@ func (c *CLI) run(args []string) int {
 
 // migrate moves the secrets in a file into the vault and leaves references.
 //
-// A dry run is the default and -apply is required to change anything. A tool that
-// rewrites a shell config on a bare command is a tool people run once, and the
-// diff is the whole point: the detector proposes, the human decides.
+// The bare command shows the plan and then asks for confirmation, which must be
+// the exact word "yes". --dry-run shows the plan and stops. -auto-approve applies
+// without asking, for scripts.
+//
+// The plan goes to stdout and the question to stderr, so redirecting the plan to a
+// file still leaves the question visible and answerable.
 func (c *CLI) migrate(args []string) int {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(c.Stderr)
-	apply := fs.Bool("apply", false, "make the changes, rather than only describing them")
-	// Redundant with the default, and worth having: -dry-run is a strong enough
-	// convention that its absence leaves people unsure whether the bare command is
-	// safe to run.
-	dryRun := fs.Bool("dry-run", false, "describe the changes without making them (the default)")
+	dryRun := fs.Bool("dry-run", false, "describe what would change, and stop")
+	autoApprove := fs.Bool("auto-approve", false, "apply without asking for confirmation")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
-	if *dryRun && *apply {
-		// Guessing which was meant is how a script intended to preview ends up
+	if *dryRun && *autoApprove {
+		// Guessing which was meant is how a script written to preview ends up
 		// rewriting a shell config.
-		fmt.Fprint(c.Stderr, "keyward migrate: -dry-run and -apply contradict each other; pass one or neither\n")
+		fmt.Fprint(c.Stderr, "keyward migrate: -dry-run and -auto-approve contradict each other; pass one or neither\n")
 		return exitUsage
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprint(c.Stderr, "usage: keyward migrate [-apply | -dry-run] <file>\n")
+		fmt.Fprint(c.Stderr, "usage: keyward migrate [--dry-run | -auto-approve] <file>\n")
 		return exitUsage
 	}
 
@@ -256,12 +261,24 @@ func (c *CLI) migrate(args []string) int {
 		return exitOK
 	}
 
-	// The diff withholds values; see migrate.Plan.Diff.
+	// The plan is printed before anything else happens, so approval is never given
+	// to something unseen. The diff withholds values; see migrate.Plan.Diff.
 	fmt.Fprint(c.Stdout, plan.Diff())
 
-	if !*apply {
-		fmt.Fprintf(c.Stdout, "\nThis was a dry run. Re-run with -apply to make these changes.\n")
+	if *dryRun {
+		fmt.Fprintf(c.Stdout, "\nDry run: nothing was changed.\n")
 		return exitOK
+	}
+
+	if !*autoApprove {
+		ok, err := c.confirm(len(plan.Changes), plan.Path)
+		if err != nil {
+			return c.fail("keyward migrate: %v", err)
+		}
+		if !ok {
+			fmt.Fprint(c.Stderr, "\nAborted. Nothing was changed.\n")
+			return exitFailure
+		}
 	}
 
 	applied, err := plan.Apply(c.Store)
@@ -273,6 +290,31 @@ func (c *CLI) migrate(args []string) int {
 	fmt.Fprintf(c.Stdout, "Original saved to %s\n", applied.BackupPath)
 	fmt.Fprintf(c.Stdout, "\nRun commands that need these values through keyward, for example:\n  keyward run -- your-command\n")
 	return exitOK
+}
+
+// confirmWord is the only accepted answer. Compared exactly, so a hurried "y" or a
+// capitalised "Yes" does not rewrite a shell config.
+const confirmWord = "yes"
+
+// confirm asks whether to proceed, reporting false for any answer but "yes".
+//
+// Reaching end of input counts as a refusal. That is the case where nothing can
+// answer — a pipeline, or an agent with no terminal — and applying there would be
+// the worst possible default for a command that rewrites a file.
+func (c *CLI) confirm(count int, path string) (bool, error) {
+	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into the Keychain?\n", count, path)
+	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is copied to a timestamped backup first.\n")
+	fmt.Fprintf(c.Stderr, "  Only %q will be accepted.\n\n  Enter a value: ", confirmWord)
+
+	if c.Stdin == nil {
+		return false, nil
+	}
+	line, err := bufio.NewReader(c.Stdin).ReadString('\n')
+	fmt.Fprintln(c.Stderr)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, fmt.Errorf("reading the answer: %w", err)
+	}
+	return strings.TrimSpace(line) == confirmWord, nil
 }
 
 // failResolve renders resolution failures with a suggested fix.

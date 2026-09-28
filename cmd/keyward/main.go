@@ -22,6 +22,7 @@ func main() {
 
 	c := &cli.CLI{
 		Store:      vault.NewKeychainService(service),
+		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
 		Environ:    os.Environ,

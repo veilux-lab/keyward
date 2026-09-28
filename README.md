@@ -40,10 +40,8 @@ machine are usually overselling.
 
 ```sh
 # move the secrets in a shell rc file into the Keychain.
-# a dry run is the default: this describes the changes and makes none.
-keyward migrate ~/.zshrc
-keyward migrate --dry-run ~/.zshrc   # the same thing, said explicitly
-keyward migrate -apply ~/.zshrc      # actually make the changes
+keyward migrate --dry-run ~/.zshrc   # describe what would move, change nothing
+keyward migrate ~/.zshrc             # describe, then confirm by typing "yes"
 
 # store one by hand — piped, so it never appears in argv or shell history
 pbpaste | keyward add splunk-mcp-token
@@ -93,9 +91,14 @@ Next:
 
 ### On migrate
 
-Dry run by default: it prints what it would change and changes nothing until
-`-apply`. `--dry-run` says the same thing explicitly, and combining it with
-`-apply` is an error rather than a guess. The diff never shows a value, only its length — printing the old line
+It always prints the plan first, then asks. Only the exact lowercase word `yes` is
+accepted — not `y`, not `Yes`. `--dry-run` prints the plan and stops without asking,
+so it is safe in a pipeline and safe for an agent to run. `-auto-approve` applies
+without asking, for scripts. Asking for both `--dry-run` and `-auto-approve` is an
+error rather than a guess.
+
+Reaching end of input counts as a refusal, so a command with no terminal to answer
+it aborts rather than rewriting the file. The diff never shows a value, only its length — printing the old line
 verbatim would spill every secret in the file into your scrollback, and into the
 context of any agent that ran the command.
 

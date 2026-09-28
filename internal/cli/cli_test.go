@@ -51,6 +51,7 @@ func newHarness(t *testing.T, stdin string, seed map[string]string, environ []st
 	}
 	h.cli = &cli.CLI{
 		Store:   store,
+		Stdin:   strings.NewReader(stdin),
 		Stdout:  h.stdout,
 		Stderr:  h.stderr,
 		Environ: func() []string { return environ },
@@ -573,6 +574,9 @@ func TestAddRejectsUnknownFlag(t *testing.T) {
 
 // ===========================================================================
 // migrate
+//
+// The bare command applies, after showing the plan and requiring the literal
+// string "yes". --dry-run shows the plan and stops.
 // ===========================================================================
 
 const rcFixture = `export EDITOR=vim
@@ -588,84 +592,115 @@ func writeFixture(t *testing.T, content string) string {
 	return path
 }
 
-// Dry run is the default. A tool that rewrites a shell config on a bare command
-// is a tool people run once.
-func TestMigrateIsDryRunByDefault(t *testing.T) {
+// The plan has to be on screen before the question is asked, or the user is
+// approving something they have not seen.
+func TestMigratePromptsAfterShowingThePlan(t *testing.T) {
 	path := writeFixture(t, rcFixture)
-	h := newHarness(t, "", nil, nil)
+	h := newHarness(t, "yes\n", nil, nil)
 
 	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
 		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
 	}
-	if got, _ := os.ReadFile(path); string(got) != rcFixture {
-		t.Error("a dry run modified the file")
-	}
-	if names, _ := h.store.List(); len(names) != 0 {
-		t.Errorf("a dry run stored %v", names)
-	}
+
 	if !strings.Contains(h.out(), "cap://splunk-mcp-token") {
-		t.Errorf("stdout does not show the proposed change:\n%s", h.out())
+		t.Errorf("the plan was not printed:\n%s", h.out())
 	}
-	if !strings.Contains(h.out(), "-apply") {
-		t.Errorf("stdout does not say how to apply it:\n%s", h.out())
+	prompt := h.err()
+	if !strings.Contains(prompt, "yes") {
+		t.Errorf("the prompt does not say what to type:\n%s", prompt)
 	}
-}
-
-// -dry-run is redundant with the default, and exists anyway: it is a strong
-// enough convention that its absence makes people unsure whether the bare command
-// is safe to run.
-func TestMigrateDryRunFlagMatchesTheDefault(t *testing.T) {
-	bare := writeFixture(t, rcFixture)
-	explicit := writeFixture(t, rcFixture)
-
-	h1 := newHarness(t, "", nil, nil)
-	h2 := newHarness(t, "", nil, nil)
-
-	if code := h1.cli.Run([]string{"migrate", bare}); code != 0 {
-		t.Fatalf("bare exit code = %d. stderr: %s", code, h1.err())
-	}
-	if code := h2.cli.Run([]string{"migrate", "--dry-run", explicit}); code != 0 {
-		t.Fatalf("--dry-run exit code = %d. stderr: %s", code, h2.err())
-	}
-
-	// Only the path differs between the two outputs.
-	norm := func(s, path string) string { return strings.ReplaceAll(s, path, "<file>") }
-	if norm(h1.out(), bare) != norm(h2.out(), explicit) {
-		t.Errorf("--dry-run differs from the default:\n%s\n---\n%s", h1.out(), h2.out())
-	}
-	for _, p := range []string{bare, explicit} {
-		if got, _ := os.ReadFile(p); string(got) != rcFixture {
-			t.Errorf("%s was modified", p)
-		}
+	if !strings.Contains(prompt, "1") {
+		t.Errorf("the prompt does not say how many values are involved:\n%s", prompt)
 	}
 }
 
-// Asking for both is a contradiction. Guessing which one was meant is how a
-// script intended to preview ends up rewriting a shell config.
-func TestMigrateRejectsDryRunWithApply(t *testing.T) {
+func TestMigrateAppliesOnYes(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "yes\n", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "export SPLUNK_MCP_TOKEN='cap://splunk-mcp-token'") {
+		t.Errorf("the file was not rewritten:\n%s", got)
+	}
+	if _, err := h.store.Get("splunk-mcp-token"); err != nil {
+		t.Errorf("the secret was not stored: %v", err)
+	}
+	if !strings.Contains(h.out(), "keyward-backup") {
+		t.Errorf("the backup location was not reported:\n%s", h.out())
+	}
+}
+
+// Only the exact lowercase word counts. Anything else leaves the file alone.
+func TestMigrateRefusesAnythingButYes(t *testing.T) {
+	for _, answer := range []string{"no\n", "n\n", "y\n", "Yes\n", "YES\n", "yes please\n", "\n", ""} {
+		t.Run(strings.TrimSpace(answer), func(t *testing.T) {
+			path := writeFixture(t, rcFixture)
+			h := newHarness(t, answer, nil, nil)
+
+			if code := h.cli.Run([]string{"migrate", path}); code != 1 {
+				t.Errorf("exit code = %d for %q, want 1", code, answer)
+			}
+			if got, _ := os.ReadFile(path); string(got) != rcFixture {
+				t.Errorf("the file was modified after answering %q", answer)
+			}
+			if names, _ := h.store.List(); len(names) != 0 {
+				t.Errorf("stored %v after answering %q", names, answer)
+			}
+		})
+	}
+}
+
+// Surrounding whitespace is a typo, not a refusal.
+func TestMigrateAcceptsYesWithSurroundingSpace(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "  yes  \n", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	if got, _ := os.ReadFile(path); !strings.Contains(string(got), "cap://") {
+		t.Error("the file was not rewritten")
+	}
+}
+
+// Empty stdin means nothing can answer the question — a pipeline, or an agent with
+// no terminal. Silently applying there would be the worst possible default.
+func TestMigrateAbortsWhenNothingCanAnswer(t *testing.T) {
 	path := writeFixture(t, rcFixture)
 	h := newHarness(t, "", nil, nil)
 
-	if code := h.cli.Run([]string{"migrate", "--dry-run", "-apply", path}); code != 2 {
-		t.Errorf("exit code = %d, want 2 for contradictory flags", code)
+	if code := h.cli.Run([]string{"migrate", path}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
 	}
 	if got, _ := os.ReadFile(path); string(got) != rcFixture {
-		t.Error("the file was modified despite contradictory flags")
-	}
-	if names, _ := h.store.List(); len(names) != 0 {
-		t.Errorf("stored %v despite contradictory flags", names)
+		t.Error("the file was modified with no confirmation available")
 	}
 }
 
-// Someone reading help should be able to tell the command is safe without running
-// it first.
-func TestHelpSaysMigrateIsSafeByDefault(t *testing.T) {
-	h := newHarness(t, "", nil, nil)
-	h.cli.Run([]string{"help"})
+// --dry-run prints the plan and stops. It must not ask anything, so it is safe in
+// a pipeline and safe for an agent to run.
+func TestMigrateDryRunOnlyPrints(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	// Stdin says yes. --dry-run must ignore it entirely.
+	h := newHarness(t, "yes\n", nil, nil)
 
-	out := strings.ToLower(h.out())
-	if !strings.Contains(out, "describes") && !strings.Contains(out, "dry run") {
-		t.Errorf("help does not say migrate changes nothing without -apply:\n%s", h.out())
+	if code := h.cli.Run([]string{"migrate", "--dry-run", path}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	if !strings.Contains(h.out(), "cap://splunk-mcp-token") {
+		t.Errorf("the plan was not printed:\n%s", h.out())
+	}
+	if got, _ := os.ReadFile(path); string(got) != rcFixture {
+		t.Error("--dry-run modified the file")
+	}
+	if names, _ := h.store.List(); len(names) != 0 {
+		t.Errorf("--dry-run stored %v", names)
+	}
+	if strings.Contains(strings.ToLower(h.err()), "enter a value") {
+		t.Errorf("--dry-run prompted:\n%s", h.err())
 	}
 }
 
@@ -674,7 +709,7 @@ func TestHelpSaysMigrateIsSafeByDefault(t *testing.T) {
 func TestMigrateDryRunPrintsNoSecrets(t *testing.T) {
 	path := writeFixture(t, rcFixture)
 	h := newHarness(t, "", nil, nil)
-	h.cli.Run([]string{"migrate", path})
+	h.cli.Run([]string{"migrate", "--dry-run", path})
 
 	secret := "eyJraWQiOiJzcGx1bmsiLCJhbGciOiJIUzI1NiJ9"
 	if strings.Contains(h.out(), secret) || strings.Contains(h.err(), secret) {
@@ -682,30 +717,37 @@ func TestMigrateDryRunPrintsNoSecrets(t *testing.T) {
 	}
 }
 
-func TestMigrateApply(t *testing.T) {
+// -auto-approve is for scripts: same as answering yes, without asking.
+func TestMigrateAutoApprove(t *testing.T) {
 	path := writeFixture(t, rcFixture)
 	h := newHarness(t, "", nil, nil)
 
-	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 0 {
+	if code := h.cli.Run([]string{"migrate", "-auto-approve", path}); code != 0 {
 		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
 	}
-
-	got, _ := os.ReadFile(path)
-	if !strings.Contains(string(got), "export SPLUNK_MCP_TOKEN='cap://splunk-mcp-token'") {
-		t.Errorf("file was not rewritten:\n%s", got)
+	if got, _ := os.ReadFile(path); !strings.Contains(string(got), "cap://") {
+		t.Error("-auto-approve did not rewrite the file")
 	}
-	if !strings.Contains(string(got), "export EDITOR=vim") {
-		t.Error("an unrelated line was changed")
-	}
-	if _, err := h.store.Get("splunk-mcp-token"); err != nil {
-		t.Errorf("secret was not stored: %v", err)
-	}
-	if !strings.Contains(h.out(), "keyward-backup") {
-		t.Errorf("stdout does not report the backup location:\n%s", h.out())
+	if strings.Contains(strings.ToLower(h.err()), "enter a value") {
+		t.Errorf("-auto-approve prompted:\n%s", h.err())
 	}
 }
 
-func TestMigrateNothingToDo(t *testing.T) {
+// Asking to both preview and approve is a contradiction. Guessing is how a script
+// written to preview ends up rewriting a shell config.
+func TestMigrateRejectsDryRunWithAutoApprove(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", "--dry-run", "-auto-approve", path}); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+	if got, _ := os.ReadFile(path); string(got) != rcFixture {
+		t.Error("the file was modified despite contradictory flags")
+	}
+}
+
+func TestMigrateNothingToDoDoesNotPrompt(t *testing.T) {
 	path := writeFixture(t, "export EDITOR=vim\n")
 	h := newHarness(t, "", nil, nil)
 
@@ -714,6 +756,9 @@ func TestMigrateNothingToDo(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(h.out()), "nothing") {
 		t.Errorf("stdout = %q, want it to say there is nothing to move", h.out())
+	}
+	if strings.Contains(strings.ToLower(h.err()), "enter a value") {
+		t.Error("prompted with nothing to do")
 	}
 }
 
@@ -731,15 +776,14 @@ func TestMigrateMissingFile(t *testing.T) {
 	}
 }
 
-// A collision is the one planning failure that must stop everything: two
-// variables mapping to one vault entry would make one of them silently resolve to
-// the other's value.
+// A collision is the one planning failure that must stop everything: two variables
+// mapping to one vault entry would make one silently resolve to the other's value.
 func TestMigrateReportsPlanningFailure(t *testing.T) {
 	path := writeFixture(t,
 		"export MY_TOKEN=ghp_firstValue0123456789\nMY_TOKEN=ghp_secondValue0123456789\n")
-	h := newHarness(t, "", nil, nil)
+	h := newHarness(t, "yes\n", nil, nil)
 
-	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 1 {
+	if code := h.cli.Run([]string{"migrate", path}); code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
 	if !strings.Contains(h.err(), "my-token") {
@@ -755,9 +799,9 @@ func TestMigrateReportsPlanningFailure(t *testing.T) {
 func TestMigrateSkipsUnusableNameAndContinues(t *testing.T) {
 	path := writeFixture(t,
 		"export oauth_client_id_=AbCdEfGhIjKlMnOpQrStUv\nexport GITHUB_TOKEN=ghp_fine0123456789abcd\n")
-	h := newHarness(t, "", nil, nil)
+	h := newHarness(t, "yes\n", nil, nil)
 
-	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 0 {
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
 		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
 	}
 	if _, err := h.store.Get("github-token"); err != nil {
@@ -774,14 +818,29 @@ func TestMigrateSkipsUnusableNameAndContinues(t *testing.T) {
 
 func TestMigrateReportsApplyFailure(t *testing.T) {
 	path := writeFixture(t, rcFixture)
-	h := newHarness(t, "", nil, nil)
+	h := newHarness(t, "yes\n", nil, nil)
 	h.cli.Store = brokenStore{}
 
-	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 1 {
+	if code := h.cli.Run([]string{"migrate", path}); code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
 	if got, _ := os.ReadFile(path); string(got) != rcFixture {
 		t.Error("the file was modified despite the failure")
+	}
+}
+
+// Someone reading help should be able to tell what the bare command does without
+// running it.
+func TestHelpSaysMigrateAsksFirst(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Run([]string{"help"})
+
+	out := strings.ToLower(h.out())
+	if !strings.Contains(out, "asks") && !strings.Contains(out, "confirm") {
+		t.Errorf("help does not say migrate asks before changing anything:\n%s", h.out())
+	}
+	if !strings.Contains(out, "dry-run") {
+		t.Errorf("help does not mention --dry-run:\n%s", h.out())
 	}
 }
 
