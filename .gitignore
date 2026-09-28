@@ -2,3 +2,6 @@ bin/
 coverage.out
 coverage.html
 .DS_Store
+
+# frontend-slides working files (previews are throwaway)
+.frontend-slides/

@@ -1,0 +1,163 @@
+# Design
+
+## Two layers, only one of which needs cooperation
+
+| Layer | Provides | Needs the agent to cooperate? |
+| --- | --- | --- |
+| **Migration** — values move to the Keychain, files hold references | Security | No |
+| **Cooperation** — MCP tools, generated agent instructions, useful errors | Productivity | Yes |
+
+Keeping these separate is the central idea. If migration is done, the security
+property holds whether or not the agent cooperates. Cooperation only decides
+whether the agent gets its work done smoothly or wastes turns hunting for
+credentials that are not there.
+
+## Components
+
+| Package | Responsibility | State |
+| --- | --- | --- |
+| `internal/handle` | Parse, validate, and format `cap://` references | Implemented |
+| `internal/vault` | Keychain storage via cgo and Security.framework | Not started |
+| `internal/resolve` | Scan an environment, resolve references to values | Not started |
+| `internal/audit` | Append-only JSONL record of every resolution | Not started |
+| `internal/migrate` | Detect secrets in a file, rewrite to references | Not started |
+| `internal/mcpconfig` | Rewrite MCP server configs to launch via keyward | Not started |
+| `cmd/keyward` | CLI surface | Not started |
+
+## The reference format
+
+```
+cap://<name>
+```
+
+- Prefix matched **case-sensitively**, so detection is unambiguous and needs no
+  allocation.
+- Names are lowercased on parse. `cap://TOKEN` and `cap://token` are the same
+  reference, which prevents two Keychain items differing only by case.
+- Allowed characters: `a-z`, `0-9`, and the separators `-`, `_`, `.`. Must begin
+  and end alphanumeric. Maximum 128 characters.
+- Chosen to survive every parser that will see it: dotenv, JSON, YAML, TOML, and
+  shell single-quoting. No `$`, no `{}`, no characters a shell will expand.
+
+### Two decisions inside the parser worth keeping
+
+**`IsRef` is weaker than `Parse`.** `IsRef` reports whether a string *claims* to
+be a reference; `Parse` decides whether it is a valid one. A malformed reference
+like `cap://bad name` returns true from `IsRef` and an error from `Parse`.
+
+This matters because the alternative is worse. If a typo'd reference were treated
+as "not a reference," it would be passed to a program as a literal value — a
+silent failure in exactly the place the format exists to make safe. Callers
+scanning an environment need "broken reference, fail loudly" to be distinct from
+"literal value, pass through."
+
+**Parse errors never quote their input.** `Parse` is routinely called on strings
+that turn out to be real credentials, and an error message reaches a log file
+easily. `ErrNotHandle` therefore carries no context at all. There is a test
+asserting a token-shaped input never appears in the error text.
+
+## Resolution paths
+
+Ordered from least to most exposure. Prefer the first one that lets the work
+finish. This ladder is borrowed from HASP, which got it right.
+
+1. **`keyward run -- <cmd>`** — scan the environment, resolve references, exec
+   the child. Values exist only in the child's environment.
+2. **`keyward inject -- <cmd>`** — same, plus materialise a temporary file for
+   tools that demand a credential path rather than a variable.
+3. **`keyward shell`** — an interactive subshell holding real values. Explicit,
+   time-boxed, and the only path where plaintext reaches the user's own
+   environment.
+
+`run` uses `syscall.Exec` rather than `exec.Command`: replacing the process image
+leaves no parent holding secrets in memory and removes all child-management code.
+
+### Why not lazy resolution in the rc file
+
+The tempting shortcut is:
+
+```sh
+export TOKEN="$(keyward get TOKEN)"   # do not do this
+```
+
+This puts real values into the environment of *every* shell, which the agent's
+own shell tool then inherits. It reintroduces the exact leak keyward exists to
+close. References must stay references in the environment; only a deliberate
+`run`, `inject`, or `shell` resolves them.
+
+## Trust model: reference-only
+
+The agent may **see** references and reason about them. It may not cause one to
+be resolved. Requests go to a queue, a human approves, the command runs, and the
+agent receives the command's *output* — never the value.
+
+Rejected alternative: letting the agent invoke templated commands with the secret
+injected (`use_capability("db", {query: ...})`). More capable, but its safety
+depends on every command template being escape-proof forever. Reference-only
+keeps the guarantee provable and deletes an entire class of vulnerability —
+along with the SQL validator, the argument constrainer, and the template engine
+that would have been needed to enforce it.
+
+The cost is friction, and friction is the real risk to this project. Mitigations,
+in order of importance:
+
+- **Time-boxed grants.** One approval covers a short window rather than each
+  call. This is a deliberate step toward the model just rejected; it stays
+  defensible because a human made a bounded decision that is recorded.
+- **Batched approval** rather than interrupting per request.
+- **Plan-time approval** — agents already plan before acting, so approve the
+  declared set of credentialed steps once.
+
+## Storage: Keychain, not a custom vault
+
+HASP writes its own encrypted vault with `golang.org/x/crypto` because it
+supports Linux. keyward is macOS-only and therefore should not:
+
+- No cryptography to implement, review, or get wrong.
+- Per-item ACLs come free from the OS.
+- Access-control flags open the door to biometric gating later.
+
+Do not shell out to `/usr/bin/security`. `security add-generic-password -w
+<value>` places the secret in `argv`, where `ps` can read it — self-defeating for
+a secrets tool. Use cgo against `SecItemAdd` and `SecItemCopyMatching`.
+
+## MCP config rewriting
+
+Each MCP server's launch command is rewritten to go through keyward, with
+references in its `env` block:
+
+```json
+"splunk-mcp-server": {
+  "command": "keyward",
+  "args": ["run", "--", "uvx", "splunk-mcp-server"],
+  "env": { "SPLUNK_MCP_TOKEN": "cap://splunk-mcp-token" }
+}
+```
+
+This also fixes a real standing bug: MCP servers currently fail with a connect
+timeout when the editor is launched from Finder rather than a terminal, because
+`${SPLUNK_MCP_TOKEN}` is empty in a non-login environment. Resolving from the
+Keychain makes the launch method irrelevant.
+
+That fix matters out of proportion to its size. A tool kept installed for a daily
+convenience is a tool whose security properties are still in force a year later.
+
+## Testing approach
+
+Test-driven throughout. Tests are written first and observed to fail before any
+implementation exists.
+
+cgo and the real Keychain resist unit testing, so the seam is an interface:
+
+- `vault.Store` is an interface. All logic is tested against an in-memory fake.
+- The cgo implementation stays thin enough to be nearly declarative.
+- One build-tagged integration test exercises the real Keychain and is excluded
+  from `make test`, keeping the default loop fast.
+
+## Open design questions
+
+- How a grant is represented and where its expiry is enforced.
+- Whether the audit log needs signing, or whether append-only on a single-user
+  machine is enough. Signing is cheap to add and hard to retrofit honestly.
+- Whether biometric gating is reachable from a CLI process at all. See
+  [obstacles.md](obstacles.md).
