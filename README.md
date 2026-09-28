@@ -39,7 +39,12 @@ machine are usually overselling.
 ## Usage
 
 ```sh
-# store a secret — piped, so it never appears in argv or shell history
+# move the secrets in a shell rc file into the Keychain.
+# describes the changes and changes nothing without -apply.
+keyward migrate ~/.zshrc
+keyward migrate -apply ~/.zshrc
+
+# store one by hand — piped, so it never appears in argv or shell history
 pbpaste | keyward add splunk-mcp-token
 
 keyward ls                      # names only, never values
@@ -75,15 +80,27 @@ Working, not yet packaged. There is no installer or Homebrew formula; build it w
 
 Implemented:
 
+- `keyward migrate` — move an rc file's secrets into the Keychain
 - `keyward add` / `ls` / `rm` / `run`
 - macOS Keychain storage
 - reference parsing and environment resolution
 
 Next:
 
-- `keyward migrate` — rewrite an rc file, moving values into the Keychain
 - MCP server config rewriting
 - audit log
+
+### On migrate
+
+Dry run by default: it prints what it would change and changes nothing until
+`-apply`. The diff never shows a value, only its length — printing the old line
+verbatim would spill every secret in the file into your scrollback, and into the
+context of any agent that ran the command.
+
+Before writing anything it stores each secret, so a failure never leaves the file
+pointing at values that are not in the Keychain. The original is copied to a
+timestamped backup beside it, the rewrite is atomic, and the file mode is
+preserved. Running it twice is safe.
 
 ## Development
 

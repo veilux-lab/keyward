@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/nwokolo24/keyward/internal/handle"
+	"github.com/nwokolo24/keyward/internal/migrate"
 	"github.com/nwokolo24/keyward/internal/resolve"
 	"github.com/nwokolo24/keyward/internal/vault"
 )
@@ -60,12 +61,15 @@ commands:
   ls                    list stored secret names
   rm <name>             remove a secret
   run [--] <cmd>...     resolve cap:// references and run a command
+  migrate [-apply] <f>  move the secrets in a file into the Keychain
   version               print the version
   help                  print this message
 
 examples:
   pbpaste | keyward add splunk-mcp-token
   keyward run -- npm test
+  keyward migrate ~/.zshrc          # describe the changes, change nothing
+  keyward migrate -apply ~/.zshrc   # make them
 `
 
 // Run dispatches a command and returns a process exit code.
@@ -90,6 +94,8 @@ func (c *CLI) Run(args []string) int {
 		return c.remove(args[1:])
 	case "run":
 		return c.run(args[1:])
+	case "migrate":
+		return c.migrate(args[1:])
 	default:
 		fmt.Fprintf(c.Stderr, "keyward: unknown command %q\n\n%s", args[0], usage)
 		return exitUsage
@@ -209,6 +215,52 @@ func (c *CLI) run(args []string) int {
 		return c.fail("keyward run: executing %s: %v", args[0], err)
 	}
 	// Reached only when Exec is a test double; the real one does not return.
+	return exitOK
+}
+
+// migrate moves the secrets in a file into the vault and leaves references.
+//
+// A dry run is the default and -apply is required to change anything. A tool that
+// rewrites a shell config on a bare command is a tool people run once, and the
+// diff is the whole point: the detector proposes, the human decides.
+func (c *CLI) migrate(args []string) int {
+	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	fs.SetOutput(c.Stderr)
+	apply := fs.Bool("apply", false, "make the changes, rather than only describing them")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprint(c.Stderr, "usage: keyward migrate [-apply] <file>\n")
+		return exitUsage
+	}
+
+	plan, err := migrate.Read(fs.Arg(0))
+	if err != nil {
+		return c.fail("keyward migrate: %v", err)
+	}
+
+	if plan.Empty() {
+		fmt.Fprintf(c.Stdout, "%s: nothing to move\n", plan.Path)
+		return exitOK
+	}
+
+	// The diff withholds values; see migrate.Plan.Diff.
+	fmt.Fprint(c.Stdout, plan.Diff())
+
+	if !*apply {
+		fmt.Fprintf(c.Stdout, "\nThis was a dry run. Re-run with -apply to make these changes.\n")
+		return exitOK
+	}
+
+	applied, err := plan.Apply(c.Store)
+	if err != nil {
+		return c.fail("keyward migrate: %v", err)
+	}
+
+	fmt.Fprintf(c.Stdout, "\nStored %d secret(s): %s\n", len(applied.Stored), strings.Join(applied.Stored, ", "))
+	fmt.Fprintf(c.Stdout, "Original saved to %s\n", applied.BackupPath)
+	fmt.Fprintf(c.Stdout, "\nRun commands that need these values through keyward, for example:\n  keyward run -- your-command\n")
 	return exitOK
 }
 

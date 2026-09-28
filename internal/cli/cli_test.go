@@ -3,6 +3,8 @@ package cli_test
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -566,6 +568,134 @@ func TestAddRejectsUnknownFlag(t *testing.T) {
 	h := newHarness(t, token, nil, nil)
 	if code := h.cli.Run([]string{"add", "-nonsense", "t"}); code != 2 {
 		t.Errorf("exit code = %d, want 2 for a bad flag", code)
+	}
+}
+
+// ===========================================================================
+// migrate
+// ===========================================================================
+
+const rcFixture = `export EDITOR=vim
+export SPLUNK_MCP_TOKEN=eyJraWQiOiJzcGx1bmsiLCJhbGciOiJIUzI1NiJ9
+`
+
+func writeFixture(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), ".zshrc")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing fixture: %v", err)
+	}
+	return path
+}
+
+// Dry run is the default. A tool that rewrites a shell config on a bare command
+// is a tool people run once.
+func TestMigrateIsDryRunByDefault(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	if got, _ := os.ReadFile(path); string(got) != rcFixture {
+		t.Error("a dry run modified the file")
+	}
+	if names, _ := h.store.List(); len(names) != 0 {
+		t.Errorf("a dry run stored %v", names)
+	}
+	if !strings.Contains(h.out(), "cap://splunk-mcp-token") {
+		t.Errorf("stdout does not show the proposed change:\n%s", h.out())
+	}
+	if !strings.Contains(h.out(), "-apply") {
+		t.Errorf("stdout does not say how to apply it:\n%s", h.out())
+	}
+}
+
+// The diff reaches a terminal and may be produced by an agent. It must not carry
+// the values it is describing.
+func TestMigrateDryRunPrintsNoSecrets(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "", nil, nil)
+	h.cli.Run([]string{"migrate", path})
+
+	secret := "eyJraWQiOiJzcGx1bmsiLCJhbGciOiJIUzI1NiJ9"
+	if strings.Contains(h.out(), secret) || strings.Contains(h.err(), secret) {
+		t.Errorf("migrate printed a secret.\nstdout: %s\nstderr: %s", h.out(), h.err())
+	}
+}
+
+func TestMigrateApply(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "export SPLUNK_MCP_TOKEN='cap://splunk-mcp-token'") {
+		t.Errorf("file was not rewritten:\n%s", got)
+	}
+	if !strings.Contains(string(got), "export EDITOR=vim") {
+		t.Error("an unrelated line was changed")
+	}
+	if _, err := h.store.Get("splunk-mcp-token"); err != nil {
+		t.Errorf("secret was not stored: %v", err)
+	}
+	if !strings.Contains(h.out(), "keyward-backup") {
+		t.Errorf("stdout does not report the backup location:\n%s", h.out())
+	}
+}
+
+func TestMigrateNothingToDo(t *testing.T) {
+	path := writeFixture(t, "export EDITOR=vim\n")
+	h := newHarness(t, "", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if !strings.Contains(strings.ToLower(h.out()), "nothing") {
+		t.Errorf("stdout = %q, want it to say there is nothing to move", h.out())
+	}
+}
+
+func TestMigrateRequiresAPath(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	if code := h.cli.Run([]string{"migrate"}); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestMigrateMissingFile(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	if code := h.cli.Run([]string{"migrate", filepath.Join(t.TempDir(), "nope")}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+}
+
+// A plan that cannot be built safely must fail before anything is written.
+func TestMigrateReportsPlanningFailure(t *testing.T) {
+	path := writeFixture(t, "export _TOKEN=ghp_exampleValue0123456789\n")
+	h := newHarness(t, "", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(h.err(), "_TOKEN") {
+		t.Errorf("stderr = %q, want it to name the problem variable", h.err())
+	}
+}
+
+func TestMigrateReportsApplyFailure(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "", nil, nil)
+	h.cli.Store = brokenStore{}
+
+	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if got, _ := os.ReadFile(path); string(got) != rcFixture {
+		t.Error("the file was modified despite the failure")
 	}
 }
 

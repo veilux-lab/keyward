@@ -42,7 +42,7 @@ cgo Keychain file is excluded without the `integration` tag; it is covered by
 | `internal/resolve` | **Done** | Environment scanning, caching, all-or-nothing resolution, aggregate errors. 100% covered. |
 | `internal/audit` | Not started | Independent; can land any time. |
 | `cmd/keyward` | **Done** | `add`, `ls`, `rm`, `run`. Logic in `internal/cli` with store, streams, environ, and exec injected. |
-| `internal/migrate` | **Partial** | `scan.go` and `detect.go` done, 100% covered. `Plan`/`Apply` not yet written — nothing writes to a file. |
+| `internal/migrate` | **Done** | Scan, detect, `Plan`, `Apply`. Dry run by default, redacted diff, backup, atomic write, idempotent. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
@@ -54,9 +54,10 @@ available to work on.
 
 **Nothing gates these:**
 
-- `migrate.Plan` / `Apply` — the diff, the backup, the atomic write, and the CLI
-  command. The reading and deciding half is done; this is the half that can damage
-  a shell config, so it is kept separate.
+- `internal/mcpconfig` — rewrite MCP server configs to launch via `keyward run`.
+  Delivers the Finder-launch fix.
+- `internal/audit` — append-only JSONL. No dependencies.
+- `keyward shell` — a time-boxed subshell holding resolved values.
 - `internal/audit` — append-only JSONL. No dependencies.
 - `internal/mcpconfig` — `run` works, so MCP configs can be rewritten to use it.
   Delivers the Finder-launch fix.
@@ -81,6 +82,9 @@ these before the core is in daily use would be building on a guess.
 
 ## The decision point
 
+**This is now runnable.** `keyward migrate -apply ~/.zshrc` does the whole job in
+one command, so the experiment costs a minute rather than an afternoon.
+
 The project has one real go/no-go, and it is not about security:
 
 > Migrate `~/.zshrc` and one project's `.env`, then work normally. If
@@ -92,6 +96,14 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-09-28 (migrate complete)** — `Plan`, `Apply`, and `keyward migrate`. Dry run
+by default. The diff withholds values: printing the old line verbatim would spill
+every secret in the file into scrollback and into the context of any agent that ran
+the command, which is the leak the tool exists to prevent. Secrets are stored before
+the file is touched, so a failure loses nothing. Verified by hand on a realistic rc
+file: five values moved, five correctly left alone, mode preserved, backup intact,
+second run a no-op, and `keyward run` resolving the result.
 
 **2026-09-28 (migrate, part one)** — `internal/migrate` scanning and detection,
 100% covered. Split from the writing half deliberately: this part only reads and
