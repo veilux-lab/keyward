@@ -142,21 +142,23 @@ func (c *CLI) add(args []string) int {
 	}
 	defer secret.Destroy()
 
+	// No provenance: a secret added by hand came from a person, not a file. That
+	// absence is the signal that keeps `doctor` from ever calling it a leftover.
 	if *force {
 		// Replace requires the name to exist, so fall back to Put. -force means
 		// "do not stop me", not "the name must already be there".
-		if err := c.Store.Replace(name, secret); err != nil {
+		if err := c.Store.Replace(name, secret, ""); err != nil {
 			if !errors.Is(err, vault.ErrNotFound) {
 				return c.fail("keyward add: %v", err)
 			}
-			if err := c.Store.Put(name, secret); err != nil {
+			if err := c.Store.Put(name, secret, ""); err != nil {
 				return c.fail("keyward add: %v", err)
 			}
 		}
 		return exitOK
 	}
 
-	if err := c.Store.Put(name, secret); err != nil {
+	if err := c.Store.Put(name, secret, ""); err != nil {
 		if errors.Is(err, vault.ErrExists) {
 			return c.fail("keyward add: %q already exists; pass -force to replace it", name)
 		}
@@ -168,12 +170,12 @@ func (c *CLI) add(args []string) int {
 // list prints stored names, one per line and nothing else, so the output pipes
 // into other commands without needing to be filtered.
 func (c *CLI) list() int {
-	names, err := c.Store.List()
+	entries, err := c.Store.Entries()
 	if err != nil {
 		return c.fail("keyward ls: %v", err)
 	}
-	for _, n := range names {
-		fmt.Fprintln(c.Stdout, n)
+	for _, e := range entries {
+		fmt.Fprintln(c.Stdout, e.Name)
 	}
 	return exitOK
 }

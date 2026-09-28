@@ -175,8 +175,8 @@ func TestDiffShowsLineNumbersAndReasons(t *testing.T) {
 	p := mustPlan(t, "/tmp/.zshrc", rcFile)
 	diff := p.Diff()
 
-	// SPLUNK_MCP_TOKEN is on line 9 of rcFile.
-	if !strings.Contains(diff, "line 9") {
+	// SPLUNK_MCP_TOKEN is on line 8 of rcFile.
+	if !strings.Contains(diff, "line 8") {
 		t.Errorf("diff does not give a line number:\n%s", diff)
 	}
 	if !strings.Contains(diff, "eyJ") {
@@ -339,6 +339,42 @@ func TestApply(t *testing.T) {
 	}
 	if applied.BackupPath == "" {
 		t.Error("Apply reported no backup path")
+	}
+}
+
+// Provenance is what later lets keyward distinguish an entry whose source file no
+// longer references it from one a person added on purpose. Without it, every
+// unreferenced entry looks equally like a leftover and none can be safely removed.
+func TestApplyRecordsProvenance(t *testing.T) {
+	path := writeRC(t, rcFile)
+	store := vault.NewMemory()
+
+	if _, err := mustReadPlan(t, path).Apply(store); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	entries, err := store.Entries()
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	notes := map[string]string{}
+	for _, e := range entries {
+		notes[e.Name] = e.Note
+	}
+
+	// SPLUNK_MCP_TOKEN is on line 8 of rcFile, GITHUB_TOKEN on line 9.
+	if want := path + ":8"; notes["splunk-mcp-token"] != want {
+		t.Errorf("note = %q, want %q", notes["splunk-mcp-token"], want)
+	}
+	if want := path + ":9"; notes["github-token"] != want {
+		t.Errorf("note = %q, want %q", notes["github-token"], want)
+	}
+
+	// A note must never carry the value it describes.
+	for _, e := range entries {
+		if strings.Contains(e.Note, "eyJ") || strings.Contains(e.Note, "ghp_") {
+			t.Errorf("note for %s leaked a value: %q", e.Name, e.Note)
+		}
 	}
 }
 
@@ -551,7 +587,7 @@ func TestApplyStopsWhenTheBackupCannotBeWritten(t *testing.T) {
 	}
 	// The secrets did get stored, and saying so is what makes the failure
 	// recoverable rather than mysterious.
-	if names, _ := store.List(); len(names) == 0 {
+	if names, _ := store.Entries(); len(names) == 0 {
 		t.Error("no secrets were stored before the backup was attempted")
 	}
 }
@@ -573,7 +609,7 @@ func TestApplyReportsAFailedConflictCheck(t *testing.T) {
 
 type existsButUnreadable struct{ vault.Store }
 
-func (existsButUnreadable) Put(string, vault.Secret) error { return vault.ErrExists }
+func (existsButUnreadable) Put(string, vault.Secret, string) error { return vault.ErrExists }
 func (existsButUnreadable) Get(string) (vault.Secret, error) {
 	return vault.Secret{}, errors.New("keychain read failed")
 }
@@ -597,4 +633,4 @@ var errPutFailed = errors.New("keychain write failed")
 
 type brokenPutStore struct{ vault.Store }
 
-func (brokenPutStore) Put(string, vault.Secret) error { return errPutFailed }
+func (brokenPutStore) Put(string, vault.Secret, string) error { return errPutFailed }

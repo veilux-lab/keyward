@@ -66,6 +66,11 @@ func statusError(op, name string, status int32) error {
 	}
 }
 
+// noteSeparator divides a name from its note in the flat listing the C helper
+// returns. A unit separator cannot appear in a path, and SanitizeNote removes it
+// from notes anyway, so a record can never be split in the wrong place.
+const noteSeparator = '\x1f'
+
 // DefaultService is the Keychain service name keyward stores items under. Each
 // secret is a separate generic-password item, which is what makes the OS's
 // per-item access controls available.

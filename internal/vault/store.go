@@ -34,6 +34,22 @@ var (
 	ErrDenied = errors.New("access to the secret was denied")
 )
 
+// Entry is a stored secret's metadata. Deliberately not its value: this is what
+// listing and reporting work from, so no code path that enumerates the vault can
+// accidentally hold a credential.
+type Entry struct {
+	// Name is the canonical reference name.
+	Name string
+
+	// Note records where the value came from, such as "/Users/x/.zshrc:9". Empty
+	// means nothing recorded it — which is itself information: a secret added by
+	// hand was created deliberately, and should never be mistaken for a leftover.
+	//
+	// Keychain attributes are readable more freely than values, so a note may only
+	// ever hold a path. Never anything sensitive.
+	Note string
+}
+
 // Store holds secret values keyed by name.
 //
 // Names are normalised by handle.Normalize, so a Store is keyed by exactly the
@@ -53,14 +69,20 @@ type Store interface {
 	// Put never overwrites. Silently replacing a credential is how a working
 	// setup breaks with no trace of what changed, so overwriting is Replace's
 	// job and a caller has to say which it means.
-	Put(name string, value Secret) error
+	//
+	// note records provenance and may be empty. See Entry.Note.
+	Put(name string, value Secret, note string) error
 
 	// Replace overwrites an existing secret, returning ErrNotFound if absent.
-	Replace(name string, value Secret) error
+	//
+	// note replaces any previous provenance, since a new value came from somewhere
+	// new.
+	Replace(name string, value Secret, note string) error
 
 	// Delete removes a secret, returning ErrNotFound if absent.
 	Delete(name string) error
 
-	// List returns every stored name, sorted.
-	List() ([]string, error)
+	// Entries returns metadata for every stored secret, sorted by name. Never
+	// values.
+	Entries() ([]Entry, error)
 }

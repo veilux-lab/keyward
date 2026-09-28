@@ -470,11 +470,11 @@ var errStoreBroken = errors.New("keychain unavailable")
 
 type brokenStore struct{ vault.Store }
 
-func (brokenStore) Get(string) (vault.Secret, error)   { return vault.Secret{}, errStoreBroken }
-func (brokenStore) Put(string, vault.Secret) error     { return errStoreBroken }
-func (brokenStore) Replace(string, vault.Secret) error { return errStoreBroken }
-func (brokenStore) Delete(string) error                { return errStoreBroken }
-func (brokenStore) List() ([]string, error)            { return nil, errStoreBroken }
+func (brokenStore) Get(string) (vault.Secret, error)           { return vault.Secret{}, errStoreBroken }
+func (brokenStore) Put(string, vault.Secret, string) error     { return errStoreBroken }
+func (brokenStore) Replace(string, vault.Secret, string) error { return errStoreBroken }
+func (brokenStore) Delete(string) error                        { return errStoreBroken }
+func (brokenStore) Entries() ([]vault.Entry, error)            { return nil, errStoreBroken }
 
 func TestCommandsReportStoreFailures(t *testing.T) {
 	cases := []struct {
@@ -550,8 +550,8 @@ func TestAddReportsReadFailure(t *testing.T) {
 // fails, the failure has to surface rather than be swallowed by the fallback.
 type absentThenBroken struct{ vault.Store }
 
-func (absentThenBroken) Replace(string, vault.Secret) error { return vault.ErrNotFound }
-func (absentThenBroken) Put(string, vault.Secret) error     { return errStoreBroken }
+func (absentThenBroken) Replace(string, vault.Secret, string) error { return vault.ErrNotFound }
+func (absentThenBroken) Put(string, vault.Secret, string) error     { return errStoreBroken }
 
 func TestAddForceReportsFallbackPutFailure(t *testing.T) {
 	h := newHarness(t, token, nil, nil)
@@ -646,7 +646,7 @@ func TestMigrateRefusesAnythingButYes(t *testing.T) {
 			if got, _ := os.ReadFile(path); string(got) != rcFixture {
 				t.Errorf("the file was modified after answering %q", answer)
 			}
-			if names, _ := h.store.List(); len(names) != 0 {
+			if names, _ := h.store.Entries(); len(names) != 0 {
 				t.Errorf("stored %v after answering %q", names, answer)
 			}
 		})
@@ -696,7 +696,7 @@ func TestMigrateDryRunOnlyPrints(t *testing.T) {
 	if got, _ := os.ReadFile(path); string(got) != rcFixture {
 		t.Error("--dry-run modified the file")
 	}
-	if names, _ := h.store.List(); len(names) != 0 {
+	if names, _ := h.store.Entries(); len(names) != 0 {
 		t.Errorf("--dry-run stored %v", names)
 	}
 	if strings.Contains(strings.ToLower(h.err()), "enter a value") {
@@ -789,7 +789,7 @@ func TestMigrateReportsPlanningFailure(t *testing.T) {
 	if !strings.Contains(h.err(), "my-token") {
 		t.Errorf("stderr = %q, want it to name the colliding reference", h.err())
 	}
-	if names, _ := h.store.List(); len(names) != 0 {
+	if names, _ := h.store.Entries(); len(names) != 0 {
 		t.Errorf("stored %v despite refusing the plan", names)
 	}
 }

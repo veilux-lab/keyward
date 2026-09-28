@@ -3,6 +3,7 @@ package vault
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/nwokolo24/keyward/internal/handle"
@@ -15,13 +16,14 @@ import (
 // several references per command, so a Store that needed external locking would
 // push that requirement onto every caller.
 type Memory struct {
-	mu sync.RWMutex
-	m  map[string][]byte
+	mu    sync.RWMutex
+	m     map[string][]byte
+	notes map[string]string
 }
 
 // NewMemory returns an empty Memory store.
 func NewMemory() *Memory {
-	return &Memory{m: make(map[string][]byte)}
+	return &Memory{m: make(map[string][]byte), notes: make(map[string]string)}
 }
 
 // Get implements Store.
@@ -43,7 +45,7 @@ func (s *Memory) Get(name string) (Secret, error) {
 }
 
 // Put implements Store.
-func (s *Memory) Put(name string, value Secret) error {
+func (s *Memory) Put(name string, value Secret, note string) error {
 	key, err := checkPut(name, value)
 	if err != nil {
 		return err
@@ -56,11 +58,12 @@ func (s *Memory) Put(name string, value Secret) error {
 		return fmt.Errorf("%q: %w", key, ErrExists)
 	}
 	s.m[key] = clone(value.Bytes())
+	s.notes[key] = SanitizeNote(note)
 	return nil
 }
 
 // Replace implements Store.
-func (s *Memory) Replace(name string, value Secret) error {
+func (s *Memory) Replace(name string, value Secret, note string) error {
 	key, err := checkPut(name, value)
 	if err != nil {
 		return err
@@ -73,6 +76,7 @@ func (s *Memory) Replace(name string, value Secret) error {
 		return fmt.Errorf("%q: %w", key, ErrNotFound)
 	}
 	s.m[key] = clone(value.Bytes())
+	s.notes[key] = SanitizeNote(note)
 	return nil
 }
 
@@ -94,20 +98,21 @@ func (s *Memory) Delete(name string) error {
 		s.m[key][i] = 0
 	}
 	delete(s.m, key)
+	delete(s.notes, key)
 	return nil
 }
 
-// List implements Store.
-func (s *Memory) List() ([]string, error) {
+// Entries implements Store.
+func (s *Memory) Entries() ([]Entry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	names := make([]string, 0, len(s.m))
+	entries := make([]Entry, 0, len(s.m))
 	for k := range s.m {
-		names = append(names, k)
+		entries = append(entries, Entry{Name: k, Note: s.notes[k]})
 	}
-	sort.Strings(names)
-	return names, nil
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	return entries, nil
 }
 
 // Seed loads several secrets at once, for tests of higher layers that need a
@@ -129,6 +134,21 @@ func (s *Memory) Seed(values map[string]string) error {
 		s.m[key] = clone(b)
 	}
 	return nil
+}
+
+// SanitizeNote makes a note safe to carry through a flat listing.
+//
+// The Keychain listing encodes name and note into one string per entry, so a
+// separator inside a note could split a record and mislabel a different secret.
+// Replacing them is enough: a note is a path, and a path needs none of these.
+func SanitizeNote(note string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', noteSeparator:
+			return ' '
+		}
+		return r
+	}, note)
 }
 
 // normalize canonicalises a name for use as a key.

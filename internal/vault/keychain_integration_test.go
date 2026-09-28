@@ -38,7 +38,7 @@ func TestKeychainPersistsAcrossStores(t *testing.T) {
 	_ = writer.Delete(name)
 	t.Cleanup(func() { _ = writer.Delete(name) })
 
-	if err := writer.Put(name, vault.NewSecret(value)); err != nil {
+	if err := writer.Put(name, vault.NewSecret(value), ""); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
@@ -65,19 +65,19 @@ func TestKeychainServicesAreIsolated(t *testing.T) {
 	_ = b.Delete(name)
 	t.Cleanup(func() { _ = a.Delete(name); _ = b.Delete(name) })
 
-	if err := a.Put(name, vault.NewSecret([]byte("v"))); err != nil {
+	if err := a.Put(name, vault.NewSecret([]byte("v")), ""); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 	if _, err := b.Get(name); !errors.Is(err, vault.ErrNotFound) {
 		t.Errorf("Get from a different service = %v, want ErrNotFound", err)
 	}
-	if err := b.Put(name, vault.NewSecret([]byte("v"))); err != nil {
+	if err := b.Put(name, vault.NewSecret([]byte("v")), ""); err != nil {
 		t.Errorf("Put under a different service = %v, want success", err)
 	}
 }
 
-// List must not report entries belonging to other services.
-func TestKeychainListIsScopedToService(t *testing.T) {
+// Entries must not report entries belonging to other services.
+func TestKeychainEntriesAreScopedToService(t *testing.T) {
 	const name = "kwtest-scope"
 
 	a := vault.NewKeychainService(testService)
@@ -85,16 +85,16 @@ func TestKeychainListIsScopedToService(t *testing.T) {
 	_ = b.Delete(name)
 	t.Cleanup(func() { _ = b.Delete(name) })
 
-	if err := b.Put(name, vault.NewSecret([]byte("v"))); err != nil {
+	if err := b.Put(name, vault.NewSecret([]byte("v")), ""); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	names, err := a.List()
+	entries, err := a.Entries()
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf("Entries: %v", err)
 	}
-	for _, n := range names {
-		if n == name {
-			t.Errorf("List returned %q, which belongs to another service", n)
+	for _, e := range entries {
+		if e.Name == name {
+			t.Errorf("Entries returned %q, which belongs to another service", e.Name)
 		}
 	}
 }

@@ -78,7 +78,16 @@ static OSStatus kw_get(const char *service, const char *account, void **out, int
 
 // kw_put adds a new item. SecItemAdd reports errSecDuplicateItem if the account
 // already exists, which is what gives Put its never-overwrite behaviour.
-static OSStatus kw_put(const char *service, const char *account, const void *val, int valLen) {
+// kw_set_note attaches provenance. A NULL or empty note is simply not set.
+static void kw_set_note(CFMutableDictionaryRef d, const char *note) {
+	if (!note || !*note) return;
+	CFStringRef s = CFStringCreateWithCString(kCFAllocatorDefault, note, kCFStringEncodingUTF8);
+	if (!s) return;
+	CFDictionarySetValue(d, kSecAttrComment, s);
+	CFRelease(s);
+}
+
+static OSStatus kw_put(const char *service, const char *account, const void *val, int valLen, const char *note) {
 	CFMutableDictionaryRef q = kw_query(service, account);
 	if (!q) return errSecAllocate;
 
@@ -86,6 +95,7 @@ static OSStatus kw_put(const char *service, const char *account, const void *val
 	if (!data) { CFRelease(q); return errSecAllocate; }
 	CFDictionarySetValue(q, kSecValueData, data);
 	CFRelease(data);
+	kw_set_note(q, note);
 
 	OSStatus st = SecItemAdd(q, NULL);
 	CFRelease(q);
@@ -93,7 +103,7 @@ static OSStatus kw_put(const char *service, const char *account, const void *val
 }
 
 // kw_update overwrites an existing item, reporting errSecItemNotFound if absent.
-static OSStatus kw_update(const char *service, const char *account, const void *val, int valLen) {
+static OSStatus kw_update(const char *service, const char *account, const void *val, int valLen, const char *note) {
 	CFMutableDictionaryRef q = kw_query(service, account);
 	if (!q) return errSecAllocate;
 
@@ -106,6 +116,10 @@ static OSStatus kw_update(const char *service, const char *account, const void *
 	if (!data) { CFRelease(attrs); CFRelease(q); return errSecAllocate; }
 	CFDictionarySetValue(attrs, kSecValueData, data);
 	CFRelease(data);
+	// Always set the comment, so replacing a value clears stale provenance rather
+	// than leaving a note pointing at the wrong file.
+	CFStringRef noteStr = CFStringCreateWithCString(kCFAllocatorDefault, note ? note : "", kCFStringEncodingUTF8);
+	if (noteStr) { CFDictionarySetValue(attrs, kSecAttrComment, noteStr); CFRelease(noteStr); }
 
 	OSStatus st = SecItemUpdate(q, attrs);
 	CFRelease(attrs);
@@ -121,11 +135,11 @@ static OSStatus kw_delete(const char *service, const char *account) {
 	return st;
 }
 
-// kw_list writes the account names for a service into *out as a newline-separated
-// string (malloc'd; release with free).
+// kw_list writes one record per item into *out (malloc'd; release with free), as
+// "account\x1fnote" separated by newlines.
 //
-// Joining on a newline is unambiguous because handle.Normalize rejects any name
-// containing one, so the separator cannot appear inside a name.
+// Both separators are safe: handle.Normalize rejects a name containing either, and
+// SanitizeNote replaces them in notes before they are stored.
 static OSStatus kw_list(const char *service, char **out) {
 	*out = NULL;
 
@@ -151,6 +165,9 @@ static OSStatus kw_list(const char *service, char **out) {
 		CFStringRef acct = (CFStringRef)CFDictionaryGetValue(item, kSecAttrAccount);
 		if (!acct) continue;
 		CFStringAppend(joined, acct);
+		CFStringAppendCString(joined, "\x1f", kCFStringEncodingUTF8);
+		CFStringRef note = (CFStringRef)CFDictionaryGetValue(item, kSecAttrComment);
+		if (note) CFStringAppend(joined, note);
 		CFStringAppendCString(joined, "\n", kCFStringEncodingUTF8);
 	}
 	CFRelease(result);
@@ -267,7 +284,7 @@ func (k *Keychain) Get(name string) (Secret, error) {
 }
 
 // Put implements Store.
-func (k *Keychain) Put(name string, value Secret) error {
+func (k *Keychain) Put(name string, value Secret, note string) error {
 	key, err := k.resolveWith(name, value)
 	if err != nil {
 		return err
@@ -275,16 +292,18 @@ func (k *Keychain) Put(name string, value Secret) error {
 
 	svc, acct, free := k.cStrings(key)
 	defer free()
+	cNote := C.CString(SanitizeNote(note))
+	defer C.free(unsafe.Pointer(cNote))
 
 	b := value.Bytes()
 	keychainMu.Lock()
-	status := C.kw_put(svc, acct, unsafe.Pointer(&b[0]), C.int(len(b)))
+	status := C.kw_put(svc, acct, unsafe.Pointer(&b[0]), C.int(len(b)), cNote)
 	keychainMu.Unlock()
 	return statusError("put", key, int32(status))
 }
 
 // Replace implements Store.
-func (k *Keychain) Replace(name string, value Secret) error {
+func (k *Keychain) Replace(name string, value Secret, note string) error {
 	key, err := k.resolveWith(name, value)
 	if err != nil {
 		return err
@@ -292,10 +311,12 @@ func (k *Keychain) Replace(name string, value Secret) error {
 
 	svc, acct, free := k.cStrings(key)
 	defer free()
+	cNote := C.CString(SanitizeNote(note))
+	defer C.free(unsafe.Pointer(cNote))
 
 	b := value.Bytes()
 	keychainMu.Lock()
-	status := C.kw_update(svc, acct, unsafe.Pointer(&b[0]), C.int(len(b)))
+	status := C.kw_update(svc, acct, unsafe.Pointer(&b[0]), C.int(len(b)), cNote)
 	keychainMu.Unlock()
 	return statusError("replace", key, int32(status))
 }
@@ -316,9 +337,9 @@ func (k *Keychain) Delete(name string) error {
 	return statusError("delete", key, int32(status))
 }
 
-// List implements Store. Scoped to this store's service, so it never reports
+// Entries implements Store. Scoped to this store's service, so it never reports
 // items belonging to anything else.
-func (k *Keychain) List() ([]string, error) {
+func (k *Keychain) Entries() ([]Entry, error) {
 	if k.service == "" {
 		return nil, errEmptyService
 	}
@@ -332,24 +353,26 @@ func (k *Keychain) List() ([]string, error) {
 	keychainMu.Unlock()
 	// No items for this service is an empty list, not a failure.
 	if int32(status) == statusItemNotFound {
-		return []string{}, nil
+		return []Entry{}, nil
 	}
 	if err := statusError("list", k.service, int32(status)); err != nil {
 		return nil, err
 	}
 	if joined == nil {
-		return []string{}, nil
+		return []Entry{}, nil
 	}
 	defer C.free(unsafe.Pointer(joined))
 
-	names := make([]string, 0, 8)
-	for _, n := range strings.Split(C.GoString(joined), "\n") {
-		if n != "" {
-			names = append(names, n)
+	entries := make([]Entry, 0, 8)
+	for _, record := range strings.Split(C.GoString(joined), "\n") {
+		if record == "" {
+			continue
 		}
+		name, note, _ := strings.Cut(record, string(noteSeparator))
+		entries = append(entries, Entry{Name: name, Note: note})
 	}
-	sort.Strings(names)
-	return names, nil
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	return entries, nil
 }
 
 // resolve normalises a name and checks the store is usable.

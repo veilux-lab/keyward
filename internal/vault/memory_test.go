@@ -21,7 +21,7 @@ func TestMemory(t *testing.T) {
 func TestMemoryInstancesAreIndependent(t *testing.T) {
 	a, b := vault.NewMemory(), vault.NewMemory()
 
-	if err := a.Put("token", vault.NewSecret([]byte("v"))); err != nil {
+	if err := a.Put("token", vault.NewSecret([]byte("v")), ""); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 	if _, err := b.Get("token"); err == nil {

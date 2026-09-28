@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -32,7 +33,7 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 		name := reserve(t, s, "roundtrip")
 		want := []byte("eyJraWQiOiJzcGx1bmsi")
 
-		if err := s.Put(name, vault.NewSecret(want)); err != nil {
+		if err := s.Put(name, vault.NewSecret(want), ""); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 		got, err := s.Get(name)
@@ -57,10 +58,10 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 	t.Run("PutExisting", func(t *testing.T) {
 		s := newStore(t)
 		name := reserve(t, s, "exists")
-		if err := s.Put(name, vault.NewSecret([]byte("first"))); err != nil {
+		if err := s.Put(name, vault.NewSecret([]byte("first")), ""); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
-		if err := s.Put(name, vault.NewSecret([]byte("second"))); !errors.Is(err, vault.ErrExists) {
+		if err := s.Put(name, vault.NewSecret([]byte("second")), ""); !errors.Is(err, vault.ErrExists) {
 			t.Fatalf("second Put = %v, want ErrExists", err)
 		}
 		got, err := s.Get(name)
@@ -75,10 +76,10 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 	t.Run("Replace", func(t *testing.T) {
 		s := newStore(t)
 		name := reserve(t, s, "replace")
-		if err := s.Put(name, vault.NewSecret([]byte("old"))); err != nil {
+		if err := s.Put(name, vault.NewSecret([]byte("old")), ""); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
-		if err := s.Replace(name, vault.NewSecret([]byte("new"))); err != nil {
+		if err := s.Replace(name, vault.NewSecret([]byte("new")), ""); err != nil {
 			t.Fatalf("Replace: %v", err)
 		}
 		got, err := s.Get(name)
@@ -93,7 +94,7 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 	t.Run("ReplaceMissing", func(t *testing.T) {
 		s := newStore(t)
 		name := reserve(t, s, "replace-missing")
-		if err := s.Replace(name, vault.NewSecret([]byte("v"))); !errors.Is(err, vault.ErrNotFound) {
+		if err := s.Replace(name, vault.NewSecret([]byte("v")), ""); !errors.Is(err, vault.ErrNotFound) {
 			t.Errorf("Replace on absent name = %v, want ErrNotFound", err)
 		}
 	})
@@ -101,7 +102,7 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 	t.Run("Delete", func(t *testing.T) {
 		s := newStore(t)
 		name := reserve(t, s, "delete")
-		if err := s.Put(name, vault.NewSecret([]byte("v"))); err != nil {
+		if err := s.Put(name, vault.NewSecret([]byte("v")), ""); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 		if err := s.Delete(name); err != nil {
@@ -115,32 +116,90 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 		}
 	})
 
-	t.Run("ListIsSorted", func(t *testing.T) {
+	t.Run("EntriesAreSorted", func(t *testing.T) {
 		s := newStore(t)
 		names := []string{reserve(t, s, "list-c"), reserve(t, s, "list-a"), reserve(t, s, "list-b")}
 		for _, n := range names {
-			if err := s.Put(n, vault.NewSecret([]byte("v"))); err != nil {
+			if err := s.Put(n, vault.NewSecret([]byte("v")), ""); err != nil {
 				t.Fatalf("Put(%s): %v", n, err)
 			}
 		}
-		got, err := s.List()
+		got, err := s.Entries()
 		if err != nil {
-			t.Fatalf("List: %v", err)
+			t.Fatalf("Entries: %v", err)
 		}
 
 		var ours []string
-		for _, n := range got {
+		for _, e := range got {
 			for _, want := range names {
-				if n == want {
-					ours = append(ours, n)
+				if e.Name == want {
+					ours = append(ours, e.Name)
 				}
 			}
 		}
 		if len(ours) != len(names) {
-			t.Fatalf("List returned %d of the %d stored names: %v", len(ours), len(names), ours)
+			t.Fatalf("Entries returned %d of the %d stored names: %v", len(ours), len(names), ours)
 		}
 		if !sort.StringsAreSorted(ours) {
-			t.Errorf("List is not sorted: %v", ours)
+			t.Errorf("Entries is not sorted: %v", ours)
+		}
+	})
+
+	// A note records where a value came from, so keyward can later tell an entry
+	// whose source no longer references it from one added by hand on purpose.
+	// Values are never involved.
+	t.Run("Notes", func(t *testing.T) {
+		s := newStore(t)
+		withNote := reserve(t, s, "note-present")
+		withoutNote := reserve(t, s, "note-absent")
+
+		const note = "/Users/someone/.zshrc:42"
+		if err := s.Put(withNote, vault.NewSecret([]byte("v")), note); err != nil {
+			t.Fatalf("Put with a note: %v", err)
+		}
+		if err := s.Put(withoutNote, vault.NewSecret([]byte("v")), ""); err != nil {
+			t.Fatalf("Put without a note: %v", err)
+		}
+
+		got := entryNotes(t, s)
+		if got[withNote] != note {
+			t.Errorf("note for %s = %q, want %q", withNote, got[withNote], note)
+		}
+		if got[withoutNote] != "" {
+			t.Errorf("note for %s = %q, want empty", withoutNote, got[withoutNote])
+		}
+
+		// Replace updates provenance, since the value came from somewhere new.
+		const moved = "/Users/someone/.zshenv:7"
+		if err := s.Replace(withNote, vault.NewSecret([]byte("v2")), moved); err != nil {
+			t.Fatalf("Replace: %v", err)
+		}
+		if got := entryNotes(t, s); got[withNote] != moved {
+			t.Errorf("note after Replace = %q, want %q", got[withNote], moved)
+		}
+	})
+
+	// Notes are encoded into a flat listing, so a separator inside one must not be
+	// able to split a record and mislabel another entry.
+	t.Run("NotesWithSeparatorsAreNeutralised", func(t *testing.T) {
+		s := newStore(t)
+		name := reserve(t, s, "note-separators")
+
+		if err := s.Put(name, vault.NewSecret([]byte("v")), "a\nb\rc\x1fd"); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		entries, err := s.Entries()
+		if err != nil {
+			t.Fatalf("Entries: %v", err)
+		}
+		for _, e := range entries {
+			if strings.ContainsAny(e.Note, "\n\r\x1f") {
+				t.Errorf("note for %s still contains a separator: %q", e.Name, e.Note)
+			}
+		}
+		if got := entryNotes(t, s)[name]; got != "a b c d" {
+			t.Errorf("note = %q, want separators replaced with spaces", got)
 		}
 	})
 
@@ -151,13 +210,13 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 		name := reserve(t, s, "normalise")
 		upper := prefixUpper(name)
 
-		if err := s.Put(upper, vault.NewSecret([]byte("v"))); err != nil {
+		if err := s.Put(upper, vault.NewSecret([]byte("v")), ""); err != nil {
 			t.Fatalf("Put(%q): %v", upper, err)
 		}
 		if _, err := s.Get(name); err != nil {
 			t.Errorf("Get(%q) after Put(%q): %v", name, upper, err)
 		}
-		if err := s.Put(name, vault.NewSecret([]byte("v"))); !errors.Is(err, vault.ErrExists) {
+		if err := s.Put(name, vault.NewSecret([]byte("v")), ""); !errors.Is(err, vault.ErrExists) {
 			t.Errorf("Put(%q) after Put(%q) = %v, want ErrExists", name, upper, err)
 		}
 	})
@@ -166,13 +225,13 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 		s := newStore(t)
 		bad := []string{"", "has space", "-leading", "trailing-", "slash/name", "cap://token"}
 		for _, n := range bad {
-			if err := s.Put(n, vault.NewSecret([]byte("v"))); err == nil {
+			if err := s.Put(n, vault.NewSecret([]byte("v")), ""); err == nil {
 				t.Errorf("Put(%q) succeeded, want an error", n)
 			}
 			if _, err := s.Get(n); err == nil {
 				t.Errorf("Get(%q) succeeded, want an error", n)
 			}
-			if err := s.Replace(n, vault.NewSecret([]byte("v"))); err == nil {
+			if err := s.Replace(n, vault.NewSecret([]byte("v")), ""); err == nil {
 				t.Errorf("Replace(%q) succeeded, want an error", n)
 			}
 			if err := s.Delete(n); err == nil {
@@ -187,10 +246,10 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 	t.Run("RejectsEmptyValue", func(t *testing.T) {
 		s := newStore(t)
 		name := reserve(t, s, "empty")
-		if err := s.Put(name, vault.Secret{}); !errors.Is(err, vault.ErrEmptyValue) {
+		if err := s.Put(name, vault.Secret{}, ""); !errors.Is(err, vault.ErrEmptyValue) {
 			t.Errorf("Put with zero Secret = %v, want ErrEmptyValue", err)
 		}
-		if err := s.Put(name, vault.NewSecret([]byte{})); !errors.Is(err, vault.ErrEmptyValue) {
+		if err := s.Put(name, vault.NewSecret([]byte{}), ""); !errors.Is(err, vault.ErrEmptyValue) {
 			t.Errorf("Put with empty value = %v, want ErrEmptyValue", err)
 		}
 	})
@@ -200,7 +259,7 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 	t.Run("GetReturnsIndependentCopy", func(t *testing.T) {
 		s := newStore(t)
 		name := reserve(t, s, "copy")
-		if err := s.Put(name, vault.NewSecret([]byte("original"))); err != nil {
+		if err := s.Put(name, vault.NewSecret([]byte("original")), ""); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
@@ -224,7 +283,7 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 	t.Run("ConcurrentAccess", func(t *testing.T) {
 		s := newStore(t)
 		shared := reserve(t, s, "concurrent-shared")
-		if err := s.Put(shared, vault.NewSecret([]byte("shared-value"))); err != nil {
+		if err := s.Put(shared, vault.NewSecret([]byte("shared-value")), ""); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
@@ -237,7 +296,7 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 			wg.Add(1)
 			go func(name string) {
 				defer wg.Done()
-				if err := s.Put(name, vault.NewSecret([]byte("v"))); err != nil {
+				if err := s.Put(name, vault.NewSecret([]byte("v")), ""); err != nil {
 					errs <- fmt.Errorf("Put(%s): %w", name, err)
 					return
 				}
@@ -260,8 +319,8 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, err := s.List(); err != nil {
-					errs <- fmt.Errorf("List: %w", err)
+				if _, err := s.Entries(); err != nil {
+					errs <- fmt.Errorf("Entries: %w", err)
 				}
 			}()
 		}
@@ -272,6 +331,20 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 			t.Error(err)
 		}
 	})
+}
+
+// entryNotes indexes the store's notes by name, for readable assertions.
+func entryNotes(t *testing.T, s vault.Store) map[string]string {
+	t.Helper()
+	entries, err := s.Entries()
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	out := make(map[string]string, len(entries))
+	for _, e := range entries {
+		out[e.Name] = e.Note
+	}
+	return out
 }
 
 // reserve returns a namespaced name, clears any residue from an earlier run, and

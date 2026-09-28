@@ -248,7 +248,10 @@ func (p *Plan) Apply(store vault.Store) (*Applied, error) {
 
 	stored := make([]string, 0, len(p.Changes))
 	for _, c := range p.Changes {
-		if err := storeSecret(store, c.RefName, c.Value); err != nil {
+		// Provenance: where this value came from, so a later doctor run can tell an
+		// entry whose source no longer references it from one added by hand.
+		note := fmt.Sprintf("%s:%d", p.Path, c.Line)
+		if err := storeSecret(store, c.RefName, c.Value, note); err != nil {
 			return nil, fmt.Errorf("%s:%d: %w", p.Path, c.Line, err)
 		}
 		stored = append(stored, c.RefName)
@@ -275,11 +278,11 @@ func (p *Plan) Apply(store vault.Store) (*Applied, error) {
 // An existing entry holding the same value means an earlier attempt got this far,
 // so the command stays re-runnable. An existing entry holding something else is a
 // conflict: overwriting it could destroy a credential something else depends on.
-func storeSecret(store vault.Store, name, value string) error {
+func storeSecret(store vault.Store, name, value, note string) error {
 	secret := vault.NewSecret([]byte(value))
 	defer secret.Destroy()
 
-	err := store.Put(name, secret)
+	err := store.Put(name, secret, note)
 	if err == nil {
 		return nil
 	}
