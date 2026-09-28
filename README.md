@@ -63,4 +63,4 @@ make cover
 
 ## License
 
-TBD.
+MIT — see [LICENSE](LICENSE).
