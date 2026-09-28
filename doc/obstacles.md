@@ -95,6 +95,47 @@ So biometric gating probably means code signing and provisioning, not just a few
 extra lines of cgo. That is a materially larger undertaking than obstacle 2
 implied, and another reason to leave it until last.
 
+## 2a. Keychain item ACLs are bound to the creating binary — BLOCKING
+
+**Severity: blocking. Must be solved before keyward is usable beyond one build.**
+
+Measured, not inferred. A secret stored by one build of the binary and read by a
+different build of the same source:
+
+| Operation | Same binary | Different binary |
+| --- | --- | --- |
+| `Get` | instant | **blocks on a GUI authorisation dialog** |
+| `Delete` | works | fails, OSStatus -25244 |
+| `/usr/bin/security` read | — | denied |
+
+The legacy file-based keychain gives each item a default ACL naming the application
+that created it. Every `go build` produces a different binary, so every rebuild is a
+different application as far as the Keychain is concerned.
+
+**Why this is blocking rather than annoying:** the flagship use case is launching MCP
+servers through `keyward run`. After any upgrade, that would hang on a dialog the
+user may never see, with the editor waiting on it. A tool that intermittently blocks
+on an invisible prompt is worse than the problem it solves.
+
+Options:
+
+1. **Create items with a permissive `SecAccess`** — no application restriction, so
+   any process reads without prompting. Unblocks everything immediately. It sounds
+   like a security regression and mostly is not: the stated invariant is that no
+   plaintext sits on disk and no value enters an agent's context, and the ACL was
+   never part of that claim. It does make the already-documented deliberate-agent
+   case (obstacle 1) easier, since `security find-generic-password` would then
+   succeed.
+2. **Code-sign the binary with a stable identity.** The correct fix: the ACL keys on
+   the signing identity rather than the binary hash, so rebuilds keep access and
+   other applications stay out. Needs a signing certificate, and is the same
+   machinery the biometric work in obstacle 2 would need.
+3. **Accept the prompts.** Rejected. A GUI dialog blocking a non-interactive
+   `keyward run` is the worst failure mode available.
+
+Do 1 to unblock, then 2 properly. Note that 1 and 2 together are not contradictory:
+sign the binary, and keep the ACL restricted.
+
 ## 2d. Orphaned vault entries accumulate
 
 **Severity: low. Hygiene, not exposure.**

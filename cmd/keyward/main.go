@@ -20,6 +20,10 @@ func main() {
 		service = vault.DefaultService
 	}
 
+	// Failures here are not fatal: doctor simply reports fewer files as scanned.
+	home, _ := os.UserHomeDir()
+	workdir, _ := os.Getwd()
+
 	c := &cli.CLI{
 		Store:      vault.NewKeychainService(service),
 		Stdin:      os.Stdin,
@@ -28,6 +32,8 @@ func main() {
 		Environ:    os.Environ,
 		ReadSecret: cli.StdinSecretReader(os.Stdin, os.Stderr),
 		Exec:       syscall.Exec,
+		Home:       home,
+		Workdir:    workdir,
 	}
 	os.Exit(c.Run(os.Args[1:]))
 }

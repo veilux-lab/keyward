@@ -898,6 +898,107 @@ func TestHelpSaysMigrateAsksFirst(t *testing.T) {
 	}
 }
 
+// ===========================================================================
+// doctor
+// ===========================================================================
+
+// homed points Home and Workdir at a temp directory, so the test never reads the
+// developer's own shell configuration.
+func homed(t *testing.T, h *harness) string {
+	t.Helper()
+	dir := t.TempDir()
+	h.cli.Home = dir
+	h.cli.Workdir = dir
+	return dir
+}
+
+func TestDoctorReportsDanglingReferencesAndFails(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	dir := homed(t, h)
+	if err := os.WriteFile(filepath.Join(dir, ".zshrc"), []byte("export T='cap://absent'\n"), 0o644); err != nil {
+		t.Fatalf("writing .zshrc: %v", err)
+	}
+
+	// A dangling reference breaks the next command that needs it, so it is a
+	// failure exit rather than a note.
+	if code := h.cli.Run([]string{"doctor"}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(h.out(), "keyward add absent") {
+		t.Errorf("stdout does not offer the fix:\n%s", h.out())
+	}
+}
+
+func TestDoctorCleanSetupSucceeds(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"alpha": "v"}, nil)
+	dir := homed(t, h)
+	if err := os.WriteFile(filepath.Join(dir, ".zshrc"), []byte("export A='cap://alpha'\n"), 0o644); err != nil {
+		t.Fatalf("writing .zshrc: %v", err)
+	}
+
+	if code := h.cli.Run([]string{"doctor"}); code != 0 {
+		t.Fatalf("exit code = %d. stdout: %s", code, h.out())
+	}
+	if !strings.Contains(h.out(), "No problems found") {
+		t.Errorf("stdout does not report a clean result:\n%s", h.out())
+	}
+}
+
+// The whole point of report-only: doctor must never remove anything, however
+// confident it looks.
+func TestDoctorNeverDeletes(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"orphan": "v"}, nil)
+	dir := homed(t, h)
+	rc := filepath.Join(dir, ".zshrc")
+	if err := os.WriteFile(rc, []byte("# nothing references anything\n"), 0o644); err != nil {
+		t.Fatalf("writing .zshrc: %v", err)
+	}
+
+	h.cli.Run([]string{"doctor"})
+
+	if _, err := h.store.Get("orphan"); err != nil {
+		t.Errorf("doctor removed a secret: %v", err)
+	}
+	// And it offers the command rather than doing it.
+	if !strings.Contains(h.out(), "orphan") {
+		t.Errorf("stdout does not mention the unreferenced secret:\n%s", h.out())
+	}
+}
+
+// Extra paths add to the defaults. Replacing them would narrow coverage and make
+// every unreferenced verdict less trustworthy.
+func TestDoctorExtraPathsAddToDefaults(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"from-rc": "v", "from-extra": "v"}, nil)
+	dir := homed(t, h)
+	if err := os.WriteFile(filepath.Join(dir, ".zshrc"), []byte("export A='cap://from-rc'\n"), 0o644); err != nil {
+		t.Fatalf("writing .zshrc: %v", err)
+	}
+	extra := filepath.Join(dir, "compose.yml")
+	if err := os.WriteFile(extra, []byte("environment:\n  - T=cap://from-extra\n"), 0o644); err != nil {
+		t.Fatalf("writing the extra file: %v", err)
+	}
+
+	if code := h.cli.Run([]string{"doctor", extra}); code != 0 {
+		t.Fatalf("exit code = %d. stdout: %s", code, h.out())
+	}
+	if !strings.Contains(h.out(), "2 secret(s) stored and referenced") {
+		t.Errorf("both files were not counted:\n%s", h.out())
+	}
+}
+
+func TestDoctorReportsVaultFailure(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	homed(t, h)
+	h.cli.Store = brokenStore{}
+
+	if code := h.cli.Run([]string{"doctor"}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(h.err(), "keychain unavailable") {
+		t.Errorf("stderr = %q, want the underlying cause", h.err())
+	}
+}
+
 func equal(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

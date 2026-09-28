@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/nwokolo24/keyward/internal/doctor"
 	"github.com/nwokolo24/keyward/internal/handle"
 	"github.com/nwokolo24/keyward/internal/migrate"
 	"github.com/nwokolo24/keyward/internal/resolve"
@@ -54,6 +55,12 @@ type CLI struct {
 	// Exec replaces the current process, normally syscall.Exec. Injected because
 	// the real thing cannot return, and therefore cannot be tested.
 	Exec func(path string, argv []string, env []string) error
+
+	// Home and Workdir locate the files doctor reads by default. Fields rather than
+	// calls to os.UserHomeDir and os.Getwd so a test can point them at a temp
+	// directory instead of the developer's own configuration.
+	Home    string
+	Workdir string
 }
 
 const usage = `usage: keyward <command> [arguments]
@@ -68,6 +75,7 @@ commands:
   run [--] <cmd>...     resolve cap:// references and run a command
   migrate <file>        move a file's secrets into the Keychain (asks first)
   migrate --dry-run <f> describe what would move, and stop
+  doctor [file...]      check references against what is stored
   version               print the version
   help                  print this message
 
@@ -102,6 +110,8 @@ func (c *CLI) Run(args []string) int {
 		return c.run(args[1:])
 	case "migrate":
 		return c.migrate(args[1:])
+	case "doctor":
+		return c.doctor(args[1:])
 	default:
 		fmt.Fprintf(c.Stderr, "keyward: unknown command %q\n\n%s", args[0], usage)
 		return exitUsage
@@ -329,6 +339,31 @@ func (c *CLI) confirm(count int, path string) (bool, error) {
 		return false, fmt.Errorf("reading the answer: %w", err)
 	}
 	return strings.TrimSpace(line) == confirmWord, nil
+}
+
+// doctor reports on the health of the setup: references with nothing behind them,
+// and stored secrets nothing refers to.
+//
+// It never deletes. Removal stays a deliberate `keyward rm`, because doctor cannot
+// prove a secret is unused — only that it did not find a reference in the files it
+// read. The report prints the commands instead, which is one keystroke more than a
+// flag and removes a whole category of accident.
+func (c *CLI) doctor(args []string) int {
+	paths := doctor.DefaultPaths(c.Home, c.Workdir)
+	// Extra paths add to the defaults rather than replacing them: wider coverage
+	// makes every "unreferenced" verdict more trustworthy.
+	paths = append(paths, args...)
+
+	report, err := doctor.Run(c.Store, paths)
+	if err != nil {
+		return c.fail("keyward doctor: %v", err)
+	}
+
+	fmt.Fprint(c.Stdout, report.String())
+	if report.HasProblems() {
+		return exitFailure
+	}
+	return exitOK
 }
 
 // failResolve renders resolution failures with a suggested fix.
