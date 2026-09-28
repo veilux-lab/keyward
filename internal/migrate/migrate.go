@@ -76,9 +76,18 @@ func NewPlan(path string, content []byte) (*Plan, error) {
 			continue
 		}
 
+		// A name that cannot be represented as a reference is skipped rather than
+		// fatal. It cannot collide with anything, so leaving that one line in
+		// plaintext — the status quo — is better than refusing the whole file. One
+		// variable called oauth_client_id_ blocked a real ~/.zshrc entirely before
+		// this was a skip.
 		ref, err := RefName(a.Name)
 		if err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", path, a.Line, err)
+			p.Skips = append(p.Skips, Skip{
+				Assignment: a,
+				Reason:     "looks like a secret, but the name cannot become a reference; rename it to migrate it",
+			})
+			continue
 		}
 		if other, taken := refs[ref]; taken {
 			return nil, fmt.Errorf("%s:%d: %s and %s both map to the reference %q; rename one before migrating",

@@ -673,16 +673,44 @@ func TestMigrateMissingFile(t *testing.T) {
 	}
 }
 
-// A plan that cannot be built safely must fail before anything is written.
+// A collision is the one planning failure that must stop everything: two
+// variables mapping to one vault entry would make one of them silently resolve to
+// the other's value.
 func TestMigrateReportsPlanningFailure(t *testing.T) {
-	path := writeFixture(t, "export _TOKEN=ghp_exampleValue0123456789\n")
+	path := writeFixture(t,
+		"export MY_TOKEN=ghp_firstValue0123456789\nMY_TOKEN=ghp_secondValue0123456789\n")
 	h := newHarness(t, "", nil, nil)
 
 	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
-	if !strings.Contains(h.err(), "_TOKEN") {
-		t.Errorf("stderr = %q, want it to name the problem variable", h.err())
+	if !strings.Contains(h.err(), "my-token") {
+		t.Errorf("stderr = %q, want it to name the colliding reference", h.err())
+	}
+	if names, _ := h.store.List(); len(names) != 0 {
+		t.Errorf("stored %v despite refusing the plan", names)
+	}
+}
+
+// An unrepresentable name is skipped, so a file containing one still migrates the
+// rest rather than failing outright.
+func TestMigrateSkipsUnusableNameAndContinues(t *testing.T) {
+	path := writeFixture(t,
+		"export oauth_client_id_=AbCdEfGhIjKlMnOpQrStUv\nexport GITHUB_TOKEN=ghp_fine0123456789abcd\n")
+	h := newHarness(t, "", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", "-apply", path}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	if _, err := h.store.Get("github-token"); err != nil {
+		t.Errorf("the usable secret was not stored: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "export oauth_client_id_=AbCdEfGhIjKlMnOpQrStUv") {
+		t.Error("the unusable line was modified")
+	}
+	if !strings.Contains(h.out(), "rename") {
+		t.Errorf("stdout does not explain the skip:\n%s", h.out())
 	}
 }
 

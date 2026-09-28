@@ -99,15 +99,41 @@ func TestNewPlanRejectsCollidingRefNames(t *testing.T) {
 	}
 }
 
-// A variable name that cannot become a valid reference is reported rather than
-// adjusted, since adjusting it could make it collide with another.
-func TestNewPlanRejectsUnusableName(t *testing.T) {
-	_, err := migrate.NewPlan("/tmp/.zshrc", []byte("export _TOKEN=ghp_exampleValue01234567\n"))
-	if err == nil {
-		t.Fatal("NewPlan accepted a name that cannot become a reference")
+// A variable name that cannot become a valid reference is skipped, not fatal.
+//
+// Found by running against a real ~/.zshrc: one variable called oauth_client_id_
+// blocked the entire file. A name that cannot be represented cannot collide with
+// anything either, so leaving that one line in plaintext — the status quo — and
+// migrating the rest is strictly better than migrating nothing.
+func TestNewPlanSkipsUnusableNames(t *testing.T) {
+	content := "export _TOKEN=ghp_unusableName0123456789\n" +
+		"export oauth_client_id_=AbCdEfGhIjKlMnOpQrStUv\n" +
+		"export GITHUB_TOKEN=ghp_perfectlyFine0123456789\n"
+
+	p, err := migrate.NewPlan("/tmp/.zshrc", []byte(content))
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
 	}
-	if !strings.Contains(err.Error(), "_TOKEN") {
-		t.Errorf("error = %v, want it to name the variable", err)
+
+	if len(p.Changes) != 1 || p.Changes[0].Name != "GITHUB_TOKEN" {
+		t.Errorf("Changes = %+v, want only GITHUB_TOKEN", p.Changes)
+	}
+
+	skipped := map[string]string{}
+	for _, s := range p.Skips {
+		skipped[s.Name] = s.Reason
+	}
+	for _, name := range []string{"_TOKEN", "oauth_client_id_"} {
+		reason, ok := skipped[name]
+		if !ok {
+			t.Errorf("%s was neither changed nor skipped", name)
+			continue
+		}
+		// The reason has to be actionable: the user can rename the variable if
+		// they want it migrated.
+		if !strings.Contains(reason, "rename") {
+			t.Errorf("skip reason for %s = %q, want it to suggest renaming", name, reason)
+		}
 	}
 }
 
