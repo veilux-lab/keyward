@@ -40,9 +40,10 @@ machine are usually overselling.
 
 ```sh
 # move the secrets in a shell rc file into the Keychain.
-# describes the changes and changes nothing without -apply.
+# a dry run is the default: this describes the changes and makes none.
 keyward migrate ~/.zshrc
-keyward migrate -apply ~/.zshrc
+keyward migrate --dry-run ~/.zshrc   # the same thing, said explicitly
+keyward migrate -apply ~/.zshrc      # actually make the changes
 
 # store one by hand — piped, so it never appears in argv or shell history
 pbpaste | keyward add splunk-mcp-token
@@ -93,7 +94,8 @@ Next:
 ### On migrate
 
 Dry run by default: it prints what it would change and changes nothing until
-`-apply`. The diff never shows a value, only its length — printing the old line
+`-apply`. `--dry-run` says the same thing explicitly, and combining it with
+`-apply` is an error rather than a guess. The diff never shows a value, only its length — printing the old line
 verbatim would spill every secret in the file into your scrollback, and into the
 context of any agent that ran the command.
 

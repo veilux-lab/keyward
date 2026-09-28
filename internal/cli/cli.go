@@ -61,15 +61,16 @@ commands:
   ls                    list stored secret names
   rm <name>             remove a secret
   run [--] <cmd>...     resolve cap:// references and run a command
-  migrate [-apply] <f>  move the secrets in a file into the Keychain
+  migrate <file>        describe moving a file's secrets into the Keychain
+  migrate -apply <file> actually move them
   version               print the version
   help                  print this message
 
 examples:
   pbpaste | keyward add splunk-mcp-token
   keyward run -- npm test
-  keyward migrate ~/.zshrc          # describe the changes, change nothing
-  keyward migrate -apply ~/.zshrc   # make them
+  keyward migrate ~/.zshrc          # dry run: describes, changes nothing
+  keyward migrate -apply ~/.zshrc   # make the changes
 `
 
 // Run dispatches a command and returns a process exit code.
@@ -227,11 +228,21 @@ func (c *CLI) migrate(args []string) int {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(c.Stderr)
 	apply := fs.Bool("apply", false, "make the changes, rather than only describing them")
+	// Redundant with the default, and worth having: -dry-run is a strong enough
+	// convention that its absence leaves people unsure whether the bare command is
+	// safe to run.
+	dryRun := fs.Bool("dry-run", false, "describe the changes without making them (the default)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
+	if *dryRun && *apply {
+		// Guessing which was meant is how a script intended to preview ends up
+		// rewriting a shell config.
+		fmt.Fprint(c.Stderr, "keyward migrate: -dry-run and -apply contradict each other; pass one or neither\n")
+		return exitUsage
+	}
 	if fs.NArg() != 1 {
-		fmt.Fprint(c.Stderr, "usage: keyward migrate [-apply] <file>\n")
+		fmt.Fprint(c.Stderr, "usage: keyward migrate [-apply | -dry-run] <file>\n")
 		return exitUsage
 	}
 

@@ -611,6 +611,64 @@ func TestMigrateIsDryRunByDefault(t *testing.T) {
 	}
 }
 
+// -dry-run is redundant with the default, and exists anyway: it is a strong
+// enough convention that its absence makes people unsure whether the bare command
+// is safe to run.
+func TestMigrateDryRunFlagMatchesTheDefault(t *testing.T) {
+	bare := writeFixture(t, rcFixture)
+	explicit := writeFixture(t, rcFixture)
+
+	h1 := newHarness(t, "", nil, nil)
+	h2 := newHarness(t, "", nil, nil)
+
+	if code := h1.cli.Run([]string{"migrate", bare}); code != 0 {
+		t.Fatalf("bare exit code = %d. stderr: %s", code, h1.err())
+	}
+	if code := h2.cli.Run([]string{"migrate", "--dry-run", explicit}); code != 0 {
+		t.Fatalf("--dry-run exit code = %d. stderr: %s", code, h2.err())
+	}
+
+	// Only the path differs between the two outputs.
+	norm := func(s, path string) string { return strings.ReplaceAll(s, path, "<file>") }
+	if norm(h1.out(), bare) != norm(h2.out(), explicit) {
+		t.Errorf("--dry-run differs from the default:\n%s\n---\n%s", h1.out(), h2.out())
+	}
+	for _, p := range []string{bare, explicit} {
+		if got, _ := os.ReadFile(p); string(got) != rcFixture {
+			t.Errorf("%s was modified", p)
+		}
+	}
+}
+
+// Asking for both is a contradiction. Guessing which one was meant is how a
+// script intended to preview ends up rewriting a shell config.
+func TestMigrateRejectsDryRunWithApply(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "", nil, nil)
+
+	if code := h.cli.Run([]string{"migrate", "--dry-run", "-apply", path}); code != 2 {
+		t.Errorf("exit code = %d, want 2 for contradictory flags", code)
+	}
+	if got, _ := os.ReadFile(path); string(got) != rcFixture {
+		t.Error("the file was modified despite contradictory flags")
+	}
+	if names, _ := h.store.List(); len(names) != 0 {
+		t.Errorf("stored %v despite contradictory flags", names)
+	}
+}
+
+// Someone reading help should be able to tell the command is safe without running
+// it first.
+func TestHelpSaysMigrateIsSafeByDefault(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Run([]string{"help"})
+
+	out := strings.ToLower(h.out())
+	if !strings.Contains(out, "describes") && !strings.Contains(out, "dry run") {
+		t.Errorf("help does not say migrate changes nothing without -apply:\n%s", h.out())
+	}
+}
+
 // The diff reaches a terminal and may be produced by an agent. It must not carry
 // the values it is describing.
 func TestMigrateDryRunPrintsNoSecrets(t *testing.T) {
