@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>keyward — architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;900&family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap">
+<style>
+/* ============================================================
+   keyward — architecture walkthrough
+
+   DESIGN SYSTEM: "Declassified"
+   Manila filing stock, typewriter body copy, heavy condensed
+   display, one stamp red. The redaction bar is the signature
+   device because it is literally what the tool does: a value is
+   covered over and replaced by a reference.
+
+   To retheme: change the :root variables below. To change type,
+   swap the two Google Font families in the <link> above and the
+   --font-* variables.
+   ============================================================ */
+
+:root{
+  /* --- Palette: aged manila stock --- */
+  --manila:#ddd2b6;
+  --manila-dark:#c9bc9c;
+  --manila-deep:#bfb094;
+  --fiber:#b9a982;
+  --ink:#1b1814;
+  --ink-soft:#3a342b;
+  --ink-faint:#5e5344;
+  --stamp:#b2262c;
+  --bar:#14110e;
+  --stage-bg:#6d6353;
+  --slide-bg:#ddd2b6;
+
+  /* --- Typography, authored at the 1920x1080 stage size --- */
+  --font-display:'Big Shoulders Display',sans-serif;
+  --font-body:'Courier Prime',monospace;
+  --cover-size:300px;
+  --h2-size:104px;
+  --h2-size-tight:80px;
+  --body-size:30px;
+  --label-size:20px;
+
+  /* --- Rhythm --- */
+  --margin-left:170px;   /* clears the punch holes */
+  --margin-right:104px;
+  --ease:cubic-bezier(.16,1,.3,1);
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+
+/* ============================================================
+   FIXED 16:9 STAGE — full contents of viewport-base.css.
+   Slides are authored at 1920x1080 and the whole stage is
+   scaled by one transform. Never reflow slide content.
+   ============================================================ */
+
+/* 1. Lock the browser viewport */
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:var(--stage-bg,#000)}
+
+/* 2. Full-window deck viewport */
+.deck-viewport{position:fixed;inset:0;overflow:hidden;background:var(--stage-bg,#000)}
+
+/* 3. Fixed 16:9 design canvas. JS sets transform: translate(...) scale(...) */
+.deck-stage{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;transform-origin:0 0;background:var(--slide-bg,#fff)}
+
+/* 4. Slides stack inside the fixed stage */
+.slide{position:absolute;inset:0;width:1920px;height:1080px;overflow:hidden;display:block;visibility:hidden;opacity:0;pointer-events:none;background:var(--slide-bg,#fff)}
+.slide.active,.slide.visible{visibility:visible;opacity:1;pointer-events:auto;z-index:1}
+
+/* 5. Keep media inside authored slide bounds */
+img,video,canvas,svg{max-width:100%;max-height:100%}
+
+/* 6. Presentation chrome stays outside the slide design system */
+.deck-controls{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:1000}
+
+/* 7. Print one fixed-size slide per page */
+@media print{
+  html,body{width:1920px;height:auto;overflow:visible;background:#fff}
+  .deck-viewport{position:static;overflow:visible;background:#fff}
+  .deck-stage{position:static;width:auto;height:auto;transform:none!important;background:none}
+  .slide{position:relative;display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;width:1920px;height:1080px;break-after:page;page-break-after:always}
+  .slide:last-child{break-after:auto;page-break-after:auto}
+  .deck-controls{display:none!important}
+}
+
+/* 8. Reduced motion */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.2s!important}
+}
+
+/* ============================================================
+   PAPER: fibre flecks and uneven ageing, all CSS.
+   Gives the stock depth so it does not read as flat beige.
+   ============================================================ */
+.slide::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:
+    radial-gradient(circle at 12% 22%,rgba(140,120,80,.16) 0 2px,transparent 3px),
+    radial-gradient(circle at 63% 8%,rgba(140,120,80,.13) 0 2px,transparent 3px),
+    radial-gradient(circle at 87% 71%,rgba(140,120,80,.15) 0 2px,transparent 3px),
+    radial-gradient(circle at 31% 88%,rgba(140,120,80,.12) 0 2px,transparent 3px),
+    radial-gradient(circle at 74% 44%,rgba(140,120,80,.10) 0 2px,transparent 3px),
+    radial-gradient(circle at 46% 63%,rgba(140,120,80,.11) 0 2px,transparent 3px),
+    radial-gradient(900px 620px at 92% 6%,rgba(120,100,62,.20),transparent 70%),
+    radial-gradient(760px 540px at 4% 96%,rgba(120,100,62,.16),transparent 72%);
+}
+
+/* Punch holes down the left margin — the filed-document cue */
+.holes{position:absolute;left:58px;top:0;bottom:0;width:34px;pointer-events:none;display:flex;flex-direction:column;justify-content:center;gap:188px;z-index:3}
+.holes span{width:34px;height:34px;border-radius:50%;background:var(--stage-bg);box-shadow:inset 0 3px 5px rgba(0,0,0,.5)}
+
+/* ============================================================
+   CHROME: file header and folio. Real deck furniture only.
+   ============================================================ */
+.filehead{
+  position:absolute;left:var(--margin-left);right:var(--margin-right);top:70px;
+  display:flex;justify-content:space-between;align-items:flex-end;
+  font-family:var(--font-body);font-size:var(--label-size);letter-spacing:.2em;
+  text-transform:uppercase;color:var(--ink-faint);
+  border-bottom:3px double var(--ink);padding-bottom:18px;z-index:2
+}
+.folio{
+  position:absolute;right:var(--margin-right);bottom:44px;
+  font-family:var(--font-body);font-size:18px;letter-spacing:.2em;color:var(--ink-faint);z-index:2
+}
+
+/* Rotated rubber stamp */
+.stamp{
+  position:absolute;font-family:var(--font-display);font-weight:900;
+  letter-spacing:.14em;color:var(--stamp);border:6px solid var(--stamp);
+  padding:16px 30px;transform:rotate(-8deg);opacity:.86;line-height:1;z-index:4
+}
+.stamp.tr{right:120px;top:190px;font-size:40px}
+.stamp.caution{right:150px;bottom:150px;font-size:34px;transform:rotate(6deg)}
+/* Margin position: for slides whose lower half is full, the stamp sits
+   beside the title instead, where headings do not reach. */
+.stamp.margin{right:150px;top:206px;font-size:34px;transform:rotate(7deg) scale(1.4)}
+
+/* ============================================================
+   TYPE
+   ============================================================ */
+.slide-content{position:absolute;left:var(--margin-left);right:var(--margin-right);top:196px;bottom:104px}
+.slide-content.tight{top:176px}
+
+h1.cover{font-family:var(--font-display);font-weight:900;font-size:var(--cover-size);line-height:.78;letter-spacing:.008em;text-transform:uppercase;color:var(--ink)}
+h2{font-family:var(--font-display);font-weight:900;font-size:var(--h2-size);line-height:.88;letter-spacing:.01em;text-transform:uppercase;color:var(--ink);margin-bottom:40px}
+h2.tight{font-size:var(--h2-size-tight);margin-bottom:34px}
+h2 .accent{color:var(--stamp)}
+
+.subtitle{font-family:var(--font-body);font-size:34px;line-height:1.5;color:var(--ink-soft);max-width:1180px;margin-top:40px}
+.subtitle i{background:rgba(178,38,44,.15);font-style:italic;padding:0 6px}
+.lede{font-family:var(--font-body);font-size:var(--body-size);line-height:1.56;color:var(--ink-soft);max-width:1440px;margin-bottom:38px}
+.lede strong{font-weight:700;color:var(--ink)}
+.kicker{font-family:var(--font-body);font-size:var(--label-size);letter-spacing:.3em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:28px}
+
+/* ============================================================
+   THE REDACTION DEVICE — a covered value beside its reference
+   ============================================================ */
+.record{font-family:var(--font-body);font-size:var(--body-size);color:var(--ink)}
+.record .row{display:flex;align-items:center;gap:26px;margin-bottom:22px}
+.record .key{min-width:420px;letter-spacing:.06em}
+.redacted{position:relative;display:inline-block;padding:4px 14px;color:transparent;user-select:none}
+.redacted::after{content:"";position:absolute;inset:0;background:var(--bar);transform-origin:left}
+.ref{display:inline-block;padding:4px 14px;font-weight:700;color:var(--stamp);border-bottom:3px solid var(--stamp)}
+
+/* ============================================================
+   SECTION DIVIDER — oversized numeral, filed-tab feel
+   ============================================================ */
+.sect{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding-left:var(--margin-left);padding-right:var(--margin-right)}
+.sect .num{font-family:var(--font-display);font-weight:900;font-size:440px;line-height:.78;color:var(--manila-deep);letter-spacing:.01em}
+.sect h2{font-size:140px;margin:0}
+.sect .note{font-family:var(--font-body);font-size:32px;color:var(--ink-faint);margin-top:34px;max-width:1100px;line-height:1.5}
+
+/* ============================================================
+   FILING CARDS — the workhorse layout
+   ============================================================ */
+.cards{display:grid;gap:26px}
+.cards.two{grid-template-columns:1fr 1fr}
+.cards.three{grid-template-columns:repeat(3,1fr)}
+.card{background:var(--manila-dark);border:3px solid var(--ink);padding:32px 34px;position:relative}
+.card .tab{font-family:var(--font-body);font-size:17px;letter-spacing:.22em;text-transform:uppercase;color:var(--manila-dark);background:var(--ink);display:inline-block;padding:5px 14px;margin-bottom:20px}
+.card h3{font-family:var(--font-display);font-weight:700;font-size:44px;line-height:1;text-transform:uppercase;color:var(--ink);margin-bottom:18px;letter-spacing:.01em}
+.card p{font-family:var(--font-body);font-size:25px;line-height:1.5;color:var(--ink-soft)}
+.card p+p{margin-top:14px}
+.card.flag{border-color:var(--stamp)}
+.card.flag .tab{background:var(--stamp);color:var(--manila)}
+
+/* ============================================================
+   LEDGER — a ruled index table
+   ============================================================ */
+.ledger{width:100%;border-collapse:collapse;font-family:var(--font-body);font-size:26px;color:var(--ink-soft)}
+.ledger th{text-align:left;font-weight:700;font-size:19px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink);border-bottom:3px solid var(--ink);padding:0 20px 14px 0}
+.ledger td{padding:17px 20px 17px 0;border-bottom:1px solid var(--fiber);vertical-align:top}
+.ledger tr:last-child td{border-bottom:none}
+.ledger .mono-k{font-weight:700;color:var(--ink);white-space:nowrap}
+.pill{display:inline-block;font-size:18px;letter-spacing:.16em;text-transform:uppercase;padding:5px 13px;border:2px solid var(--ink);white-space:nowrap}
+.pill.done{background:var(--ink);color:var(--manila)}
+.pill.open{background:transparent;color:var(--ink-faint);border-color:var(--fiber)}
+.pill.risk{background:var(--stamp);color:var(--manila);border-color:var(--stamp)}
+
+/* ============================================================
+   PIPELINE DIAGRAM — vertical spine of stamped boxes
+   ============================================================ */
+.pipe{display:flex;flex-direction:column;align-items:stretch;gap:0}
+.pipe-row{display:flex;gap:22px;align-items:stretch}
+.box{flex:1;background:var(--manila-dark);border:3px solid var(--ink);padding:22px 26px}
+.box .nm{font-family:var(--font-body);font-weight:700;font-size:27px;color:var(--ink);letter-spacing:.02em}
+.box .ds{font-family:var(--font-body);font-size:22px;color:var(--ink-faint);line-height:1.4;margin-top:7px}
+.box.side{flex:0 0 430px;background:transparent;border-style:dashed;border-color:var(--fiber)}
+.box.hot{border-color:var(--stamp)}
+.box.hot .nm{color:var(--stamp)}
+/* Down-arrow connector between rows */
+.arrow{height:44px;display:flex;align-items:center;justify-content:center;font-family:var(--font-body);font-size:30px;color:var(--ink);line-height:1}
+.arrow.dash{color:var(--fiber)}
+
+/* ============================================================
+   LADDER — numbered steps of increasing exposure
+   ============================================================ */
+.ladder{display:flex;flex-direction:column;gap:20px}
+.rung{display:flex;align-items:flex-start;gap:28px;background:var(--manila-dark);border-left:10px solid var(--ink);padding:24px 30px}
+.rung .n{font-family:var(--font-display);font-weight:900;font-size:62px;line-height:.8;color:var(--ink);min-width:62px}
+.rung .t{font-family:var(--font-body);font-weight:700;font-size:28px;color:var(--ink);margin-bottom:8px}
+.rung .d{font-family:var(--font-body);font-size:24px;color:var(--ink-soft);line-height:1.45}
+.rung.r2{border-left-color:#7a5a30}
+.rung.r3{border-left-color:var(--stamp)}
+
+/* ============================================================
+   CAUTION BLOCK — for the things that are actually wrong
+   ============================================================ */
+.caution{border:4px solid var(--stamp);background:rgba(178,38,44,.08);padding:34px 38px}
+.caution .hd{font-family:var(--font-display);font-weight:900;font-size:36px;letter-spacing:.12em;text-transform:uppercase;color:var(--stamp);margin-bottom:18px}
+.caution p{font-family:var(--font-body);font-size:27px;line-height:1.5;color:var(--ink-soft)}
+.caution p+p{margin-top:15px}
+.caution code{font-weight:700;color:var(--ink);background:rgba(27,24,20,.09);padding:2px 7px}
+
+/* ============================================================
+   STATEMENT — a single claim, centred
+   ============================================================ */
+.statement{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:0 240px 0 var(--margin-left)}
+.statement q{font-family:var(--font-display);font-weight:700;font-size:118px;line-height:1.02;text-transform:uppercase;color:var(--ink);quotes:none;letter-spacing:.008em}
+.statement .src{font-family:var(--font-body);font-size:26px;color:var(--ink-faint);margin-top:44px;letter-spacing:.14em;text-transform:uppercase}
+.statement .rule{width:180px;height:7px;background:var(--stamp);margin-bottom:48px}
+
+/* ============================================================
+   ANIMATION — one orchestrated load per slide, staggered
+   ============================================================ */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .66s var(--ease),transform .66s var(--ease)}
+.slide.visible .reveal{opacity:1;transform:none}
+.slide.visible .reveal:nth-child(1){transition-delay:.06s}
+.slide.visible .reveal:nth-child(2){transition-delay:.15s}
+.slide.visible .reveal:nth-child(3){transition-delay:.24s}
+.slide.visible .reveal:nth-child(4){transition-delay:.33s}
+.slide.visible .reveal:nth-child(5){transition-delay:.42s}
+.slide.visible .reveal:nth-child(6){transition-delay:.51s}
+.slide.visible .reveal:nth-child(7){transition-delay:.6s}
+
+/* Cover: the bar wipes over the token, then the reference types in */
+.redacted::after{transform:scaleX(0);transition:transform .5s var(--ease) .7s}
+.slide.visible .redacted::after{transform:scaleX(1)}
+#cover .record .row{opacity:0;transition:opacity .5s ease}
+#cover.visible .record .row:nth-child(1){opacity:1;transition-delay:.62s}
+#cover.visible .record .row:nth-child(2){opacity:1;transition-delay:1.15s}
+#cover .ref{clip-path:inset(0 100% 0 0);transition:clip-path .7s steps(22,end) 1.3s}
+#cover.visible .ref{clip-path:inset(0 0 0 0)}
+.stamp{opacity:0;transform:rotate(-8deg) scale(1.5)}
+.slide.visible .stamp.tr{opacity:.86;transform:rotate(-8deg) scale(1);transition:opacity .34s ease 1.9s,transform .34s cubic-bezier(.34,1.56,.64,1) 1.9s}
+.slide.visible .stamp.caution{opacity:.86;transform:rotate(6deg) scale(1);transition:opacity .34s ease .9s,transform .34s cubic-bezier(.34,1.56,.64,1) .9s}
+.slide.visible .stamp.margin{opacity:.86;transform:rotate(7deg) scale(1);transition:opacity .34s ease .9s,transform .34s cubic-bezier(.34,1.56,.64,1) .9s}
+
+/* Section dividers: numeral slides up behind the title */
+.sect .num{opacity:0;transform:translateY(40px);transition:opacity .8s var(--ease),transform .8s var(--ease)}
+.slide.visible .sect .num{opacity:1;transform:none}
+
+/* Staggered children inside grids and stacks */
+.stagger>*{opacity:0;transform:translateY(22px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
+.slide.visible .stagger>*{opacity:1;transform:none}
+.slide.visible .stagger>*:nth-child(1){transition-delay:.2s}
+.slide.visible .stagger>*:nth-child(2){transition-delay:.29s}
+.slide.visible .stagger>*:nth-child(3){transition-delay:.38s}
+.slide.visible .stagger>*:nth-child(4){transition-delay:.47s}
+.slide.visible .stagger>*:nth-child(5){transition-delay:.56s}
+.slide.visible .stagger>*:nth-child(6){transition-delay:.65s}
+.slide.visible .stagger>*:nth-child(7){transition-delay:.74s}
+.slide.visible .stagger>*:nth-child(8){transition-delay:.83s}
+.slide.visible .stagger>*:nth-child(9){transition-delay:.92s}
+.slide.visible .stagger>*:nth-child(10){transition-delay:1.01s}
+.slide.visible .stagger>*:nth-child(11){transition-delay:1.1s}
+
+/* ============================================================
+   PROGRESS + EDIT CHROME (outside the slide design system)
+   ============================================================ */
+.progress{position:fixed;left:0;bottom:0;height:5px;background:var(--stamp);z-index:1000;transition:width .4s var(--ease)}
+.edit-hotzone{position:fixed;top:0;left:0;width:80px;height:80px;z-index:10000;cursor:pointer}
+.edit-toggle{
+  position:fixed;top:18px;left:18px;z-index:10001;
+  font-family:var(--font-body);font-size:22px;border:3px solid var(--ink);
+  background:var(--manila);color:var(--ink);padding:8px 14px;cursor:pointer;
+  opacity:0;pointer-events:none;transition:opacity .3s ease
+}
+/* Visibility is driven by JS classes only. Do NOT use a CSS ~ sibling
+   selector here: pointer-events:none breaks the hover chain, so the
+   button vanishes before it can be clicked. */
+.edit-toggle.show,.edit-toggle.active{opacity:1;pointer-events:auto}
+.edit-toggle.active{background:var(--stamp);color:var(--manila);border-color:var(--stamp)}
+[contenteditable="true"]{outline:2px dashed var(--stamp);outline-offset:4px}
+</style>
+</head>
+<body>
+<div class="deck-viewport">
+<main class="deck-stage" id="deckStage">
+
+  <!-- ===== 01 COVER ===== -->
+  <section class="slide active visible" id="cover">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>File&nbsp;&nbsp;/&nbsp;&nbsp;Local secrets broker&nbsp;&nbsp;/&nbsp;&nbsp;macOS</span><span>nwokolo24 &middot; 2026</span></div>
+    <div class="stamp tr">On&nbsp;file</div>
+    <div class="slide-content tight">
+      <h1 class="cover reveal">Keyward</h1>
+      <p class="subtitle reveal">Your agent reads <i>~/.zshrc</i> for perfectly ordinary reasons, and every token you exported leaves with it. So take the values off the disk.</p>
+      <div class="record" style="margin-top:64px">
+        <div class="row"><span class="key">SPLUNK_MCP_TOKEN&nbsp;=</span><span class="redacted">eyJraWQiOiJzcGx1bmsi</span></div>
+        <div class="row"><span class="key">SPLUNK_MCP_TOKEN&nbsp;=</span><span class="ref">cap://splunk-mcp-token</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 02 THE PROBLEM ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>The problem</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="reveal">Nobody made<br>a mistake</h2>
+      <p class="lede reveal">An agent opens your shell configuration to check <strong>PATH</strong>, or to work out why a variable is unset, or to read an alias. All reasonable. In doing so it pulls every exported token into its context window, and from there into a transcript that may be stored, replayed, or summarised somewhere you are not looking.</p>
+      <div class="cards two stagger">
+        <div class="card"><span class="tab">What is assumed</span><h3>A hostile agent</h3><p>Defended against with sandboxes, permission prompts, and audit trails. Rare in practice.</p></div>
+        <div class="card flag"><span class="tab">What happens</span><h3>A helpful agent</h3><p>Reads a readable file for a good reason. Happens constantly, leaks the same credentials, and no control is watching.</p></div>
+      </div>
+    </div>
+    <div class="folio">02</div>
+  </section>
+
+  <!-- ===== 03 THE INVARIANT ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>The claim</span><span>keyward</span></div>
+    <div class="statement">
+      <div class="rule reveal"></div>
+      <q class="reveal">A secret value is never present in plaintext on disk, and never enters an agent's context.</q>
+      <p class="src reveal">The invariant &mdash; and the whole of it</p>
+    </div>
+    <div class="folio">03</div>
+  </section>
+
+  <!-- ===== 04 NON-GOALS ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Scope</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">What this is <span class="accent">not</span></h2>
+      <p class="lede reveal">Stated first, because a security tool that overstates its reach is worse than one that does less and says so.</p>
+      <table class="ledger stagger">
+        <tr><td class="mono-k">Not an agent firewall</td><td>Network egress control is solved and crowded. Complementary, not competitive.</td></tr>
+        <tr><td class="mono-k">Not enforcement</td><td>No sandbox, no wrapper, no interception of file reads.</td></tr>
+        <tr><td class="mono-k">Not proof against intent</td><td>An agent that can run commands can run a resolver. The accidental case closes; the deliberate one does not.</td></tr>
+        <tr><td class="mono-k">Not cross-platform</td><td>macOS only, so the Keychain replaces hand-rolled cryptography.</td></tr>
+        <tr><td class="mono-k">Not a team product</td><td>One machine, one person. Usefulness to others is a later question.</td></tr>
+      </table>
+    </div>
+    <div class="folio">04</div>
+  </section>
+
+  <!-- ===== 05 SECTION: ARCHITECTURE ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Section</span><span>keyward</span></div>
+    <div class="sect">
+      <div class="num">01</div>
+      <h2>Architecture</h2>
+      <p class="note reveal">Two layers, only one of which needs the agent's cooperation.</p>
+    </div>
+    <div class="folio">05</div>
+  </section>
+
+  <!-- ===== 06 TWO LAYERS ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Architecture / layers</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">Separate the<br>two concerns</h2>
+      <div class="cards two stagger" style="margin-top:8px">
+        <div class="card"><span class="tab">Layer one</span><h3>Migration</h3><p><strong>Provides security.</strong> Values move to the Keychain; files hold references.</p><p>Needs no cooperation. Holds whether the agent behaves or not, because there is nothing on disk to find.</p></div>
+        <div class="card"><span class="tab">Layer two</span><h3>Cooperation</h3><p><strong>Provides productivity.</strong> MCP tools, generated instructions, errors that name the next action.</p><p>Needs cooperation. Decides only whether the agent works smoothly or wastes turns hunting.</p></div>
+      </div>
+      <p class="lede reveal" style="margin-top:34px;margin-bottom:0">Keeping these apart is the central idea. Conflating them is how a tool ends up requiring a wrapper around every agent &mdash; and then going uninstalled.</p>
+    </div>
+    <div class="folio">06</div>
+  </section>
+
+  <!-- ===== 07 REFERENCE FORMAT ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Architecture / format</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">cap://&lt;name&gt;</h2>
+      <p class="lede reveal">Chosen to survive every parser that will see it &mdash; dotenv, JSON, YAML, TOML, shell single-quoting. No <strong>$</strong>, no braces, nothing a shell will expand.</p>
+      <table class="ledger stagger">
+        <tr><th style="width:400px">Rule</th><th>Reason</th></tr>
+        <tr><td class="mono-k">Prefix is case-sensitive</td><td>Detection stays unambiguous and needs no allocation.</td></tr>
+        <tr><td class="mono-k">Names lowercased on parse</td><td>Prevents two Keychain items differing only by case.</td></tr>
+        <tr><td class="mono-k">a&ndash;z, 0&ndash;9, and - _ .</td><td>Safe in every config format that will carry it.</td></tr>
+        <tr><td class="mono-k">Begins and ends alphanumeric</td><td>No ambiguity at token boundaries.</td></tr>
+        <tr><td class="mono-k">Slashes rejected</td><td>Leaves namespacing open without committing to a scheme.</td></tr>
+      </table>
+    </div>
+    <div class="folio">07</div>
+  </section>
+
+  <!-- ===== 08 PARSER DECISIONS ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Architecture / internal/handle</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">Two decisions<br>inside the parser</h2>
+      <div class="cards two stagger">
+        <div class="card"><span class="tab">Decision</span><h3>IsRef is weaker than Parse</h3><p><strong>IsRef</strong> asks whether a string claims to be a reference. <strong>Parse</strong> decides whether it is a valid one.</p><p>So <strong>cap://bad name</strong> is recognised as a broken reference and fails loudly, rather than being handed to a program as though it were the secret.</p></div>
+        <div class="card flag"><span class="tab">Decision</span><h3>Errors never quote input</h3><p>Parse runs against strings that turn out to be real credentials, and an error message reaches a log file easily.</p><p>ErrNotHandle therefore carries no context at all. A test asserts a token-shaped input never appears in the error text.</p></div>
+      </div>
+    </div>
+    <div class="folio">08</div>
+  </section>
+
+  <!-- ===== 09 THE PIPELINE ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Architecture / resolution path</span><span>keyward</span></div>
+    <div class="slide-content tight">
+      <h2 class="tight reveal">How it comes together</h2>
+      <div class="pipe stagger">
+        <div class="pipe-row"><div class="box"><div class="nm">~/.zshrc &nbsp;&middot;&nbsp; .env &nbsp;&middot;&nbsp; mcp.json</div><div class="ds">Config on disk. Holds references only &mdash; safe for anything to read.</div></div></div>
+        <div class="arrow">&darr;</div>
+        <div class="pipe-row">
+          <div class="box hot"><div class="nm">internal/handle</div><div class="ds">Recognise and validate each reference</div></div>
+          <div class="box"><div class="nm">internal/resolve</div><div class="ds">Scan the environment, resolve each name</div></div>
+          <div class="box side"><div class="nm">internal/vault</div><div class="ds">Keychain via cgo. The only holder of values.</div></div>
+        </div>
+        <div class="arrow">&darr;</div>
+        <div class="pipe-row"><div class="box"><div class="nm">cmd/keyward run</div><div class="ds">syscall.Exec replaces the process image, so no parent lingers holding secrets</div></div>
+        <div class="box side"><div class="nm">internal/audit</div><div class="ds">Append-only JSONL, one record per resolution</div></div></div>
+        <div class="arrow">&darr;</div>
+        <div class="pipe-row"><div class="box"><div class="nm">child process</div><div class="ds">Real values, in this environment only, for the lifetime of this command</div></div></div>
+      </div>
+    </div>
+    <div class="folio">09</div>
+  </section>
+
+  <!-- ===== 10 THE SETUP TOOLS ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Architecture / migration</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">The tools that<br>write the files</h2>
+      <p class="lede reveal">Migration runs once per file. Everything after that is resolution.</p>
+      <div class="cards two stagger">
+        <div class="card"><span class="tab">internal/migrate</span><h3>Take the values out</h3><p>Detect secrets by entropy and known prefixes &mdash; <strong>ghp_</strong>, <strong>sk-</strong>, <strong>eyJ</strong>, <strong>Bearer</strong>. Store each in the Keychain, rewrite the line to a reference.</p><p>Dry-run by default. Shows a diff. Keeps a backup. This is the adoption-critical component: if it is not trustworthy, nothing downstream gets used.</p></div>
+        <div class="card"><span class="tab">internal/mcpconfig</span><h3>Rewire the servers</h3><p>Rewrite each MCP server to launch through keyward, with references in its env block.</p><p>Also fixes a standing bug: servers currently fail with a connect timeout when the editor launches from Finder, because the variable is empty outside a login shell. Resolving from the Keychain makes launch method irrelevant.</p></div>
+      </div>
+    </div>
+    <div class="folio">10</div>
+  </section>
+
+  <!-- ===== 11 EXPOSURE LADDER ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Architecture / exposure</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">Prefer the first rung<br>that finishes the work</h2>
+      <div class="ladder stagger">
+        <div class="rung"><div class="n">1</div><div><div class="t">keyward run -- &lt;cmd&gt;</div><div class="d">Resolve into the child's environment and exec. Values exist nowhere else.</div></div></div>
+        <div class="rung r2"><div class="n">2</div><div><div class="t">keyward inject -- &lt;cmd&gt;</div><div class="d">Same, plus a temporary file for tools that demand a credential path rather than a variable.</div></div></div>
+        <div class="rung r3"><div class="n">3</div><div><div class="t">keyward shell</div><div class="d">An interactive subshell holding real values. Explicit, time-boxed, and the only path where plaintext reaches your own environment.</div></div></div>
+      </div>
+      <p class="lede reveal" style="margin-top:32px;margin-bottom:0">Rejected: <strong>export TOKEN="$(keyward get TOKEN)"</strong> in the rc file. That puts real values into every shell, which the agent's own shell inherits &mdash; reintroducing the exact leak.</p>
+    </div>
+    <div class="folio">11</div>
+  </section>
+
+  <!-- ===== 12 TRUST MODEL ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Architecture / trust</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">The agent may refer,<br>never resolve</h2>
+      <p class="lede reveal">Requests queue, a human approves, the command runs, and the agent receives the command's <strong>output</strong> &mdash; never the value. Gated, not blocked.</p>
+      <div class="cards two stagger">
+        <div class="card"><span class="tab">Chosen</span><h3>Reference only</h3><p>The guarantee is provable: one enforcement point, no templates to escape. Deletes the SQL validator, the argument constrainer, and the template engine along with the vulnerability class they existed to contain.</p></div>
+        <div class="card"><span class="tab">Rejected</span><h3>Agent-spendable</h3><p>More capable, but safety would rest on every command template being escape-proof forever. For a security tool, an unprovable guarantee is worth little.</p></div>
+      </div>
+      <p class="lede reveal" style="margin-top:30px;margin-bottom:0">The cost is friction. Time-boxed grants, batched approval, and plan-time approval are the mitigations &mdash; in that order of importance.</p>
+    </div>
+    <div class="folio">12</div>
+  </section>
+
+  <!-- ===== 13 STORAGE ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Architecture / storage</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">Keychain, not a<br>custom vault</h2>
+      <p class="lede reveal">The nearest comparable tool writes its own encrypted vault because it supports Linux. Being macOS-only is the advantage here, not the limitation.</p>
+      <div class="cards three stagger">
+        <div class="card"><span class="tab">Gain</span><h3>No crypto</h3><p>Nothing to implement, review, or get wrong.</p></div>
+        <div class="card"><span class="tab">Gain</span><h3>Free ACLs</h3><p>Per-item access control comes from the OS.</p></div>
+        <div class="card"><span class="tab">Gain</span><h3>A door left open</h3><p>Access-control flags make biometric gating conceivable later.</p></div>
+      </div>
+      <div class="caution reveal" style="margin-top:34px">
+        <div class="hd">Do not shell out to security(1)</div>
+        <p><code>security add-generic-password -w &lt;value&gt;</code> places the secret in <code>argv</code>, where <code>ps</code> can read it. Self-defeating for a secrets tool. Use cgo against <code>SecItemAdd</code> and <code>SecItemCopyMatching</code>.</p>
+      </div>
+    </div>
+    <div class="folio">13</div>
+  </section>
+
+  <!-- ===== 14 SECTION: REALITY ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Section</span><span>keyward</span></div>
+    <div class="sect">
+      <div class="num">02</div>
+      <h2>Reality</h2>
+      <p class="note reveal">What is hard, what is unproven, and what already turned out to be wrong.</p>
+    </div>
+    <div class="folio">14</div>
+  </section>
+
+  <!-- ===== 15 THE HOLE ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Reality / invalidated</span><span>keyward</span></div>
+    <div class="stamp margin">Corrected</div>
+    <div class="slide-content">
+      <h2 class="tight reveal">Deleting the file is<br>not enough</h2>
+      <p class="lede reveal">An earlier design replaced <strong>~/.aws/credentials</strong> with <strong>credential_process</strong>, reasoning that there would then be nothing to read. That reasoning was wrong.</p>
+      <div class="caution reveal">
+        <div class="hd">The hook is itself a resolver</div>
+        <p><code>aws configure export-credentials --format env</code> prints plaintext to stdout, resolves through the <code>credential_process</code> chain, and has no documented way to be disabled. <code>git credential fill</code> is equivalent.</p>
+        <p>AWS's own documentation warns that <code>credential_process</code> "could be a security risk if the command to generate the credentials becomes accessible by non-approved processes" &mdash; which describes an agent exactly.</p>
+      </div>
+      <p class="lede reveal" style="margin-top:30px;margin-bottom:0">Every native credential hook is designed to be invoked by tooling, and an agent that runs shell commands <strong>is</strong> tooling. The invariant is scoped to match.</p>
+    </div>
+    <div class="folio">15</div>
+  </section>
+
+  <!-- ===== 16 OBSTACLES LEDGER ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Reality / register</span><span>keyward</span></div>
+    <div class="slide-content tight">
+      <h2 class="tight reveal">Known complexities</h2>
+      <table class="ledger stagger">
+        <tr><th style="width:150px">Risk</th><th style="width:470px">Obstacle</th><th>Position</th></tr>
+        <tr><td><span class="pill risk">High</span></td><td class="mono-k">Migration friction</td><td>The real project risk. Everything reading those variables breaks until it goes through keyward. Measured early; a negative answer is accepted, not pushed through.</td></tr>
+        <tr><td><span class="pill risk">High</span></td><td class="mono-k">Hooks are resolvers</td><td>Closed the accidental case only. Scope narrowed rather than the claim widened.</td></tr>
+        <tr><td><span class="pill open">Med</span></td><td class="mono-k">Biometric gating unproven</td><td>No Go binding exists, Apple's docs unreachable, behaviour from a CLI unverified. Research, not a planned feature.</td></tr>
+        <tr><td><span class="pill open">Med</span></td><td class="mono-k">MCP config rewriting</td><td>Owning another tool's format. Needs backups, idempotence, and a doctor command.</td></tr>
+        <tr><td><span class="pill open">Low</span></td><td class="mono-k">cgo resists TDD</td><td>Interface seam, in-memory fake, thin cgo layer, one build-tagged integration test.</td></tr>
+        <tr><td><span class="pill open">Low</span></td><td class="mono-k">Go cannot zero memory</td><td>The GC copies and moves. Documented rather than overclaimed.</td></tr>
+      </table>
+    </div>
+    <div class="folio">16</div>
+  </section>
+
+  <!-- ===== 17 LANDSCAPE ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Reality / prior art</span><span>keyward</span></div>
+    <div class="slide-content">
+      <h2 class="tight reveal">Someone already<br>built this</h2>
+      <p class="lede reveal"><strong>HASP</strong> ships the same invariant, nearly the same architecture, and seven agent integrations. Recorded so the position stays honest rather than flattering.</p>
+      <table class="ledger stagger">
+        <tr><th style="width:330px">What</th><th>Where that leaves keyward</th></tr>
+        <tr><td class="mono-k">HASP</td><td>Repo-scoped: project bindings, per-repo manifests, targets. A shell rc file is not in a repo, so this problem sits outside its model. Fair Core licensed, and no Keychain or biometric path.</td></tr>
+        <tr><td class="mono-k">Pipelock &middot; Coder</td><td>Egress firewalls. Complementary &mdash; they cover the sanctioned-use-then-print gap keyward cannot.</td></tr>
+        <tr><td class="mono-k">1Password op://</td><td>The same primitive, mature. No per-caller attribution and no command scoping &mdash; support it as a backend rather than compete with the format.</td></tr>
+        <tr><td class="mono-k">MCP itself</td><td>The spec tells stdio servers to read credentials from the environment. The ecosystem standardised on the problem.</td></tr>
+      </table>
+    </div>
+    <div class="folio">17</div>
+  </section>
+
+  <!-- ===== 18 STATUS ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>Register / state</span><span>keyward</span></div>
+    <div class="slide-content tight">
+      <h2 class="tight reveal">Where things stand</h2>
+      <table class="ledger stagger">
+        <tr><th style="width:190px">State</th><th style="width:400px">Component</th><th>Gated on</th></tr>
+        <tr><td><span class="pill done">Done</span></td><td class="mono-k">internal/handle</td><td>&mdash; &nbsp;7 test functions, 29 subtests, vet and gofmt clean</td></tr>
+        <tr><td><span class="pill open">Next</span></td><td class="mono-k">internal/vault</td><td>Nothing. Store interface, in-memory fake, then cgo behind it.</td></tr>
+        <tr><td><span class="pill open">Open</span></td><td class="mono-k">internal/audit</td><td>Nothing. Independent of everything else.</td></tr>
+        <tr><td><span class="pill open">Open</span></td><td class="mono-k">internal/resolve &middot; cmd run</td><td>vault.Store existing</td></tr>
+        <tr><td><span class="pill open">Open</span></td><td class="mono-k">migrate &middot; mcpconfig</td><td>keyward run working end to end</td></tr>
+        <tr><td><span class="pill open">Open</span></td><td class="mono-k">shell &middot; grants &middot; MCP surface</td><td>The migration being lived with</td></tr>
+        <tr><td><span class="pill risk">Spike</span></td><td class="mono-k">Biometric gating</td><td>A solid cgo vault. Attempted last, not first.</td></tr>
+      </table>
+    </div>
+    <div class="folio">18</div>
+  </section>
+
+  <!-- ===== 19 THE GO/NO-GO ===== -->
+  <section class="slide">
+    <div class="holes"><span></span><span></span><span></span></div>
+    <div class="filehead"><span>The test that decides it</span><span>keyward</span></div>
+    <div class="stamp caution">Pending</div>
+    <div class="statement">
+      <div class="rule reveal"></div>
+      <q class="reveal">Migrate the rc file. Work normally for a week. If it is not invisible, stop.</q>
+      <p class="src reveal">Friction kills tools like this &mdash; not weak guarantees</p>
+    </div>
+    <div class="folio">19</div>
+  </section>
+
+</main>
+</div>
+
+<!-- Progress bar and edit affordance live outside the slide design system -->
+<div class="progress" id="progress"></div>
+<div class="edit-hotzone" id="editHotzone" title="Edit mode (E)"></div>
+<button class="edit-toggle" id="editToggle" title="Edit mode (E)">edit</button>
+
+<script>
+/* ============================================================
+   SLIDE CONTROLLER
+   Stage scaling, keyboard/wheel/touch navigation, progress.
+   ============================================================ */
+class SlidePresentation{
+  constructor(){
+    this.slides=[...document.querySelectorAll('.slide')];
+    this.i=0;
+    this.stage=document.getElementById('deckStage');
+    this.progress=document.getElementById('progress');
+    this.setupStageScale();
+    this.setupKeyboardNav();
+    this.setupWheelNav();
+    this.setupTouchNav();
+    this.show(0);
+  }
+
+  /* Scale the whole 1920x1080 stage to fit the window, letterboxing
+     as needed. Slide content is never reflowed. */
+  setupStageScale(){
+    const scale=()=>{
+      const f=Math.min(window.innerWidth/1920,window.innerHeight/1080);
+      const x=(window.innerWidth-1920*f)/2;
+      const y=(window.innerHeight-1080*f)/2;
+      this.stage.style.transform=`translate(${x}px, ${y}px) scale(${f})`;
+    };
+    scale();
+    window.addEventListener('resize',scale);
+  }
+
+  setupKeyboardNav(){
+    document.addEventListener('keydown',e=>{
+      if(e.target.getAttribute('contenteditable')==='true') return;
+      switch(e.key){
+        case 'ArrowRight': case 'ArrowDown': case ' ': case 'PageDown':
+          e.preventDefault(); this.next(); break;
+        case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+          e.preventDefault(); this.prev(); break;
+        case 'Home': e.preventDefault(); this.show(0); break;
+        case 'End': e.preventDefault(); this.show(this.slides.length-1); break;
+      }
+    });
+  }
+
+  /* Wheel navigation, throttled so one gesture moves one slide */
+  setupWheelNav(){
+    let lock=false;
+    window.addEventListener('wheel',e=>{
+      if(lock||Math.abs(e.deltaY)<18) return;
+      lock=true;
+      e.deltaY>0?this.next():this.prev();
+      setTimeout(()=>lock=false,650);
+    },{passive:true});
+  }
+
+  setupTouchNav(){
+    let x0=null,y0=null;
+    window.addEventListener('touchstart',e=>{x0=e.touches[0].clientX;y0=e.touches[0].clientY},{passive:true});
+    window.addEventListener('touchend',e=>{
+      if(x0===null) return;
+      const dx=e.changedTouches[0].clientX-x0, dy=e.changedTouches[0].clientY-y0;
+      if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy)) dx<0?this.next():this.prev();
+      x0=y0=null;
+    },{passive:true});
+  }
+
+  next(){this.show(this.i+1)}
+  prev(){this.show(this.i-1)}
+
+  show(n){
+    this.i=Math.max(0,Math.min(n,this.slides.length-1));
+    this.slides.forEach((s,k)=>{
+      s.classList.toggle('active',k===this.i);
+      s.classList.toggle('visible',k===this.i);
+    });
+    this.progress.style.width=((this.i+1)/this.slides.length*100)+'%';
+  }
+}
+const deck=new SlidePresentation();
+
+/* ============================================================
+   INLINE EDITING
+   Hover the top-left hotzone or press E. Edits persist to
+   localStorage; Ctrl/Cmd+S downloads the modified file.
+   ============================================================ */
+class InlineEditor{
+  constructor(){
+    this.isActive=false;
+    this.key='keyward-architecture-edits';
+    this.targets='h1,h2,h3,p,q,td,th,.nm,.ds,.t,.d,.tab,.hd,.key,.num,.note,.src';
+    this.restore();
+  }
+
+  toggle(){
+    this.isActive=!this.isActive;
+    const btn=document.getElementById('editToggle');
+    btn.classList.toggle('active',this.isActive);
+    btn.textContent=this.isActive?'done':'edit';
+    document.querySelectorAll('.slide '+this.targets).forEach(el=>{
+      el.contentEditable=this.isActive?'true':'false';
+      if(this.isActive){
+        el.addEventListener('blur',this.save,{once:true});
+      }
+    });
+    if(!this.isActive) this.save();
+  }
+
+  save=()=>{
+    const data={};
+    document.querySelectorAll('.slide').forEach((s,si)=>{
+      s.querySelectorAll(this.targets).forEach((el,ei)=>{
+        data[si+':'+ei]=el.innerHTML;
+      });
+    });
+    try{localStorage.setItem(this.key,JSON.stringify(data))}catch(e){}
+  }
+
+  restore(){
+    let data;
+    try{data=JSON.parse(localStorage.getItem(this.key)||'null')}catch(e){return}
+    if(!data) return;
+    document.querySelectorAll('.slide').forEach((s,si)=>{
+      s.querySelectorAll(this.targets).forEach((el,ei)=>{
+        const v=data[si+':'+ei];
+        if(typeof v==='string') el.innerHTML=v;
+      });
+    });
+  }
+
+  /* Write the current DOM back out as a standalone file */
+  download(){
+    const clone=document.documentElement.cloneNode(true);
+    clone.querySelectorAll('[contenteditable]').forEach(el=>el.removeAttribute('contenteditable'));
+    const blob=new Blob(['<!DOCTYPE html>\n'+clone.outerHTML],{type:'text/html'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='architecture.html';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+}
+const editor=new InlineEditor();
+
+/* --- Toggle visibility: JS with a grace period, never a CSS ~ selector.
+       pointer-events:none on the button would otherwise break the hover
+       chain and the button would vanish before it could be clicked. --- */
+const hotzone=document.getElementById('editHotzone');
+const editToggle=document.getElementById('editToggle');
+let hideTimeout=null;
+const showBtn=()=>{clearTimeout(hideTimeout);editToggle.classList.add('show')};
+const hideBtn=()=>{hideTimeout=setTimeout(()=>{if(!editor.isActive) editToggle.classList.remove('show')},400)};
+
+hotzone.addEventListener('mouseenter',showBtn);
+hotzone.addEventListener('mouseleave',hideBtn);
+editToggle.addEventListener('mouseenter',()=>clearTimeout(hideTimeout));
+editToggle.addEventListener('mouseleave',hideBtn);
+editToggle.addEventListener('click',()=>editor.toggle());
+hotzone.addEventListener('click',()=>{showBtn();editor.toggle()});
+
+document.addEventListener('keydown',e=>{
+  if((e.key==='e'||e.key==='E')&&e.target.getAttribute('contenteditable')!=='true'){
+    showBtn(); editor.toggle();
+  }
+  if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();editor.download()}
+});
+</script>
+</body>
+</html>

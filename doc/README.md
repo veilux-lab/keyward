@@ -8,8 +8,22 @@
 | [obstacles.md](obstacles.md) | Known problems and complexities, including one that already invalidated a design |
 | [landscape.md](landscape.md) | Prior art, what it does better, and where keyward actually stands |
 
-Visual architecture walkthroughs live alongside these as self-contained HTML
-files. Open them directly in a browser; there is nothing to build or install.
+## Visual walkthrough
+
+[architecture.html](architecture.html) — 19 slides covering the problem, the
+architecture, the resolution pipeline, and the register of known obstacles. A
+single self-contained file with no dependencies; open it in a browser directly.
+
+Arrow keys, space, or scroll to navigate. Press `E` or hover the top-left corner
+to edit text in place; edits persist to `localStorage`, and `Cmd+S` downloads the
+modified file.
+
+Built with the [frontend-slides](https://github.com/zarazhangrui/frontend-slides)
+skill. Slides are authored on a fixed 1920×1080 stage that scales as a whole, so
+the layout is identical on every screen rather than reflowing. Verified with a
+headless browser for content overflow and panel overlap at 1920×1080, 1280×720,
+and a phone viewport — `scrollHeight` checks alone miss panels that visually
+cover each other.
 
 ## Keeping these current
 
