@@ -256,8 +256,20 @@ func (c *CLI) migrate(args []string) int {
 		return c.fail("keyward migrate: %v", err)
 	}
 
+	// Before showing anything: reconcile against the vault, so a value that cannot
+	// be stored appears as a skip in the plan rather than as a failure after the
+	// user has already approved it.
+	if err := plan.Check(c.Store); err != nil {
+		return c.fail("keyward migrate: %v", err)
+	}
+
 	if plan.Empty() {
 		fmt.Fprintf(c.Stdout, "%s: nothing to move\n", plan.Path)
+		// If something was declined rather than merely uninteresting, say so.
+		// Otherwise a secret left in plaintext looks like a clean result.
+		for _, s := range plan.Blocked() {
+			fmt.Fprintf(c.Stdout, "\n  line %d  %s\n    %s\n", s.Line, s.Name, s.Reason)
+		}
 		return exitOK
 	}
 

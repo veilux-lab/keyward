@@ -95,6 +95,24 @@ So biometric gating probably means code signing and provisioning, not just a few
 extra lines of cgo. That is a materially larger undertaking than obstacle 2
 implied, and another reason to leave it until last.
 
+## 2d. Orphaned vault entries accumulate
+
+**Severity: low. Hygiene, not exposure.**
+
+Deleting a migrated line from an rc file leaves its secret in the Keychain,
+referenced by nothing. `keyward migrate` has no view of what the vault contains
+beyond the file in front of it, so it cannot notice.
+
+Not a leak — the value is exactly where it should be. But `keyward ls` grows over
+time, and an orphan becomes a conflict if the same variable is later re-added with a
+different value. `Plan.Check` now demotes that conflict to a skip and names
+`keyward rm` as the fix, so it is visible and recoverable rather than a failure
+after approval.
+
+The proper answer is a reconciliation command — `keyward doctor`, or `ls --orphaned`
+— that compares vault entries against the references found in known config files.
+Not built.
+
 ## 3. Migration friction is the real project risk
 
 **Severity: high. This is the go/no-go.**

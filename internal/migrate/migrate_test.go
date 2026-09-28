@@ -198,6 +198,97 @@ func TestDiffListsSkips(t *testing.T) {
 }
 
 // ===========================================================================
+// Check
+//
+// Conflicts with what is already in the vault have to be found before the plan is
+// shown, not while applying it. Otherwise the user approves a plan that is not
+// what happens — and one conflict aborts migrations that had nothing to do with it.
+// ===========================================================================
+
+// The case that motivated this: a variable is migrated, removed from the file, then
+// re-added later with a new value. The vault still holds the old one.
+func TestCheckMovesConflictsToSkips(t *testing.T) {
+	content := "export SPLUNK_MCP_TOKEN=eyJaNewValue0123456789\n" +
+		"export GITHUB_TOKEN=ghp_unrelatedValue0123456789\n"
+	p := mustPlan(t, "/tmp/.zshrc", content)
+
+	store := vault.NewMemory()
+	if err := store.Seed(map[string]string{"splunk-mcp-token": "eyJanOlderValue"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := p.Check(store); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+
+	if len(p.Changes) != 1 || p.Changes[0].Name != "GITHUB_TOKEN" {
+		t.Errorf("Changes = %+v, want only GITHUB_TOKEN so the conflict blocks nothing else", p.Changes)
+	}
+
+	var found bool
+	for _, s := range p.Skips {
+		if s.Name == "SPLUNK_MCP_TOKEN" {
+			found = true
+			if !strings.Contains(s.Reason, "different value") {
+				t.Errorf("skip reason = %q, want it to explain the conflict", s.Reason)
+			}
+			if !strings.Contains(s.Reason, "splunk-mcp-token") {
+				t.Errorf("skip reason = %q, want it to name the vault entry", s.Reason)
+			}
+		}
+	}
+	if !found {
+		t.Error("the conflicting variable was neither changed nor skipped")
+	}
+}
+
+// An entry already holding the identical value must stay a change: the vault is
+// right but the file still has plaintext in it that needs replacing.
+func TestCheckKeepsChangesWhenTheStoredValueMatches(t *testing.T) {
+	const token = "eyJaMatchingValue0123456789"
+	p := mustPlan(t, "/tmp/.zshrc", "export SPLUNK_MCP_TOKEN="+token+"\n")
+
+	store := vault.NewMemory()
+	if err := store.Seed(map[string]string{"splunk-mcp-token": token}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := p.Check(store); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(p.Changes) != 1 {
+		t.Errorf("Changes = %+v, want the change kept so the file still gets rewritten", p.Changes)
+	}
+}
+
+func TestCheckLeavesAbsentNamesAlone(t *testing.T) {
+	p := mustPlan(t, "/tmp/.zshrc", rcFile)
+	before := len(p.Changes)
+
+	if err := p.Check(vault.NewMemory()); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(p.Changes) != before {
+		t.Errorf("Changes went from %d to %d against an empty vault", before, len(p.Changes))
+	}
+}
+
+// If the vault cannot be read, Check must not guess. Treating an unreadable entry
+// as absent would let Apply overwrite something it could not inspect.
+func TestCheckReportsStoreFailure(t *testing.T) {
+	p := mustPlan(t, "/tmp/.zshrc", rcFile)
+	if err := p.Check(unreadableStore{Store: vault.NewMemory()}); err == nil {
+		t.Error("Check succeeded against an unreadable store")
+	}
+}
+
+type unreadableStore struct{ vault.Store }
+
+func (unreadableStore) Get(string) (vault.Secret, error) {
+	return vault.Secret{}, errors.New("keychain read failed")
+}
+
+// ===========================================================================
 // Apply
 // ===========================================================================
 

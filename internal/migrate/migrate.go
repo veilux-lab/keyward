@@ -28,6 +28,12 @@ type Change struct {
 type Skip struct {
 	Assignment
 	Reason string
+
+	// Actionable marks a skip the user could do something about: a value that does
+	// look like a secret but that keyward declined to move. Distinguished from a
+	// line that simply is not a secret, because those need no attention and would
+	// bury the ones that do.
+	Actionable bool
 }
 
 // Plan is a proposed migration of one file. Building a plan changes nothing;
@@ -86,6 +92,7 @@ func NewPlan(path string, content []byte) (*Plan, error) {
 			p.Skips = append(p.Skips, Skip{
 				Assignment: a,
 				Reason:     "looks like a secret, but the name cannot become a reference; rename it to migrate it",
+				Actionable: true,
 			})
 			continue
 		}
@@ -111,6 +118,73 @@ func Read(path string) (*Plan, error) {
 
 // Empty reports whether there is nothing to move.
 func (p *Plan) Empty() bool { return len(p.Changes) == 0 }
+
+// Check consults the vault and demotes any change that conflicts with what is
+// already stored, so the plan describes what will actually happen.
+//
+// This exists because of a sequence that turns up in real use: a variable is
+// migrated, later removed from the file, then re-added with a new value. The vault
+// still holds the old one. Without Check, that conflict surfaced part way through
+// Apply — after the user had already approved a plan that said otherwise — and
+// aborted migrations that had nothing to do with it.
+//
+// A name holding the identical value stays a change: the vault is already right,
+// but the file still has plaintext in it that needs replacing.
+//
+// Call it before Diff. Apply keeps its own conflict guard for the narrow window
+// between the two.
+func (p *Plan) Check(store vault.Store) error {
+	kept := p.Changes[:0:0]
+
+	for _, c := range p.Changes {
+		existing, err := store.Get(c.RefName)
+		switch {
+		case errors.Is(err, vault.ErrNotFound):
+			kept = append(kept, c)
+			continue
+		case err != nil:
+			// Never assume absent. Treating an unreadable entry as missing would
+			// let Apply overwrite something it could not inspect.
+			return fmt.Errorf("checking %q against the vault: %w", c.RefName, err)
+		}
+
+		proposed := vault.NewSecret([]byte(c.Value))
+		same := existing.Equal(proposed)
+		proposed.Destroy()
+		existing.Destroy()
+
+		if same {
+			kept = append(kept, c)
+			continue
+		}
+		p.Skips = append(p.Skips, Skip{
+			Assignment: c.Assignment,
+			Reason: fmt.Sprintf("the vault already holds a different value under %q; remove it with `keyward rm %s` or rename the variable",
+				c.RefName, c.RefName),
+			Actionable: true,
+		})
+	}
+
+	p.Changes = kept
+	// Skips gained entries out of order; restore file order so the plan reads top
+	// to bottom.
+	sort.Slice(p.Skips, func(i, j int) bool { return p.Skips[i].Line < p.Skips[j].Line })
+	return nil
+}
+
+// Blocked returns the skips worth the user's attention: values that do look like
+// secrets but that keyward declined to move. Used to explain a plan with nothing in
+// it, where "nothing to move" on its own would hide the fact that a secret was
+// deliberately left in plaintext.
+func (p *Plan) Blocked() []Skip {
+	var out []Skip
+	for _, s := range p.Skips {
+		if s.Actionable {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 // Diff describes the plan for a human to approve.
 //

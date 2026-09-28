@@ -98,7 +98,14 @@ without asking, for scripts. Asking for both `--dry-run` and `-auto-approve` is 
 error rather than a guess.
 
 Reaching end of input counts as a refusal, so a command with no terminal to answer
-it aborts rather than rewriting the file. The diff never shows a value, only its length — printing the old line
+it aborts rather than rewriting the file.
+
+Re-running is safe and incremental: already-migrated lines are recognised as
+references and skipped, so only new entries move. Deleting a line from the file
+leaves its secret in the Keychain, referenced by nothing — harmless, but
+`keyward ls` accumulates. If that variable later reappears with a different value,
+the plan says so and tells you to `keyward rm` the stale entry, rather than failing
+part way through. The diff never shows a value, only its length — printing the old line
 verbatim would spill every secret in the file into your scrollback, and into the
 context of any agent that ran the command.
 

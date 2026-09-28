@@ -816,6 +816,60 @@ func TestMigrateSkipsUnusableNameAndContinues(t *testing.T) {
 	}
 }
 
+// A value that cannot be stored must appear in the plan as a skip, before the
+// prompt. Learning about it afterwards means the approved plan was not the truth.
+func TestMigrateShowsVaultConflictsInThePlan(t *testing.T) {
+	path := writeFixture(t,
+		"export SPLUNK_MCP_TOKEN=eyJaNewValue0123456789\nexport GITHUB_TOKEN=ghp_unrelated0123456789\n")
+	h := newHarness(t, "yes\n", map[string]string{"splunk-mcp-token": "eyJanOlderValue"}, nil)
+
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+
+	// The conflict is explained in the plan, with a way out.
+	if !strings.Contains(h.out(), "different value") {
+		t.Errorf("the plan does not explain the conflict:\n%s", h.out())
+	}
+	if !strings.Contains(h.out(), "keyward rm splunk-mcp-token") {
+		t.Errorf("the plan does not say how to resolve it:\n%s", h.out())
+	}
+
+	// And it blocks nothing else.
+	if _, err := h.store.Get("github-token"); err != nil {
+		t.Errorf("the unrelated secret was not migrated: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "export GITHUB_TOKEN='cap://github-token'") {
+		t.Error("the unrelated line was not rewritten")
+	}
+	if !strings.Contains(string(got), "export SPLUNK_MCP_TOKEN=eyJaNewValue0123456789") {
+		t.Error("the conflicting line was rewritten despite being skipped")
+	}
+}
+
+// --dry-run must reconcile too, or the preview would promise something apply
+// would refuse.
+func TestMigrateDryRunShowsVaultConflicts(t *testing.T) {
+	path := writeFixture(t, "export SPLUNK_MCP_TOKEN=eyJaNewValue0123456789\n")
+	h := newHarness(t, "", map[string]string{"splunk-mcp-token": "eyJanOlderValue"}, nil)
+
+	if code := h.cli.Run([]string{"migrate", "--dry-run", path}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	if !strings.Contains(strings.ToLower(h.out()), "nothing to move") {
+		t.Errorf("stdout = %q, want it to report nothing movable", h.out())
+	}
+	// "nothing to move" alone would be misleading here: keyward declined to move a
+	// secret, and the reason is the whole point.
+	if !strings.Contains(h.out(), "different value") {
+		t.Errorf("stdout does not explain why nothing moved:\n%s", h.out())
+	}
+	if !strings.Contains(h.out(), "keyward rm splunk-mcp-token") {
+		t.Errorf("stdout does not say how to resolve it:\n%s", h.out())
+	}
+}
+
 func TestMigrateReportsApplyFailure(t *testing.T) {
 	path := writeFixture(t, rcFixture)
 	h := newHarness(t, "yes\n", nil, nil)
