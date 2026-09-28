@@ -58,6 +58,43 @@ Unconfirmed:
 Treat as research, not a planned feature, until a spike proves a CLI process can
 trigger and satisfy the prompt.
 
+## 2b. The legacy Keychain races under concurrent enumeration
+
+**Severity: low intra-process (fixed), open across processes.**
+
+Found by running the contract suite's concurrency case against the real Keychain:
+`SecItemCopyMatching` with `kSecMatchLimitAll` returns OSStatus **-67701**
+(`errSecInvalidRecord`) when another thread adds or deletes an item mid-walk. The
+legacy file-based keychain is not safe for concurrent enumeration and mutation.
+
+Fixed for one process by a package-scoped mutex serialising every `SecItem` call.
+The lock is package scoped rather than per-store deliberately: the keychain file is
+a single shared resource, so two `Keychain` values in one process would otherwise
+still collide.
+
+**Residual:** nothing orders operations *between* processes. Two keyward processes
+listing and mutating simultaneously can still hit this. Rare in the intended usage
+— one interactive command at a time — but it is a real hole, and the fix if it ever
+bites is a file lock or a single long-lived daemon owning all Keychain access.
+
+Worth noting this is the kind of defect only an integration test finds. Every unit
+test passed while it was present.
+
+## 2c. The data protection keychain needs an entitlement
+
+**Severity: medium. Constrains the biometric plan.**
+
+keyward uses the default file-based keychain. The modern data protection keychain
+(`kSecUseDataProtectionKeychain`) is where access-control flags including biometry
+live, but it requires the calling binary to be signed with a keychain-access-group
+entitlement. An unsigned Go binary should expect OSStatus -34018
+(`errSecMissingEntitlement`), which is mapped to `ErrDenied` for exactly this
+reason.
+
+So biometric gating probably means code signing and provisioning, not just a few
+extra lines of cgo. That is a materially larger undertaking than obstacle 2
+implied, and another reason to leave it until last.
+
 ## 3. Migration friction is the real project risk
 
 **Severity: high. This is the go/no-go.**

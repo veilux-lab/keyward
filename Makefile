@@ -1,10 +1,16 @@
-.PHONY: test test-race vet fmt cover verify clean
+.PHONY: test test-race test-integration vet fmt cover verify clean
 
 test:
 	go test ./...
 
 test-race:
 	go test -race ./...
+
+# Touches the real Keychain, so it is kept out of `test` and `verify`. Items are
+# written under a dedicated service name and removed afterwards, so it cannot
+# affect real keyward entries.
+test-integration:
+	go test -tags integration -race -count=1 ./...
 
 vet:
 	go vet ./...

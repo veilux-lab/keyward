@@ -23,6 +23,15 @@ var (
 	// variable that is present but blank, and a connect timeout with no
 	// visible cause.
 	ErrEmptyValue = errors.New("secret value is empty")
+
+	// ErrDenied means the secret exists but access was refused — by the user
+	// declining a prompt, by the keychain being locked, or by a missing
+	// entitlement.
+	//
+	// Distinct from ErrNotFound on purpose. "You said no" and "it is not there"
+	// call for different messages, and the difference becomes load-bearing if
+	// resolution is ever gated behind a biometric prompt.
+	ErrDenied = errors.New("access to the secret was denied")
 )
 
 // Store holds secret values keyed by name.

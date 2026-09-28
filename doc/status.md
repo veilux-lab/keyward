@@ -7,9 +7,12 @@ Last updated: 2026-09-28
 The reference format and the storage seam are implemented. Nothing is installable
 yet: there is no `cmd/` and no real Keychain access.
 
-`make verify` — `go vet`, `gofmt`, and `go test -race`: 19 test functions, 41
-subtests, all passing. 100% statement coverage in both `internal/handle` and
-`internal/vault`.
+`make verify` — `go vet`, `gofmt`, and `go test -race`. `make test-integration`
+additionally exercises the real Keychain; it is kept separate because it touches
+live OS state.
+
+Storage works end to end: secrets round-trip through the macOS Keychain, survive
+the process, and are scoped so one service cannot see another's items.
 
 ## Component status
 
@@ -20,8 +23,8 @@ subtests, all passing. 100% statement coverage in both `internal/handle` and
 | `vault.Store` | **Done** | Interface plus sentinel errors. The seam that keeps everything above it testable. |
 | `vault.Memory` | **Done** | In-process fake, concurrency-safe, passes the contract suite under `-race`. |
 | `vault/vaulttest` | **Done** | Contract suite. The real Keychain store will be held to exactly this. |
-| Keychain store | Not started | **Next.** cgo against `SecItemAdd` / `SecItemCopyMatching`, build-tagged integration test running `vaulttest.Run`. |
-| `internal/resolve` | Not started | Unblocked — `vault.Store` exists, so it can be written entirely against `Memory`. |
+| Keychain store | **Done** | cgo against `SecItem*`. Passes the same contract suite as the fake, plus persistence and service-isolation tests. `make test-integration`. |
+| `internal/resolve` | Not started | **Next.** Unblocked, and testable entirely against `Memory` with no cgo. |
 | `internal/audit` | Not started | Independent; can land any time. |
 | `cmd/keyward run` | Not started | Needs resolve. |
 | `internal/migrate` | Not started | Needs a real vault. The adoption-critical piece. |
@@ -36,16 +39,14 @@ available to work on.
 
 **Nothing gates these:**
 
-- **Keychain store** — the cgo implementation behind `vault.Store`. Verified by
-  running `vaulttest.Run` against it under a build tag.
-- `internal/resolve` — environment scanning and reference resolution. Unblocked
-  now that `vault.Store` and `vault.Memory` exist; needs no real Keychain.
+- `internal/resolve` — environment scanning and reference resolution. Testable
+  entirely against `Memory`; needs no cgo and no real Keychain.
 - `internal/audit` — append-only JSONL. No dependencies.
 
-**Gated on the Keychain store and resolve:**
+**Gated on resolve:**
 
-- `cmd/keyward run` — resolve plus `syscall.Exec`. Needs a real vault to be
-  useful, though it can be exercised against `Memory` first.
+- `cmd/keyward run` — resolve plus `syscall.Exec`. The vault behind it is real
+  now, so this is the last piece before the tool does something useful.
 
 **Gated on `keyward run` working end to end:**
 
@@ -78,6 +79,14 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-09-28 (later)** — Keychain store implemented, passing the same contract
+suite as the in-memory fake. The CoreFoundation plumbing sits in C rather than Go
+because cgo maps the CF types inconsistently on macOS. Two findings recorded in
+[obstacles.md](obstacles.md): the legacy keychain races under concurrent
+enumeration (fixed in-process with a mutex, still open across processes), and the
+data protection keychain needs a signing entitlement, which makes biometric gating
+a larger job than assumed.
 
 **2026-09-28** — `vault.Secret`, `vault.Store`, and `vault.Memory` implemented
 test-first, plus the `vaulttest` contract suite that the real Keychain store will
