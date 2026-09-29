@@ -77,6 +77,10 @@ func NewPlan(path string, content []byte) (*Plan, error) {
 
 	for _, a := range f.Assignments {
 		d := Detect(a.Name, a.Value)
+		if d.Possible {
+			p.Skips = append(p.Skips, possibleSkip(a, d))
+			continue
+		}
 		if !d.Secret {
 			p.Skips = append(p.Skips, Skip{Assignment: a, Reason: d.Reason})
 			continue
@@ -105,6 +109,15 @@ func NewPlan(path string, content []byte) (*Plan, error) {
 		p.Changes = append(p.Changes, Change{Assignment: a, RefName: ref, Reason: d.Reason})
 	}
 	return p, nil
+}
+
+// possibleSkip leaves a possible secret in place and says how to move it by hand.
+func possibleSkip(a Assignment, d Detection) Skip {
+	reason := fmt.Sprintf("possibly a secret (%s), so not moved", d.Reason)
+	if ref, err := RefName(a.Name); err == nil {
+		reason += fmt.Sprintf("; if it is one, run `keyward add %s` and set it to 'cap://%s'", ref, ref)
+	}
+	return Skip{Assignment: a, Reason: reason, Actionable: true}
 }
 
 // Read builds a plan from a file on disk.
@@ -203,15 +216,31 @@ func (p *Plan) Diff() string {
 		fmt.Fprintf(&b, "+%s\n", c.Rewritten(c.RefName))
 	}
 
-	if len(p.Skips) > 0 {
+	// Skips needing attention come first; among dozens of ordinary ones they would
+	// be lost.
+	var review, alone []Skip
+	for _, s := range p.Skips {
+		if s.Actionable {
+			review = append(review, s)
+		} else {
+			alone = append(alone, s)
+		}
+	}
+	if len(review) > 0 {
+		b.WriteString("\nnot moved, check these yourself:\n")
+		for _, s := range review {
+			fmt.Fprintf(&b, "  line %d %s\n      %s\n", s.Line, s.Name, s.Reason)
+		}
+	}
+	if len(alone) > 0 {
 		b.WriteString("\nleft alone:\n")
 		width := 0
-		for _, s := range p.Skips {
+		for _, s := range alone {
 			if len(s.Name) > width {
 				width = len(s.Name)
 			}
 		}
-		for _, s := range p.Skips {
+		for _, s := range alone {
 			fmt.Fprintf(&b, "  line %-4d %-*s  %s\n", s.Line, width, s.Name, s.Reason)
 		}
 	}

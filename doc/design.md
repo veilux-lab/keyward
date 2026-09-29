@@ -95,6 +95,13 @@ So ordinary exports are untouched and stay plaintext — `EDITOR`, `PATH`,
 `AWS_PROFILE`, `LANG`, locale and tooling settings, anything that is not a
 credential. There is no ambition to manage the whole environment.
 
+A value is moved only on a specific signal: a known credential prefix, a
+credential-like name, or a URL carrying a password. A value that merely looks
+random is listed as possibly a secret and left in place. On a real `~/.zshrc`,
+entropy alone picked `CPPFLAGS` and an ECR registry host, and moving those breaks
+every build outside keyward. No list of safe names can be complete, so the user
+decides these, with `keyward add` printed alongside.
+
 ### Secrets you want in an interactive shell
 
 The harder case. A credential may be wanted at the prompt for ad-hoc work — for

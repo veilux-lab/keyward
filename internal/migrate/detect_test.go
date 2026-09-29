@@ -35,9 +35,6 @@ func TestDetectSecrets(t *testing.T) {
 		// A URL carrying credentials is a secret even though the name gives no hint.
 		{"DATABASE_URL", "postgresql://dbuser:s3cretp4ss@db.internal:5432/dashweb"},
 		{"REDIS_URL", "redis://default:AbCdEf123456@cache.internal:6379"},
-
-		// No name hint and no known prefix, but the value is clearly random.
-		{"MY_THING", "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i"},
 	}
 
 	for _, tt := range tests {
@@ -136,6 +133,43 @@ func TestDetectNonSecrets(t *testing.T) {
 				t.Error("Reason is empty; a plan has to be able to explain a skip")
 			}
 		})
+	}
+}
+
+// Randomness alone is not enough to move a value. A real ~/.zshrc had CPPFLAGS and
+// an ECR registry host migrated on entropy, which would break every build that does
+// not go through keyward. No list of safe names can be complete, so these are
+// flagged for a human instead.
+func TestDetectRandomLookingValuesAreOnlyPossible(t *testing.T) {
+	tests := []struct{ name, value string }{
+		{"MY_THING", "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i"},
+		{"CPPFLAGS", "-I/opt/homebrew/opt/openssl@3/include"},
+		{"AWS_ECR_URI", "123456789012.dkr.ecr.us-west-2.amazonaws.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := migrate.Detect(tt.name, tt.value)
+			if got.Secret {
+				t.Errorf("Detect(%q).Secret = true, want entropy alone not to move it", tt.name)
+			}
+			if !got.Possible {
+				t.Errorf("Detect(%q).Possible = false, want it flagged (reason: %s)", tt.name, got.Reason)
+			}
+		})
+	}
+}
+
+// Possible is reserved for the uncertain case; a confident verdict either way must
+// not carry it.
+func TestDetectPossibleOnlyWhenUncertain(t *testing.T) {
+	for _, c := range []struct{ name, value string }{
+		{"GITHUB_TOKEN", "ghp_1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVwXyZ"},
+		{"EDITOR", "vim"},
+		{"SSH_AUTH_SOCK", "/private/tmp/com.apple.launchd.hK3mQ9vLpZ/Listeners"},
+	} {
+		if migrate.Detect(c.name, c.value).Possible {
+			t.Errorf("Detect(%q).Possible = true, want false", c.name)
+		}
 	}
 }
 

@@ -466,7 +466,7 @@ h2 .accent{color:var(--stamp)}
       <h2 class="tight reveal">The tools that<br>write the files</h2>
       <p class="lede reveal">Migration runs once per file. Everything after that is resolution.</p>
       <div class="cards two stagger">
-        <div class="card"><span class="tab">internal/migrate</span><h3>Take the values out</h3><p>Detect secrets by entropy and known prefixes &mdash; <strong>ghp_</strong>, <strong>sk-</strong>, <strong>eyJ</strong>, <strong>Bearer</strong>. Store each in the Keychain, rewrite the line to a reference.</p><p>Dry-run by default. Shows a diff. Keeps a backup. This is the adoption-critical component: if it is not trustworthy, nothing downstream gets used.</p></div>
+        <div class="card"><span class="tab">internal/migrate</span><h3>Take the values out</h3><p>Detect secrets by known prefixes and names &mdash; <strong>ghp_</strong>, <strong>sk-</strong>, <strong>eyJ</strong>, <strong>Bearer</strong>. Store each in the Keychain, rewrite the line to a reference. Values that only look random are flagged, never moved.</p><p>Dry-run by default. Shows a diff. Keeps a backup. This is the adoption-critical component: if it is not trustworthy, nothing downstream gets used.</p></div>
         <div class="card"><span class="tab">internal/mcpconfig</span><h3>Rewire the servers</h3><p>Rewrite each MCP server to launch through keyward, with references in its env block.</p><p>Also fixes a standing bug: servers currently fail with a connect timeout when the editor launches from Finder, because the variable is empty outside a login shell. Resolving from the Keychain makes launch method irrelevant.</p></div>
       </div>
     </div>

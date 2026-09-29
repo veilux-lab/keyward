@@ -15,6 +15,12 @@ import (
 // reader needs to know *why* each line was picked or passed over.
 type Detection struct {
 	Secret bool
+
+	// Possible marks a value that only looks random. It is never moved: randomness
+	// alone also describes compiler flags and hostnames, and no list of safe names
+	// can be complete. The user decides instead.
+	Possible bool
+
 	Reason string
 }
 
@@ -26,9 +32,9 @@ const (
 	// on its own. Stops TOKEN=x from being treated as a credential.
 	minNamedLen = 12
 
-	// minEntropyLen and minEntropyBits catch a random-looking value whose name
-	// gives nothing away. Base64 and hex tokens sit above 4 bits per character;
-	// English words and version numbers sit below.
+	// minEntropyLen and minEntropyBits flag a random-looking value whose name
+	// gives nothing away, as a possible secret rather than a certain one. Base64
+	// and hex tokens sit above 4 bits per character; words and versions below.
 	minEntropyLen  = 24
 	minEntropyBits = 4.0
 )
@@ -141,8 +147,8 @@ func Detect(name, value string) Detection {
 	if len(value) >= minEntropyLen {
 		if bits := entropyBits(value); bits >= minEntropyBits {
 			return Detection{
-				Secret: true,
-				Reason: fmt.Sprintf("%d characters at %.1f bits of entropy per character", len(value), bits),
+				Possible: true,
+				Reason:   fmt.Sprintf("%d characters at %.1f bits of entropy per character", len(value), bits),
 			}
 		}
 	}

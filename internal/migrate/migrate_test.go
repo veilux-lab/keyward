@@ -137,6 +137,26 @@ func TestNewPlanSkipsUnusableNames(t *testing.T) {
 	}
 }
 
+// A possible secret stays in the file, and the skip says how to move it by hand.
+func TestNewPlanLeavesPossibleSecretsForTheUser(t *testing.T) {
+	content := "export MY_THING=Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i\n" +
+		"export GITHUB_TOKEN=ghp_perfectlyFine0123456789\n"
+	p := mustPlan(t, "/tmp/.zshrc", content)
+
+	if len(p.Changes) != 1 || p.Changes[0].Name != "GITHUB_TOKEN" {
+		t.Fatalf("Changes = %+v, want only GITHUB_TOKEN", p.Changes)
+	}
+	blocked := p.Blocked()
+	if len(blocked) != 1 || blocked[0].Name != "MY_THING" {
+		t.Fatalf("Blocked() = %+v, want MY_THING", blocked)
+	}
+	for _, want := range []string{"possibly a secret", "keyward add my-thing", "cap://my-thing"} {
+		if !strings.Contains(blocked[0].Reason, want) {
+			t.Errorf("reason = %q, want it to mention %q", blocked[0].Reason, want)
+		}
+	}
+}
+
 // ===========================================================================
 // Diff
 // ===========================================================================
@@ -194,6 +214,29 @@ func TestDiffListsSkips(t *testing.T) {
 		if !strings.Contains(diff, want) {
 			t.Errorf("diff omits skipped %q:\n%s", want, diff)
 		}
+	}
+}
+
+// Skips needing attention are listed apart from the ordinary ones. In a real rc
+// file there are dozens of the latter, and a possible secret would be lost in them.
+func TestDiffSeparatesSkipsNeedingAttention(t *testing.T) {
+	p := mustPlan(t, "/tmp/.zshrc", rcFile+"export MY_THING=Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i\n")
+	diff := p.Diff()
+
+	review := strings.Index(diff, "check these yourself")
+	alone := strings.Index(diff, "\nleft alone:")
+	if review < 0 || alone < 0 {
+		t.Fatalf("diff is missing a section:\n%s", diff)
+	}
+	thing := strings.Index(diff, "MY_THING")
+	if thing < review || thing > alone {
+		t.Errorf("MY_THING is not in the section needing attention:\n%s", diff)
+	}
+	if strings.Contains(diff[review:alone], "EDITOR") {
+		t.Errorf("an ordinary skip was listed as needing attention:\n%s", diff)
+	}
+	if strings.Contains(diff, "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i") {
+		t.Errorf("diff leaked a possible secret's value:\n%s", diff)
 	}
 }
 
