@@ -157,6 +157,29 @@ func TestNewPlanLeavesPossibleSecretsForTheUser(t *testing.T) {
 	}
 }
 
+// A variable that is never exported only exists inside the shell, so keyward run
+// can never resolve it. Rewriting it would leave the shell holding a reference
+// nothing can turn back into the value. Found on a real ~/.zshrc.
+func TestNewPlanLeavesUnexportedSecretsForTheUser(t *testing.T) {
+	content := "SHELL_ONLY_TOKEN=ghp_shellOnlyValue0123456789\n" +
+		"LATER_TOKEN=ghp_exportedLater0123456789\n" +
+		"export LATER_TOKEN\n"
+	p := mustPlan(t, "/tmp/.zshrc", content)
+
+	if len(p.Changes) != 1 || p.Changes[0].Name != "LATER_TOKEN" {
+		t.Fatalf("Changes = %+v, want only LATER_TOKEN", p.Changes)
+	}
+	blocked := p.Blocked()
+	if len(blocked) != 1 || blocked[0].Name != "SHELL_ONLY_TOKEN" {
+		t.Fatalf("Blocked() = %+v, want SHELL_ONLY_TOKEN", blocked)
+	}
+	for _, want := range []string{"not exported", "keyward run", "export"} {
+		if !strings.Contains(blocked[0].Reason, want) {
+			t.Errorf("reason = %q, want it to mention %q", blocked[0].Reason, want)
+		}
+	}
+}
+
 // ===========================================================================
 // Diff
 // ===========================================================================

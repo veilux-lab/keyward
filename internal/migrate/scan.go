@@ -55,12 +55,21 @@ type File struct {
 
 	// Assignments lists every line that parsed as a simple assignment, in order.
 	Assignments []Assignment
+
+	// exported names every variable given the export attribute anywhere in the
+	// file, whether by `export NAME=value` or a bare `export NAME`.
+	exported map[string]bool
 }
+
+// Exported reports whether the file exports name. Forms it does not recognise,
+// such as `typeset -x` or `set -a`, read as not exported: the safe direction,
+// since that only ever leaves a value in place.
+func (f *File) Exported(name string) bool { return f.exported[name] }
 
 // Scan parses content. It never fails: anything unrecognised is simply not
 // reported as an assignment.
 func Scan(content []byte) *File {
-	f := &File{}
+	f := &File{exported: make(map[string]bool)}
 	if len(content) == 0 {
 		return f
 	}
@@ -76,9 +85,35 @@ func Scan(content []byte) *File {
 		if a, ok := parseAssignment(line); ok {
 			a.Line = i + 1
 			f.Assignments = append(f.Assignments, a)
+			if strings.TrimSpace(a.Prefix) == "export" {
+				f.exported[a.Name] = true
+			}
+			continue
+		}
+		for _, name := range parseBareExport(line) {
+			f.exported[name] = true
 		}
 	}
 	return f
+}
+
+// parseBareExport returns the names in `[indent]export NAME [NAME...] [# comment]`.
+// Any other word, such as a flag, means the line is not understood and yields none.
+func parseBareExport(line string) []string {
+	rest, ok := cutWord(strings.TrimLeft(line, " \t"), "export")
+	if !ok {
+		return nil
+	}
+	if i := strings.IndexByte(rest, '#'); i >= 0 {
+		rest = rest[:i]
+	}
+	names := strings.Fields(rest)
+	for _, n := range names {
+		if name, after, ok := cutName(n); !ok || after != "" || name == "" {
+			return nil
+		}
+	}
+	return names
 }
 
 // Bytes reproduces the file. With no calls to Replace, the result is identical to

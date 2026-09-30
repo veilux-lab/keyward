@@ -86,6 +86,17 @@ func NewPlan(path string, content []byte) (*Plan, error) {
 			continue
 		}
 
+		// A shell-only variable never reaches a child process, so no keyward run
+		// could resolve it. Rewriting it would strand the value.
+		if !f.Exported(a.Name) {
+			p.Skips = append(p.Skips, Skip{
+				Assignment: a,
+				Reason:     "looks like a secret, but it is not exported, so `keyward run` cannot supply it; add `export` to migrate it",
+				Actionable: true,
+			})
+			continue
+		}
+
 		// A name that cannot be represented as a reference is skipped rather than
 		// fatal. It cannot collide with anything, so leaving that one line in
 		// plaintext — the status quo — is better than refusing the whole file. One

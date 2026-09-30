@@ -154,6 +154,32 @@ func TestScanRecordsLineNumbers(t *testing.T) {
 	}
 }
 
+// Only an exported variable reaches the child processes keyward run starts. A bare
+// `export NAME` anywhere in the file exports it too, in bash and zsh alike.
+func TestScanRecordsExports(t *testing.T) {
+	content := "export DIRECT=1\n" +
+		"SHELL_ONLY=2\n" +
+		"LATER=3\n" +
+		"  export   LATER OTHER # both\n" +
+		"export # nothing\n"
+	f := migrate.Scan([]byte(content))
+
+	for _, c := range []struct {
+		name string
+		want bool
+	}{
+		{"DIRECT", true},
+		{"SHELL_ONLY", false},
+		{"LATER", true},
+		{"OTHER", true},
+		{"NEVER_MENTIONED", false},
+	} {
+		if got := f.Exported(c.name); got != c.want {
+			t.Errorf("Exported(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // Replace is how a plan is applied. Only the named line may change.
 func TestReplaceChangesOnlyOneLine(t *testing.T) {
 	content := "export FIRST=1\nexport SECOND=2\nexport THIRD=3\n"
