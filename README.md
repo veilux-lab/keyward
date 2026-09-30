@@ -39,6 +39,9 @@ machine are usually overselling.
 ## Usage
 
 ```sh
+# in its own terminal, left running: the only process that touches the Keychain
+keyward daemon
+
 # move the secrets in a shell rc file into the Keychain.
 keyward migrate --dry-run ~/.zshrc   # describe what would move, change nothing
 keyward migrate ~/.zshrc             # describe, then confirm by typing "yes"
@@ -69,8 +72,15 @@ keyward run: 1 reference(s) could not be resolved:
 Starting a command with a literal `cap://` string where a credential belongs would
 fail as though the token were wrong rather than missing, so it is refused outright.
 
-Set `KEYWARD_SERVICE` to scope items to a different Keychain service name — useful
-for trying it out without touching real entries.
+The daemon exists because the Keychain trusts the exact binary that created an item.
+Without it, every rebuild of keyward would stop on an approval dialog. The CLI can
+now change freely. After rebuilding the daemon itself, restart it in a terminal and
+approve each item once. It lets any process running as you ask for a secret by name.
+See [doc/design.md](doc/design.md) for why that is acceptable here.
+
+Set `KEYWARD_SERVICE` on the daemon to scope items to a different Keychain service
+name, and `KEYWARD_SOCKET` on every command to use a separate socket. Together they
+let you try it out without touching real entries.
 
 ## Status
 
@@ -81,6 +91,7 @@ Implemented:
 
 - `keyward migrate` — move an rc file's secrets into the Keychain
 - `keyward add` / `ls` / `rm` / `run`
+- `keyward daemon` — the single Keychain owner the other commands talk to
 - macOS Keychain storage
 - reference parsing and environment resolution
 

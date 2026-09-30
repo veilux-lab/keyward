@@ -45,7 +45,8 @@ cgo Keychain file is excluded without the `integration` tag; it is covered by
 | `internal/migrate` | **Done** | Scan, detect, `Plan`, `Apply`. Dry run by default, redacted diff, backup, atomic write, idempotent. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
-| **Code signing** | **Blocking** | An unsigned binary loses Keychain read access when rebuilt. Signing is the only fix, and is also the prerequisite for biometric gating. See [obstacles.md](obstacles.md) 2a. |
+| `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket, so CLI rebuilds no longer prompt. Verified end to end across two builds. Not yet started at login (launchd). |
+| Code signing | Not started | No longer blocking: the daemon works around [obstacles.md](obstacles.md) 2a. Would still stop the per-item prompts after a daemon rebuild, and is required for biometric gating. |
 | `internal/doctor` | **Done** | Dangling, malformed, orphaned, unknown, plus stated coverage. Report-only. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
 

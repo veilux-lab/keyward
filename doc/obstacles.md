@@ -60,7 +60,7 @@ trigger and satisfy the prompt.
 
 ## 2b. The legacy Keychain races under concurrent enumeration
 
-**Severity: low intra-process (fixed), open across processes.**
+**Severity: low. Fixed within a process; across processes, closed by the daemon.**
 
 Found by running the contract suite's concurrency case against the real Keychain:
 `SecItemCopyMatching` with `kSecMatchLimitAll` returns OSStatus **-67701**
@@ -76,6 +76,9 @@ still collide.
 listing and mutating simultaneously can still hit this. Rare in the intended usage
 — one interactive command at a time — but it is a real hole, and the fix if it ever
 bites is a file lock or a single long-lived daemon owning all Keychain access.
+
+The daemon is now that fix. It is the only Keychain caller, a lock file limits it to
+one instance, and the mutex orders its concurrent requests.
 
 Worth noting this is the kind of defect only an integration test finds. Every unit
 test passed while it was present.
@@ -95,9 +98,27 @@ So biometric gating probably means code signing and provisioning, not just a few
 extra lines of cgo. That is a materially larger undertaking than obstacle 2
 implied, and another reason to leave it until last.
 
-## 2a. An unsigned binary loses Keychain access when rebuilt — BLOCKING
+## 2a. An unsigned binary loses Keychain access when rebuilt — worked around
 
-**Severity: blocking. keyward must be code-signed to be usable at all.**
+**Severity: was blocking. Worked around by the daemon (option 3 below); signing
+would still be the proper fix.**
+
+### Resolution
+
+`keyward daemon` is the only process that touches the Keychain. The other commands
+are clients over a same-user Unix socket. Measured end to end: one CLI build
+migrated a real rc file's 32 secrets, and a second, different build resolved all 32
+through `keyward run` with no prompt. Each resolved value was identical to the
+original, compared by hash.
+
+What remains:
+
+- Rebuilding the **daemon** hits the original problem, so each item prompts once.
+  Restart the daemon interactively after an upgrade.
+- The daemon must be running. Without it, commands fail at once with a message
+  saying how to start it, so they never hang.
+- The ACL no longer separates keyward from other processes the user runs. See
+  [design.md](design.md), "One process touches the Keychain".
 
 ### The mechanism
 
@@ -213,87 +234,9 @@ errSecInvalidOwnerEdit, while `/usr/bin/security delete-generic-password` remove
 same item with no authorisation at all. Deleting is evidently not gated the way
 reading is, so the current implementation is asking for something it does not need.
 
-Worth resolving alongside 2a: once the binary is signed, the same-identity case stops
-arising in normal use, but the error would still surface for items created before
-signing was introduced.
-
-## 2b. The legacy Keychain races under concurrent enumeration
-
-**Severity: low intra-process (fixed), open across processes.**
-
-Found by running the contract suite's concurrency case against the real Keychain:
-`SecItemCopyMatching` with `kSecMatchLimitAll` returns OSStatus **-67701**
-(`errSecInvalidRecord`) when another thread adds or deletes an item mid-walk. The
-legacy file-based keychain is not safe for concurrent enumeration and mutation.
-
-Fixed for one process by a package-scoped mutex serialising every `SecItem` call.
-The lock is package scoped rather than per-store deliberately: the keychain file is
-a single shared resource, so two `Keychain` values in one process would otherwise
-still collide.
-
-**Residual:** nothing orders operations *between* processes. Two keyward processes
-listing and mutating simultaneously can still hit this. Rare in the intended usage
-— one interactive command at a time — but it is a real hole, and the fix if it ever
-bites is a file lock or a single long-lived daemon owning all Keychain access.
-
-Worth noting this is the kind of defect only an integration test finds. Every unit
-test passed while it was present.
-
-## 2c. The data protection keychain needs an entitlement
-
-**Severity: medium. Constrains the biometric plan.**
-
-keyward uses the default file-based keychain. The modern data protection keychain
-(`kSecUseDataProtectionKeychain`) is where access-control flags including biometry
-live, but it requires the calling binary to be signed with a keychain-access-group
-entitlement. An unsigned Go binary should expect OSStatus -34018
-(`errSecMissingEntitlement`), which is mapped to `ErrDenied` for exactly this
-reason.
-
-So biometric gating probably means code signing and provisioning, not just a few
-extra lines of cgo. That is a materially larger undertaking than obstacle 2
-implied, and another reason to leave it until last.
-
-## 2a. Keychain item ACLs are bound to the creating binary — BLOCKING
-
-**Severity: blocking. Must be solved before keyward is usable beyond one build.**
-
-Measured, not inferred. A secret stored by one build of the binary and read by a
-different build of the same source:
-
-| Operation | Same binary | Different binary |
-| --- | --- | --- |
-| `Get` | instant | **blocks on a GUI authorisation dialog** |
-| `Delete` | works | fails, OSStatus -25244 |
-| `/usr/bin/security` read | — | denied |
-
-The legacy file-based keychain gives each item a default ACL naming the application
-that created it. Every `go build` produces a different binary, so every rebuild is a
-different application as far as the Keychain is concerned.
-
-**Why this is blocking rather than annoying:** the flagship use case is launching MCP
-servers through `keyward run`. After any upgrade, that would hang on a dialog the
-user may never see, with the editor waiting on it. A tool that intermittently blocks
-on an invisible prompt is worse than the problem it solves.
-
-Options:
-
-1. **Create items with a permissive `SecAccess`** — no application restriction, so
-   any process reads without prompting. Unblocks everything immediately. It sounds
-   like a security regression and mostly is not: the stated invariant is that no
-   plaintext sits on disk and no value enters an agent's context, and the ACL was
-   never part of that claim. It does make the already-documented deliberate-agent
-   case (obstacle 1) easier, since `security find-generic-password` would then
-   succeed.
-2. **Code-sign the binary with a stable identity.** The correct fix: the ACL keys on
-   the signing identity rather than the binary hash, so rebuilds keep access and
-   other applications stay out. Needs a signing certificate, and is the same
-   machinery the biometric work in obstacle 2 would need.
-3. **Accept the prompts.** Rejected. A GUI dialog blocking a non-interactive
-   `keyward run` is the worst failure mode available.
-
-Do 1 to unblock, then 2 properly. Note that 1 and 2 together are not contradictory:
-sign the binary, and keep the ACL restricted.
+With the daemon, the process that deletes an item is the one that created it, so
+this no longer comes up in normal use. It should come back for items created before
+a daemon rebuild. That has not been measured yet.
 
 ## 2d. Orphaned vault entries accumulate
 

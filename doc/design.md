@@ -182,6 +182,21 @@ Do not shell out to `/usr/bin/security`. `security add-generic-password -w
 <value>` places the secret in `argv`, where `ps` can read it — self-defeating for
 a secrets tool. Use cgo against `SecItemAdd` and `SecItemCopyMatching`.
 
+### One process touches the Keychain
+
+Keychain items trust the binary that created them, and an unsigned binary changes on
+every build ([obstacles.md](obstacles.md) 2a). So `keyward daemon` is the only
+process that calls the Keychain. Every other command asks it over a Unix socket that
+only the same user can open. The CLI can be rebuilt freely. Rebuilding the daemon
+still means approving each item once.
+
+The cost: any process running as the user can ask the daemon for any secret by
+name, with no prompt. The Keychain ACL used to stop `/usr/bin/security` from
+reading a keyward value, and now a request over the socket gets it. That fits the
+cooperational model: the threat is an agent reading a file, not an agent working
+against the tool deliberately (obstacle 1). The daemon logs every request by name,
+so access can be seen, though nothing stops it.
+
 ## MCP config rewriting
 
 Each MCP server's launch command is rewritten to go through keyward, with
