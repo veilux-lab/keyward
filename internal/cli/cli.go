@@ -61,6 +61,10 @@ type CLI struct {
 	// directory instead of the developer's own configuration.
 	Home    string
 	Workdir string
+
+	// Daemon serves the Keychain to the other commands until interrupted.
+	// Injected because it binds a socket and owns the real Keychain.
+	Daemon func() error
 }
 
 const usage = `usage: keyward <command> [arguments]
@@ -68,7 +72,11 @@ const usage = `usage: keyward <command> [arguments]
 Secrets live in the macOS Keychain. Config files hold cap://<name> references
 instead of values, so an agent reading them finds nothing worth having.
 
+Only the daemon touches the Keychain; the other commands ask it. Start it in
+its own terminal and leave it running.
+
 commands:
+  daemon                hold Keychain access for the other commands
   add [-force] <name>   store a secret read from stdin
   ls                    list stored secret names
   rm <name>             remove a secret
@@ -112,6 +120,8 @@ func (c *CLI) Run(args []string) int {
 		return c.migrate(args[1:])
 	case "doctor":
 		return c.doctor(args[1:])
+	case "daemon":
+		return c.daemon(args[1:])
 	default:
 		fmt.Fprintf(c.Stderr, "keyward: unknown command %q\n\n%s", args[0], usage)
 		return exitUsage
@@ -197,6 +207,22 @@ func (c *CLI) remove(args []string) int {
 	}
 	if err := c.Store.Delete(args[0]); err != nil {
 		return c.fail("keyward rm: %v", err)
+	}
+	return exitOK
+}
+
+// daemon runs in the foreground so a Keychain prompt appears while someone is
+// there to answer it.
+func (c *CLI) daemon(args []string) int {
+	if len(args) != 0 {
+		fmt.Fprint(c.Stderr, "usage: keyward daemon\n")
+		return exitUsage
+	}
+	if c.Daemon == nil {
+		return c.fail("keyward daemon: not available in this build")
+	}
+	if err := c.Daemon(); err != nil {
+		return c.fail("keyward daemon: %v", err)
 	}
 	return exitOK
 }

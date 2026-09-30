@@ -5,16 +5,20 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/signal"
 	"syscall"
 
 	"github.com/nwokolo24/keyward/internal/cli"
+	"github.com/nwokolo24/keyward/internal/daemon"
 	"github.com/nwokolo24/keyward/internal/vault"
 )
 
 func main() {
-	// KEYWARD_SERVICE scopes the Keychain items to a different service name, so
-	// the tool can be tried out without touching real entries.
+	// KEYWARD_SERVICE scopes the daemon's Keychain items to a different service
+	// name, and KEYWARD_SOCKET moves the socket, so the tool can be tried out
+	// without touching real entries.
 	service := os.Getenv("KEYWARD_SERVICE")
 	if service == "" {
 		service = vault.DefaultService
@@ -24,8 +28,13 @@ func main() {
 	home, _ := os.UserHomeDir()
 	workdir, _ := os.Getwd()
 
+	socket := os.Getenv("KEYWARD_SOCKET")
+	if socket == "" {
+		socket = daemon.DefaultSocket(home)
+	}
+
 	c := &cli.CLI{
-		Store:      vault.NewKeychainService(service),
+		Store:      &daemon.Client{Path: socket},
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
@@ -34,6 +43,11 @@ func main() {
 		Exec:       syscall.Exec,
 		Home:       home,
 		Workdir:    workdir,
+		Daemon: func() error {
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return daemon.Run(ctx, socket, vault.NewKeychainService(service), os.Stderr)
+		},
 	}
 	os.Exit(c.Run(os.Args[1:]))
 }

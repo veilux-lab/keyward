@@ -117,6 +117,51 @@ func TestVersion(t *testing.T) {
 }
 
 // ===========================================================================
+// daemon
+// ===========================================================================
+
+func TestDaemonRunsTheInjectedServer(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	calls := 0
+	h.cli.Daemon = func() error { calls++; return nil }
+
+	if code := h.cli.Run([]string{"daemon"}); code != 0 {
+		t.Errorf("exit code = %d, want 0; stderr: %s", code, h.err())
+	}
+	if calls != 1 {
+		t.Errorf("Daemon called %d times, want 1", calls)
+	}
+}
+
+func TestDaemonFailureIsReported(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Daemon = func() error { return errors.New("a keyward daemon is already running") }
+
+	if code := h.cli.Run([]string{"daemon"}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(h.err(), "already running") {
+		t.Errorf("stderr = %q, want the reason", h.err())
+	}
+}
+
+func TestDaemonTakesNoArguments(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Daemon = func() error { t.Error("Daemon ran despite a usage error"); return nil }
+	if code := h.cli.Run([]string{"daemon", "extra"}); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestHelpMentionsDaemon(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Run([]string{"help"})
+	if !strings.Contains(h.out(), "daemon") {
+		t.Errorf("help does not mention the daemon:\n%s", h.out())
+	}
+}
+
+// ===========================================================================
 // add
 // ===========================================================================
 
