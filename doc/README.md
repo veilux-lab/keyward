@@ -7,6 +7,7 @@
 | [status.md](status.md) | Current state, component status, dependency order, and the go/no-go test |
 | [obstacles.md](obstacles.md) | Known problems and complexities, including one that already invalidated a design |
 | [landscape.md](landscape.md) | Prior art, what it does better, and where keyward actually stands |
+| [handoff-apple-development-signing.md](handoff-apple-development-signing.md) | Instructions for an agent testing free Apple Development signing on a personal Mac |
 
 ## Visual walkthrough
 
