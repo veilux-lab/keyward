@@ -115,12 +115,27 @@ What remains:
 
 - Rebuilding the **daemon** hits the original problem. Measured: restarting the same
   daemon binary reads its items with no prompt. A rebuilt daemon lists names without
-  a prompt, but each read blocks on a dialog, once per item. Code signing with a
-  trusted identity is the only fix that avoids this, and it is untested.
+  a prompt, but each read blocks on a dialog, once per item. A self-signed
+  certificate does not avoid it on macOS 27 (below). A Developer ID is untested.
 - The daemon must be running. Without it, commands fail at once with a message
   saying how to start it, so they never hang.
 - The ACL no longer separates keyward from other processes the user runs. See
   [design.md](design.md), "One process touches the Keychain".
+
+### Self-signed signing, retested (2026-10-01)
+
+On macOS 27 (this laptop), a rebuild signed with the same self-signed certificate
+still prompts. The dialog read `kw-b wants to access key "keyward-retest" in your
+keychain`; denying it failed the read. An earlier laptop run that appeared to pass
+did not tell an approved dialog from no dialog, so it proved nothing.
+
+On a CI runner (macOS 26, a fresh keychain, nobody to approve), the same test
+passed: signed rebuilds read without a prompt, trusted certificate or not, while an
+unsigned rebuild blocked. Whether macOS 27 is stricter or the fresh keychain behaves
+differently is unknown.
+
+Signing also brings its own dialog the first time: `codesign wants to access key
+"..." in your keychain`, once per signing until "Always Allow" is chosen.
 
 ### The mechanism
 
@@ -239,7 +254,8 @@ reading is, so the current implementation is asking for something it does not ne
 With the daemon, the process that deletes an item is the one that created it, so
 this no longer comes up in normal use. It does come back after a daemon rebuild:
 measured, the rebuilt daemon's delete failed with -25244, while the original daemon
-binary deleted the same item cleanly.
+binary deleted the same item cleanly. Signing does not help: a rebuild signed with
+the same certificate as the item's creator also failed its delete with -25244.
 
 ## 2d. Orphaned vault entries accumulate
 
