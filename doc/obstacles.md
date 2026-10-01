@@ -113,8 +113,10 @@ original, compared by hash.
 
 What remains:
 
-- Rebuilding the **daemon** hits the original problem, so each item prompts once.
-  Restart the daemon interactively after an upgrade.
+- Rebuilding the **daemon** hits the original problem. Measured: restarting the same
+  daemon binary reads its items with no prompt. A rebuilt daemon lists names without
+  a prompt, but each read blocks on a dialog, once per item. Code signing with a
+  trusted identity is the only fix that avoids this, and it is untested.
 - The daemon must be running. Without it, commands fail at once with a message
   saying how to start it, so they never hang.
 - The ACL no longer separates keyward from other processes the user runs. See
@@ -235,8 +237,9 @@ same item with no authorisation at all. Deleting is evidently not gated the way
 reading is, so the current implementation is asking for something it does not need.
 
 With the daemon, the process that deletes an item is the one that created it, so
-this no longer comes up in normal use. It should come back for items created before
-a daemon rebuild. That has not been measured yet.
+this no longer comes up in normal use. It does come back after a daemon rebuild:
+measured, the rebuilt daemon's delete failed with -25244, while the original daemon
+binary deleted the same item cleanly.
 
 ## 2d. Orphaned vault entries accumulate
 
