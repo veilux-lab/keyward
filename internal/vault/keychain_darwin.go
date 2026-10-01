@@ -127,13 +127,28 @@ static OSStatus kw_update(const char *service, const char *account, const void *
 	return st;
 }
 
+// kw_delete goes through the legacy item API. SecItemDelete refuses, with -25244,
+// an item a different build created; SecKeychainItemDelete does not, and neither
+// prompts. Fetching the reference reads attributes only, never the value.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 static OSStatus kw_delete(const char *service, const char *account) {
 	CFMutableDictionaryRef q = kw_query(service, account);
 	if (!q) return errSecAllocate;
-	OSStatus st = SecItemDelete(q);
+	CFDictionarySetValue(q, kSecMatchLimit, kSecMatchLimitOne);
+	CFDictionarySetValue(q, kSecReturnRef, kCFBooleanTrue);
+
+	CFTypeRef ref = NULL;
+	OSStatus st = SecItemCopyMatching(q, &ref);
 	CFRelease(q);
+	if (st != errSecSuccess) return st;
+	if (!ref) return errSecItemNotFound;
+
+	st = SecKeychainItemDelete((SecKeychainItemRef)ref);
+	CFRelease(ref);
 	return st;
 }
+#pragma clang diagnostic pop
 
 // kw_list writes one record per item into *out (malloc'd; release with free), as
 // "account\x1fnote" separated by newlines.

@@ -10,6 +10,7 @@ package vault_test
 
 import (
 	"errors"
+	"os/exec"
 	"testing"
 
 	"github.com/nwokolo24/keyward/internal/vault"
@@ -105,5 +106,35 @@ func TestKeychainRejectsEmptyService(t *testing.T) {
 	s := vault.NewKeychainService("")
 	if _, err := s.Get("kwtest-anything"); err == nil {
 		t.Error("Get with an empty service succeeded, want an error")
+	}
+}
+
+// Every rebuild is a different program to the Keychain, so after an upgrade keyward
+// must still delete what an older build stored. /usr/bin/security stands in for the
+// older build. Checked through Entries rather than Get, because reading an item
+// another program owns would put up a dialog.
+func TestKeychainDeletesItemsAnotherProgramCreated(t *testing.T) {
+	const name = "kwtest-foreign"
+	add := exec.Command("/usr/bin/security", "add-generic-password",
+		"-s", testService, "-a", name, "-w", "not-a-real-secret")
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("security add-generic-password: %v\n%s", err, out)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("/usr/bin/security", "delete-generic-password", "-s", testService, "-a", name).Run()
+	})
+
+	s := vault.NewKeychainService(testService)
+	if err := s.Delete(name); err != nil {
+		t.Fatalf("Delete of an item another program created: %v", err)
+	}
+	entries, err := s.Entries()
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name == name {
+			t.Error("item still present after Delete")
+		}
 	}
 }

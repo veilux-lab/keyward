@@ -235,16 +235,16 @@ Both were tested rather than reasoned about, and both were wrong:
   to trade the ACL away for convenience, which is just as well.
 - **Delete needs no authorisation.** `/usr/bin/security` removes an item it did not
   create, without a prompt. keyward's OSStatus -25244 on a cross-binary delete is
-  therefore a defect in keyward, not a Keychain limitation. Likely `SecItemDelete`
+  therefore a defect in keyward, not a Keychain limitation. It was `SecItemDelete`
   behaving differently from the legacy `SecKeychainItemDelete` that `security` uses.
-  Tracked separately below.
+  Fixed; see below.
 
 The ACL turns out to be doing real work: `/usr/bin/security` could not read a keyward
 value. That is a protection layer worth keeping rather than bargaining away.
 
 ## 2a-bis. Cross-binary delete fails with OSStatus -25244
 
-**Severity: medium. A keyward bug, not a platform limit.**
+**Fixed 2026-10-01. Was medium: a keyward bug, not a platform limit.**
 
 `keyward rm` on an item created by a different build fails with -25244,
 errSecInvalidOwnerEdit, while `/usr/bin/security delete-generic-password` removes the
@@ -256,6 +256,12 @@ this no longer comes up in normal use. It does come back after a daemon rebuild:
 measured, the rebuilt daemon's delete failed with -25244, while the original daemon
 binary deleted the same item cleanly. Signing does not help: a rebuild signed with
 the same certificate as the item's creator also failed its delete with -25244.
+
+Fixed by deleting through the legacy API: `SecItemCopyMatching` returns a reference,
+which `SecKeychainItemDelete` removes. That is what `security` does. An integration
+test has `/usr/bin/security` create the item and keyward delete it. Run by hand, a
+rebuilt daemon deleted an item the old daemon stored in 0.14s, with no prompt.
+`Replace` still uses `SecItemUpdate` and is untested across builds.
 
 ## 2d. Orphaned vault entries accumulate
 
