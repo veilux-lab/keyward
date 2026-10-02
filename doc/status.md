@@ -45,7 +45,7 @@ Shipping to other people needs a Developer ID, which is untested.
 | `internal/audit` | Not started | Independent; can land any time. |
 | `cmd/keyward` | **Done** | `add`, `ls`, `rm`, `run`. Logic in `internal/cli` with store, streams, environ, and exec injected. |
 | `internal/migrate` | **Done** | Scan, detect, `Plan`, `Apply`. Dry run by default, redacted diff, backup, atomic write, idempotent. |
-| `internal/restore` | **Done** | Redacted plan for explicitly selected files, mandatory exact `yes`, metadata-only dry run, best-effort atomic private writes, retained Keychain entries. Optional restoration before service uninstall; cancellation or skips keep startup available. |
+| `internal/restore` | **Done** | Separate explicit command; redacted plan for selected files, mandatory exact `yes`, metadata-only dry run, best-effort atomic private writes, retained Keychain entries. Uninstall warns users to restore first and requires confirmation before stopping startup. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
 | `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. |
@@ -99,6 +99,14 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-02 (uninstall warning)** — Removed the combined `uninstall --restore`
+option. Restoration is an explicit command. CLI uninstall warns users to run it
+before removing Keyward, shows preview/restore examples, and waits for `yes` before
+stopping the daemon. Refusal leaves startup intact. The native status window
+also warns before disabling startup. Uninstall never reads or restores secrets.
+Tests verify warning order, cancellation, and unchanged files/values. `make verify`
+passed, and the Swift companion app compiled successfully.
 
 **2026-10-02 (restore)** — Added `keyward restore [--dry-run] <file>...` and
 `keyward service uninstall --restore <file>...`. The plan precedes mandatory exact

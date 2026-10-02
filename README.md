@@ -121,14 +121,18 @@ Secret values are withheld. The directory is private to your user. These are bas
 activity logs; rotation and a separate append-only audit trail are not implemented.
 
 ```sh
-keyward service uninstall   # stop automatic startup; keep the app, CLI, and stored items
-keyward service uninstall --restore ~/.zshrc .env  # restore first, then stop startup
+keyward restore --dry-run ~/.zshrc .env  # preview the files you want restored
+keyward restore ~/.zshrc .env            # explicitly restore before uninstalling
+keyward service uninstall               # warning, then confirm removal of startup
 ```
 
-The optional restore step lists each file, variable, and reference name before
-requiring the exact lowercase word `yes`. Declining or an incomplete restoration
-leaves automatic startup in place. Plain `service uninstall` leaves references
-and Keychain entries alone.
+Uninstall warns you to run `keyward restore <file>...` first if you want the
+secrets back in your files. It waits for lowercase `yes` before stopping the
+daemon and removing automatic startup, giving you a chance to cancel and restore.
+Restoration is a separate, explicit command; uninstall never restores secrets.
+References need a running daemon to resolve. Check any restoration skips before
+uninstalling or deleting the tool. The CLI, app, and Keychain entries are kept by
+`service uninstall`. The status app shows this warning before disabling startup.
 
 This installation is for personal use. Distribution requires a paid Developer ID
 and remains untested. Certificate renewal and changes of team are also untested.

@@ -119,7 +119,7 @@ func TestVersion(t *testing.T) {
 func TestServiceActions(t *testing.T) {
 	for _, action := range []string{"install", "status", "uninstall"} {
 		t.Run(action, func(t *testing.T) {
-			h := newHarness(t, "", nil, nil)
+			h := newHarness(t, "yes\n", nil, nil)
 			h.cli.Service = func(got string) (string, error) {
 				if got != action {
 					t.Errorf("action = %q, want %q", got, action)

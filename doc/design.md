@@ -125,10 +125,12 @@ or escapes are refused. Files are replaced atomically, made private to the owner
 and retain owner execute permission. No backup of the restored values is created;
 Keychain entries stay intact. Any skip gives a nonzero exit status.
 
-`keyward service uninstall --restore <file>...` runs this same confirmation flow
-while the daemon is available and stops startup only after complete restoration.
-Cancellation or partial restoration keeps the service available for a retry.
-Plain `service uninstall` retains its existing behavior.
+Restoration remains an explicit, separate command. `keyward service uninstall`
+warns that references need a running daemon and shows restore/preview examples
+before asking for lowercase `yes` to stop the daemon and remove startup. Refusing
+keeps the service available so the user can restore first. Uninstall neither
+retrieves values nor restores files, and retains the CLI, app, and Keychain items.
+The status app presents the same warning before its Disable action.
 
 ### Secrets you want in an interactive shell
 

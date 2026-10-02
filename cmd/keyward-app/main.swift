@@ -14,8 +14,15 @@ func service(_ action: String) -> (Bool, String) {
     let output = Pipe()
     process.standardOutput = output
     process.standardError = output
+    let input = Pipe()
+    process.standardInput = input
     do {
         try process.run()
+        // The status window already warned before the user chose Disable.
+        if action == "uninstall" {
+            input.fileHandleForWriting.write(Data("yes\n".utf8))
+        }
+        input.fileHandleForWriting.closeFile()
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return (process.terminationStatus == 0, String(decoding: data, as: UTF8.self))
@@ -31,6 +38,9 @@ while true {
     alert.messageText = "Keyward by Veilux"
     alert.informativeText = status.trimmingCharacters(in: .whitespacesAndNewlines)
         + "\n\nActivity logs record request names and outcomes. Secret values are never logged."
+    if running {
+        alert.informativeText += "\n\nWarning: disabling startup stops the daemon; cap:// references will not resolve while it is stopped. Before uninstalling or deleting Keyward, run keyward restore <file>... in Terminal if you want secrets returned to your files (for example: keyward restore ~/.zshrc .env). Restored files contain plaintext secrets again. Keychain entries are kept."
+    }
     alert.icon = NSImage(systemSymbolName: "key.fill", accessibilityDescription: "Keyward")
     alert.addButton(withTitle: "Done")
     alert.addButton(withTitle: "View Activity Log")

@@ -91,38 +91,42 @@ func TestRestoreRejectsApprovalBypass(t *testing.T) {
 	}
 }
 
-func TestRestoreUninstallStopsOnlyAfterCompleteApprovedRestoration(t *testing.T) {
-	for _, scenario := range []struct {
-		answer, content string
-		stopped         bool
-	}{
-		{"yes\n", "TOKEN=cap://token\n", true},
-		{"no\n", "TOKEN=cap://token\n", false},
-		{"yes\n", "TOKEN=cap://token\nMISSING=cap://absent\n", false},
-	} {
-		path := writeFixture(t, scenario.content)
-		h := newHarness(t, scenario.answer, map[string]string{"token": "dummy-value"}, nil)
-		stopped := false
-		h.cli.Service = func(action string) (string, error) {
-			got, _ := os.ReadFile(path)
-			if action != "uninstall" || string(got) != "TOKEN='dummy-value'\n" {
-				t.Fatal("daemon stopped before restoration completed")
-			}
-			stopped = true
-			return "startup removed", nil
-		}
-		code := h.cli.Run([]string{"service", "uninstall", "--restore", path})
-		if stopped != scenario.stopped || (code == 0) != scenario.stopped {
-			t.Fatalf("uninstall: stopped %t, code %d", stopped, code)
-		}
+func TestUninstallCannotRestoreImplicitly(t *testing.T) {
+	path := writeFixture(t, "TOKEN=cap://token\n")
+	h := newHarness(t, "yes\n", map[string]string{"token": "dummy-value"}, nil)
+	s := &restoreStore{Store: h.store}
+	h.cli.Store = s
+	h.cli.Service = func(string) (string, error) { t.Fatal("invalid uninstall stopped daemon"); return "", nil }
+	if code := h.cli.Run([]string{"service", "uninstall", "--restore", path}); code != 2 || s.gets != 0 {
+		t.Fatal("uninstall accepted implicit restoration")
 	}
 }
 
-func TestRestoreUninstallDryRunCannotStopDaemon(t *testing.T) {
-	path := writeFixture(t, "TOKEN=cap://token\n")
-	h := newHarness(t, "yes\n", map[string]string{"token": "dummy-value"}, nil)
-	h.cli.Service = func(string) (string, error) { t.Fatal("dry run stopped daemon"); return "", nil }
-	if code := h.cli.Run([]string{"service", "uninstall", "--restore", "--dry-run", path}); code != 2 {
-		t.Fatal("combined uninstall accepted a dry run")
+func TestUninstallWarnsBeforeStoppingAndDoesNotRestore(t *testing.T) {
+	for _, answer := range []string{"yes\n", "no\n", "y\n", "Yes\n", ""} {
+		t.Run(strings.TrimSpace(answer), func(t *testing.T) {
+			original := "TOKEN=cap://token\n"
+			path := writeFixture(t, original)
+			h := newHarness(t, answer, map[string]string{"token": "dummy-value"}, nil)
+			s := &restoreStore{Store: h.store}
+			h.cli.Store = s
+			stopped := false
+			h.cli.Service = func(action string) (string, error) {
+				if action != "uninstall" || !strings.Contains(h.err(), "Warning:") || !strings.Contains(h.err(), "keyward restore ~/.zshrc .env") {
+					t.Fatal("uninstall stopped before showing the restore warning")
+				}
+				stopped = true
+				return "startup removed", nil
+			}
+			code := h.cli.Run([]string{"service", "uninstall"})
+			approved := answer == "yes\n"
+			got, _ := os.ReadFile(path)
+			if stopped != approved || (code == 0) != approved || s.gets != 0 || string(got) != original {
+				t.Fatal("uninstall ignored refusal or restored a file")
+			}
+			if !strings.Contains(h.err(), "keyward restore --dry-run") || !strings.Contains(h.err(), "cap://") {
+				t.Fatal("uninstall warning omitted the preview or reference consequences")
+			}
+		})
 	}
 }

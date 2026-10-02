@@ -82,8 +82,7 @@ commands:
   daemon                hold Keychain access for the other commands
   service install      install the signed CLI and start the daemon at login
   service status       check whether the login agent is loaded
-  service uninstall    stop the login agent and remove automatic startup
-  service uninstall --restore <file>...  restore first, then remove startup
+  service uninstall    warn about restoration, then ask to remove startup
   add [-force] <name>   store a secret read from stdin
   ls                    list stored secret names
   rm <name>             remove a secret
@@ -143,32 +142,31 @@ func (c *CLI) Run(args []string) int {
 }
 
 func (c *CLI) service(args []string) int {
-	if len(args) >= 2 && args[0] == "uninstall" && args[1] == "--restore" {
-		if len(args) < 3 {
-			fmt.Fprintln(c.Stderr, "usage: keyward service uninstall --restore <file>...")
-			return exitUsage
-		}
-		for _, arg := range args[2:] {
-			if arg == "--dry-run" || arg == "-dry-run" {
-				fmt.Fprintln(c.Stderr, "preview with `keyward restore --dry-run <file>...` before uninstalling")
-				return exitUsage
-			}
-		}
-		if c.Service == nil {
-			return c.fail("keyward service: service manager is unavailable")
-		}
-		if code := c.restore(args[2:]); code != exitOK {
-			fmt.Fprintln(c.Stderr, "Service uninstall cancelled.")
-			return code
-		}
-		args = []string{"uninstall"}
-	}
 	if len(args) != 1 || (args[0] != "install" && args[0] != "status" && args[0] != "uninstall") {
 		fmt.Fprintln(c.Stderr, "usage: keyward service install|status|uninstall")
 		return exitUsage
 	}
 	if c.Service == nil {
 		return c.fail("keyward service: service manager is unavailable")
+	}
+	if args[0] == "uninstall" {
+		if _, err := fmt.Fprint(c.Stderr, "Warning: stopping Keyward leaves cap:// references unresolved while the daemon is stopped.\n"+
+			"If you want secrets returned to your files, cancel and run restore BEFORE uninstalling or deleting Keyward.\n"+
+			"For example, select the files you migrated:\n"+
+			"  keyward restore --dry-run ~/.zshrc .env\n"+
+			"  keyward restore ~/.zshrc .env\n"+
+			"Check any skipped items. Restored files contain plaintext secrets again.\n"+
+			"Uninstall keeps the CLI, app, and Keychain entries; it does not restore secrets.\n\n"+
+			"Type \"yes\" to stop the daemon and remove automatic startup, or anything else to cancel: "); err != nil {
+			return exitFailure
+		}
+		ok, err := c.readConfirmation()
+		if err != nil {
+			return c.fail("keyward service: could not read confirmation; automatic startup was kept")
+		}
+		if !ok {
+			return c.fail("Service uninstall cancelled. Automatic startup was kept.")
+		}
 	}
 	message, err := c.Service(args[0])
 	if err != nil {
