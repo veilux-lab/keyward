@@ -7,8 +7,9 @@ Last updated: 2026-10-01
 The tool works end to end on the real Keychain. `add`, `ls`, `rm`, `run`,
 `migrate`, `doctor`, `daemon`, and `service` are implemented. The daemon is the only
 process that touches the Keychain, so CLI rebuilds never prompt. `make install`
-builds and signs a local installation with a per-user login agent. Live installation
-verification on this Mac is pending signing-key approval; automated checks pass.
+builds and signs a local installation with a per-user login agent. Installed on this
+Mac: the signed daemon is running and configured to start at login. Automated checks
+and the isolated live installation test pass.
 
 `make verify` runs `go vet`, `gofmt` and `go test -race`. `make test-integration`
 also exercises the real Keychain, under a separate service name.
@@ -19,9 +20,9 @@ Shipping to other people needs a Developer ID, which is untested.
 
 ### Known issues
 
-- **`Replace` (`add -force`) is untested across builds.** It uses `SecItemUpdate`,
-  which may refuse items another build created, as `SecItemDelete` did (2a-bis).
-- Live verification of signed installation and automatic startup is pending.
+- `Replace` succeeds across builds signed with the same Apple Development
+  certificate. Replacement across unsigned builds remains untested (2a-bis).
+- Login startup is configured; an actual logout/login has not been tested.
 
 ## Component status
 
@@ -40,7 +41,7 @@ Shipping to other people needs a Developer ID, which is untested.
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
 | `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. |
-| `internal/launchd` | Implemented; live verification pending | Signed CLI installation in `~/.local/bin`, startup at login, readiness checks, upgrade rollback, status, and uninstall. Automated tests pass. |
+| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. Live tests passed for signed upgrade, item replacement, launchd restart, persistence, and uninstall. Rollback and path handling are covered by automated tests. |
 | Code signing | Apple Development rebuild test passed twice | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s, 0.04s); unsigned control denied in both runs. Developer ID distribution signing remains untested and requires the paid programme; free Personal Team signing cannot be used for distribution to others. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
 | `internal/doctor` | **Done** | Dangling, malformed, orphaned, unknown, plus stated coverage. Report-only. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
@@ -52,12 +53,10 @@ available to work on.
 
 **Nothing gates these:**
 
-- Test `Replace` across builds.
 - `internal/mcpconfig`: rewrite MCP server configs to launch via `keyward run`.
   Delivers the Finder-launch fix.
 - `internal/audit`: append-only JSONL.
-- Verify signed installation and automatic startup on this Mac, with the Apple
-  Development certificate.
+- Verify login startup at the next logout/login.
 
 **Gated on a paid Developer ID:**
 
@@ -98,7 +97,9 @@ keyward binary, preserves spaces in paths, and restores the previous installatio
 if startup fails. The LaunchAgent uses an absolute binary path and a private log.
 Health checks do not access the Keychain. A separate integration test covers signed
 upgrades, replacement, launchd restart, and uninstall using a temporary job and dummy
-item; live verification is pending signing-key approval. `make verify` passes.
+item; it passed on macOS 27.0.1 in 3.22s. Cross-build reads and replacement each
+succeeded in under two seconds. The real login agent is installed and responding.
+An actual logout/login remains untested. `make verify` passes.
 
 **2026-10-01 (daemon shutdown)** — SIGINT and SIGTERM give requests one second to
 finish, then disconnect waiting clients so a Keychain dialog cannot prevent exit.

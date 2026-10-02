@@ -25,7 +25,7 @@ credentials that are not there.
 | `cmd/keyward` | CLI surface | Implemented |
 | `internal/daemon` | Own Keychain access behind a same-user socket | Implemented |
 | `internal/doctor` | Report on references and stored metadata | Implemented |
-| `internal/launchd` | Signed local installation and per-user startup | Implemented; live verification pending |
+| `internal/launchd` | Signed local installation and per-user startup | Implemented and tested on this Mac |
 
 ## The reference format
 

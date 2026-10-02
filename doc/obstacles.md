@@ -290,7 +290,11 @@ Fixed by deleting through the legacy API: `SecItemCopyMatching` returns a refere
 which `SecKeychainItemDelete` removes. That is what `security` does. An integration
 test has `/usr/bin/security` create the item and keyward delete it. Run by hand, a
 rebuilt daemon deleted an item the old daemon stored in 0.14s, with no prompt.
-`Replace` still uses `SecItemUpdate` and is untested across builds.
+`Replace` still uses `SecItemUpdate`. Tested on macOS 27.0.1 during signed
+installation verification (2026-10-01): a different daemon build signed with the
+same Apple Development certificate replaced the old build's dummy item in under
+two seconds, and a read verified the new value by hash. Unsigned cross-build
+replacement remains untested.
 
 ## 2d. Orphaned vault entries accumulate
 
