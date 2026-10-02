@@ -12,6 +12,7 @@ import (
 
 	"github.com/nwokolo24/keyward/internal/cli"
 	"github.com/nwokolo24/keyward/internal/daemon"
+	"github.com/nwokolo24/keyward/internal/launchd"
 	"github.com/nwokolo24/keyward/internal/vault"
 )
 
@@ -47,6 +48,16 @@ func main() {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return daemon.Run(ctx, socket, vault.NewKeychainService(service), os.Stderr)
+		},
+		Service: func(action string) (string, error) {
+			executable, err := os.Executable()
+			if err != nil {
+				return "", err
+			}
+			return (launchd.Manager{
+				Home: home, Executable: executable, UID: os.Getuid(),
+				Socket: socket, Service: service,
+			}).Run(action)
 		},
 	}
 	os.Exit(c.Run(os.Args[1:]))

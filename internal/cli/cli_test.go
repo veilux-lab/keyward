@@ -116,6 +116,41 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+func TestServiceActions(t *testing.T) {
+	for _, action := range []string{"install", "status", "uninstall"} {
+		t.Run(action, func(t *testing.T) {
+			h := newHarness(t, "", nil, nil)
+			h.cli.Service = func(got string) (string, error) {
+				if got != action {
+					t.Errorf("action = %q, want %q", got, action)
+				}
+				return "service result", nil
+			}
+			if code := h.cli.Run([]string{"service", action}); code != 0 || !strings.Contains(h.out(), "service result") {
+				t.Fatalf("service %s: code %d, stderr %s", action, code, h.err())
+			}
+		})
+	}
+}
+
+func TestServiceRejectsInvalidArgumentsBeforeChangingAnything(t *testing.T) {
+	for _, args := range [][]string{{"service"}, {"service", "unknown"}, {"service", "install", "extra"}} {
+		h := newHarness(t, "", nil, nil)
+		h.cli.Service = func(string) (string, error) { t.Fatal("invalid action reached service manager"); return "", nil }
+		if code := h.cli.Run(args); code != 2 {
+			t.Errorf("%v: code %d, want 2", args, code)
+		}
+	}
+}
+
+func TestServiceFailureIsReported(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Service = func(string) (string, error) { return "", errors.New("signing identity required") }
+	if code := h.cli.Run([]string{"service", "install"}); code != 1 || !strings.Contains(h.err(), "signing identity required") {
+		t.Fatalf("service failure: code %d, stderr %s", code, h.err())
+	}
+}
+
 // ===========================================================================
 // daemon
 // ===========================================================================

@@ -141,6 +141,8 @@ func (s *Server) handle(conn net.Conn) {
 func (s *Server) dispatch(req request) response {
 	var err error
 	switch req.Op {
+	case "ping":
+		return response{}
 	case "get":
 		var secret vault.Secret
 		if secret, err = s.Store.Get(req.Name); err == nil {

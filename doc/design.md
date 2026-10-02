@@ -17,12 +17,15 @@ credentials that are not there.
 | Package | Responsibility | State |
 | --- | --- | --- |
 | `internal/handle` | Parse, validate, and format `cap://` references | Implemented |
-| `internal/vault` | Keychain storage via cgo and Security.framework | Not started |
-| `internal/resolve` | Scan an environment, resolve references to values | Not started |
+| `internal/vault` | Keychain storage via cgo and Security.framework | Implemented |
+| `internal/resolve` | Scan an environment, resolve references to values | Implemented |
 | `internal/audit` | Append-only JSONL record of every resolution | Not started |
-| `internal/migrate` | Detect secrets in a file, rewrite to references | Not started |
+| `internal/migrate` | Detect secrets in a file, rewrite to references | Implemented |
 | `internal/mcpconfig` | Rewrite MCP server configs to launch via keyward | Not started |
-| `cmd/keyward` | CLI surface | Not started |
+| `cmd/keyward` | CLI surface | Implemented |
+| `internal/daemon` | Own Keychain access behind a same-user socket | Implemented |
+| `internal/doctor` | Report on references and stored metadata | Implemented |
+| `internal/launchd` | Signed local installation and per-user startup | Implemented; live verification pending |
 
 ## The reference format
 
@@ -187,8 +190,15 @@ a secrets tool. Use cgo against `SecItemAdd` and `SecItemCopyMatching`.
 Keychain items trust the binary that created them, and an unsigned binary changes on
 every build ([obstacles.md](obstacles.md) 2a). So `keyward daemon` is the only
 process that calls the Keychain. Every other command asks it over a Unix socket that
-only the same user can open. The CLI can be rebuilt freely. Rebuilding the daemon
-still means approving each item once.
+only the same user can open. The CLI can be rebuilt freely. Unsigned daemon
+rebuilds need per-item approval; rebuilding with the same Apple Development
+certificate preserves access on the tested Mac.
+
+`keyward service install` copies a signed build into `~/.local/bin` and registers a
+per-user LaunchAgent. launchd starts it at login and restarts it if it exits. Updates
+replace the executable atomically, restart the agent, and check its socket without
+reading a Keychain item. A failed startup restores the prior installation. Removing
+the login agent keeps the CLI and stored items.
 
 The cost: any process running as the user can ask the daemon for any secret by
 name, with no prompt. The Keychain ACL used to stop `/usr/bin/security` from

@@ -65,6 +65,9 @@ type CLI struct {
 	// Daemon serves the Keychain to the other commands until interrupted.
 	// Injected because it binds a socket and owns the real Keychain.
 	Daemon func() error
+
+	// Service manages the signed installation and login agent.
+	Service func(action string) (string, error)
 }
 
 const usage = `usage: keyward <command> [arguments]
@@ -72,11 +75,14 @@ const usage = `usage: keyward <command> [arguments]
 Secrets live in the macOS Keychain. Config files hold cap://<name> references
 instead of values, so an agent reading them finds nothing worth having.
 
-Only the daemon touches the Keychain; the other commands ask it. Start it in
-its own terminal and leave it running.
+Only the daemon touches the Keychain; the other commands ask it. Install automatic
+startup with keyward service install from a signed build, or run it in a terminal.
 
 commands:
   daemon                hold Keychain access for the other commands
+  service install      install the signed CLI and start the daemon at login
+  service status       check whether the login agent is loaded
+  service uninstall    stop the login agent and remove automatic startup
   add [-force] <name>   store a secret read from stdin
   ls                    list stored secret names
   rm <name>             remove a secret
@@ -122,10 +128,28 @@ func (c *CLI) Run(args []string) int {
 		return c.doctor(args[1:])
 	case "daemon":
 		return c.daemon(args[1:])
+	case "service":
+		return c.service(args[1:])
 	default:
 		fmt.Fprintf(c.Stderr, "keyward: unknown command %q\n\n%s", args[0], usage)
 		return exitUsage
 	}
+}
+
+func (c *CLI) service(args []string) int {
+	if len(args) != 1 || (args[0] != "install" && args[0] != "status" && args[0] != "uninstall") {
+		fmt.Fprintln(c.Stderr, "usage: keyward service install|status|uninstall")
+		return exitUsage
+	}
+	if c.Service == nil {
+		return c.fail("keyward service: service manager is unavailable")
+	}
+	message, err := c.Service(args[0])
+	if err != nil {
+		return c.fail("keyward service: %v", err)
+	}
+	fmt.Fprintln(c.Stdout, message)
+	return exitOK
 }
 
 // add stores a secret read from stdin.

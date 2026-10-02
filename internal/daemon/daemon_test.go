@@ -80,6 +80,13 @@ func TestOtherErrorsKeepTheirMessage(t *testing.T) {
 	}
 }
 
+func TestPingDoesNotReachTheStore(t *testing.T) {
+	c := start(t, &daemon.Server{Store: failingStore{err: errors.New("store must not be called")}})
+	if err := c.Ping(); err != nil {
+		t.Fatalf("Ping = %v", err)
+	}
+}
+
 func TestNotRunning(t *testing.T) {
 	c := &daemon.Client{Path: socketPath(t)}
 	_, err := c.Get("anything")

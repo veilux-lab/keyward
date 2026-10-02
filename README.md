@@ -39,7 +39,7 @@ machine are usually overselling.
 ## Usage
 
 ```sh
-# in its own terminal, left running: the only process that touches the Keychain
+# if automatic startup is not installed, leave the daemon running in a terminal
 keyward daemon
 
 # move the secrets in a shell rc file into the Keychain.
@@ -72,20 +72,49 @@ keyward run: 1 reference(s) could not be resolved:
 Starting a command with a literal `cap://` string where a credential belongs would
 fail as though the token were wrong rather than missing, so it is refused outright.
 
-The daemon exists because the Keychain trusts the exact binary that created an item.
-Without it, every rebuild of keyward would stop on an approval dialog. The CLI can
-now change freely. After rebuilding the daemon itself, restart it in a terminal and
-approve each item once. It lets any process running as you ask for a secret by name.
+The daemon is the only Keychain caller, so CLI rebuilds never prompt. Daemon
+upgrades signed with the same Apple Development certificate also preserve access
+on the tested Mac. Unsigned daemon rebuilds still need per-item approval. The
+daemon lets any process running as you ask for a secret by name.
 See [doc/design.md](doc/design.md) for why that is acceptable here.
 
 Set `KEYWARD_SERVICE` on the daemon to scope items to a different Keychain service
 name, and `KEYWARD_SOCKET` on every command to use a separate socket. Together they
 let you try it out without touching real entries.
 
+## Install on this Mac
+
+Requires Go 1.26.4+, Xcode command line tools, and an Apple Development certificate.
+A free Personal Team certificate can be created through Xcode's account settings.
+Find its exact identity, then build, sign, and install:
+
+```sh
+security find-identity -v -p codesigning
+make install SIGN_IDENTITY='Apple Development: you@example.com (CERTIFICATE_ID)'
+~/.local/bin/keyward service status
+```
+
+Allow codesign's signing-key prompt if it appears. Installation puts the CLI in
+`~/.local/bin` and starts the daemon now and at login through a per-user LaunchAgent.
+If that directory is not on your PATH, use `~/.local/bin/keyward` directly.
+The installer does not edit shell startup files or migrate secrets.
+
+Repeat the same command to upgrade using the same certificate. A failed startup
+restores the previous binary and login configuration. Daemon logs, containing
+request names and outcomes, are in `~/Library/Logs/keyward/daemon.log`.
+
+```sh
+keyward service uninstall   # stop automatic startup; keep the CLI and stored items
+```
+
+This installation is for personal use. Distribution requires a paid Developer ID
+and remains untested. Certificate renewal and changes of team are also untested.
+
 ## Status
 
-Working, not yet packaged. There is no installer or Homebrew formula; build it with
-`go build ./cmd/keyward`.
+Working, with signed local installation and automatic daemon startup. There is no
+notarised release or Homebrew formula. For an unsigned development build, use
+`make build` and run `bin/keyward daemon` in a terminal.
 
 Implemented:
 

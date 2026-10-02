@@ -31,6 +31,12 @@ type Client struct {
 
 var _ vault.Store = (*Client)(nil)
 
+// Ping checks availability without reading any Keychain item.
+func (c *Client) Ping() error {
+	_, err := c.do(request{Op: "ping"})
+	return err
+}
+
 func (c *Client) Get(name string) (vault.Secret, error) {
 	resp, err := c.do(request{Op: "get", Name: name})
 	if err != nil {
