@@ -116,7 +116,11 @@ What remains:
 - Rebuilding the **daemon** hits the original problem. Measured: restarting the same
   daemon binary reads its items with no prompt. A rebuilt daemon lists names without
   a prompt, but each read blocks on a dialog, once per item. A self-signed
-  certificate does not avoid it on macOS 27 (below). A Developer ID is untested.
+  certificate does not avoid it on macOS 27 (below). Apple Development signing
+  with the same certificate does (tested below), which supports trying Developer
+  ID signing for prompt-free daemon upgrades; Developer ID itself remains untested.
+  A free Personal Team certificate cannot be used to distribute the daemon to
+  other people; that requires Developer ID and the paid Apple Developer Programme.
 - The daemon must be running. Without it, commands fail at once with a message
   saying how to start it, so they never hang.
 - The ACL no longer separates keyward from other processes the user runs. See
@@ -136,6 +140,28 @@ differently is unknown.
 
 Signing also brings its own dialog the first time: `codesign wants to access key
 "..." in your keychain`, once per signing until "Always Allow" is chosen.
+
+### Apple Development signing, tested (2026-10-01)
+
+On macOS 27.0.1 (26A434), two distinct builds signed with the same Apple Development
+certificate read the dummy item without a prompt. Both had the same 10-character
+team ID; the unsigned control had no team ID. Their designated requirement named
+`com.nwokolo24.keyward`, Apple's generic trust anchor, and the signing certificate's
+common name.
+
+| Build | Result | Read time |
+| --- | --- | --- |
+| `kwd-a` (item creator) | READ | 0.04s |
+| `kwd-b` (signed rebuild) | READ | 0.06s |
+| `kwd-unsigned` (unsigned rebuild) | BLOCKED, access denied | 24.52s |
+
+The unsigned control reported `prompt dismissed: access to the secret was denied`.
+The exact GUI wording and whether codesign displayed dialogs were not recorded.
+
+**Pass:** the signed rebuild read in under two seconds while the unsigned control
+was denied. Apple Development signing survives a rebuild on this Mac. This supports
+testing Developer ID for distribution, without proving that certificate renewal or
+a change of team preserves access.
 
 ### The mechanism
 
@@ -166,7 +192,7 @@ that would hang on a dialog the user may never see, with the editor waiting on i
 A tool that intermittently blocks on an invisible prompt is worse than the problem
 it solves.
 
-### Attempted fixes, all measured, none working
+### Earlier unsigned and self-signed attempts
 
 A self-signed code-signing certificate was created, imported, and used. It signs
 correctly and produces a designated requirement that is stable across rebuilds:
@@ -188,8 +214,8 @@ requirements. Despite that, every combination still blocks:
 | `SecAccessCreate` with NULL / empty trusted list | blocked |
 | `SecACLSetContents(acl, NULL, …)` — documented "any application" | blocked |
 
-So neither path stability nor a stable signing identity is sufficient. The ACL pins
-something binary-specific regardless.
+For these unsigned and self-signed builds, neither path stability nor a stable
+signing identity was sufficient. The Apple Development test above passed.
 
 The most likely remaining variable is trust: the certificate evaluates as
 `CSSMERR_TP_NOT_TRUSTED`, so a requirement naming it may be unsatisfiable.
@@ -206,10 +232,10 @@ system-domain trust needs `sudo` and was not attempted.
 
 ### What this means for the storage decision
 
-This weakens the case for using the Keychain at all, which was argued in
-[design.md](design.md) on the grounds that it avoids writing any cryptography. That
-argument still holds, but it now comes with a platform behaviour that has no
-demonstrated fix.
+These earlier failures weakened the case for using the Keychain, which
+[design.md](design.md) justified because it avoids writing cryptography. The Apple
+Development test now demonstrates a same-certificate rebuild fix; Developer ID
+distribution signing remains to be tested.
 
 HASP writes its own encrypted vault, which was attributed here to Linux
 portability. This is an equally good reason, and quite possibly the real one.
