@@ -22,6 +22,10 @@ func DefaultSocket(home string) string {
 // what makes an existing socket safe to delete: holding the lock proves no other
 // daemon is serving it, so the socket is a leftover from one that crashed.
 func Listen(path string) (net.Listener, error) {
+	return listen(path)
+}
+
+func listen(path string) (*listener, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -70,6 +74,11 @@ type listener struct {
 	path string
 	lock *os.File
 	once sync.Once
+}
+
+// Keep the instance lock until Run finishes draining requests.
+func (l *listener) stopAccepting() {
+	l.Listener.Close()
 }
 
 // Close removes the socket before releasing the lock, so it can never delete a

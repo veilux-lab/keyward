@@ -18,8 +18,6 @@ Shipping to other people needs a Developer ID, which is untested.
 
 ### Known issues
 
-- **Daemon shutdown hangs** if a request is waiting on a Keychain dialog: SIGINT
-  waits for in-flight requests, so it needs `kill -9`.
 - **`Replace` (`add -force`) is untested across builds.** It uses `SecItemUpdate`,
   which may refuse items another build created, as `SecItemDelete` did (2a-bis).
 - The daemon is started by hand; there is no launchd agent.
@@ -52,7 +50,7 @@ available to work on.
 
 **Nothing gates these:**
 
-- Fix the daemon shutdown hang, and test `Replace` across builds.
+- Test `Replace` across builds.
 - `internal/mcpconfig`: rewrite MCP server configs to launch via `keyward run`.
   Delivers the Finder-launch fix.
 - `internal/audit`: append-only JSONL.
@@ -91,6 +89,13 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-01 (daemon shutdown)** — SIGINT and SIGTERM give requests one second to
+finish, then disconnect waiting clients so a Keychain dialog cannot prevent exit.
+The instance lock is retained while requests drain. A write interrupted at shutdown
+may have taken effect; the daemon logs that uncertainty. Regression tests cover a
+blocked store, lock retention, client disconnection, and normal request completion.
+`make verify` passes.
 
 **2026-09-28 (migrate complete)** — `Plan`, `Apply`, and `keyward migrate`. Dry run
 by default. The diff withholds values: printing the old line verbatim would spill

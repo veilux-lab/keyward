@@ -17,6 +17,10 @@ import (
 // in between, which may be waiting on a person answering a Keychain prompt.
 const ioTimeout = 10 * time.Second
 
+// A Keychain prompt cannot be cancelled through Store. Give ordinary requests
+// time to finish, then let the daemon process exit even if a prompt is waiting.
+const shutdownGrace = time.Second
+
 // Server answers requests against Store.
 type Server struct {
 	Store vault.Store
@@ -29,17 +33,19 @@ type Server struct {
 	// Nil discards.
 	Log io.Writer
 
-	wg sync.WaitGroup
+	wg          sync.WaitGroup
+	mu          sync.Mutex
+	connections map[net.Conn]struct{}
 }
 
 // Run serves store on path until ctx is cancelled.
 func Run(ctx context.Context, path string, store vault.Store, log io.Writer) error {
-	l, err := Listen(path)
+	l, err := listen(path)
 	if err != nil {
 		return err
 	}
 	defer l.Close()
-	stop := context.AfterFunc(ctx, func() { l.Close() })
+	stop := context.AfterFunc(ctx, l.stopAccepting)
 	defer stop()
 
 	s := &Server{Store: store, Log: log}
@@ -49,10 +55,10 @@ func Run(ctx context.Context, path string, store vault.Store, log io.Writer) err
 	return err
 }
 
-// Serve accepts connections until l is closed, then waits for requests in
-// flight. A request cut off mid-write could leave a caller unsure what happened.
+// Serve accepts connections until l is closed, then gives requests one second
+// to finish. A blocked Store call may remain until the daemon process exits.
 func (s *Server) Serve(l net.Listener) error {
-	defer s.wg.Wait()
+	defer s.drain()
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -61,11 +67,40 @@ func (s *Server) Serve(l net.Listener) error {
 			}
 			return err
 		}
+		s.mu.Lock()
+		if s.connections == nil {
+			s.connections = make(map[net.Conn]struct{})
+		}
+		s.connections[conn] = struct{}{}
+		s.mu.Unlock()
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
+			defer func() {
+				s.mu.Lock()
+				delete(s.connections, conn)
+				s.mu.Unlock()
+			}()
 			s.handle(conn)
 		}()
+	}
+}
+
+func (s *Server) drain() {
+	done := make(chan struct{})
+	go func() { s.wg.Wait(); close(done) }()
+	timer := time.NewTimer(shutdownGrace)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+		s.logf("shutdown interrupted pending requests; unfinished writes may have taken effect")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for conn := range s.connections {
+		conn.Close()
 	}
 }
 

@@ -228,6 +228,94 @@ func TestRunStopsWhenCancelled(t *testing.T) {
 	}
 }
 
+func TestRunStopsWithBlockedRequest(t *testing.T) {
+	path := socketPath(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	release := make(chan struct{})
+	defer close(release)
+	entered := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- daemon.Run(ctx, path, shutdownStore{entered: entered, release: release}, nil) }()
+	waitFor(t, func() bool { _, err := os.Stat(path); return err == nil })
+
+	clientDone := make(chan error, 1)
+	go func() {
+		_, err := (&daemon.Client{Path: path}).Get("dummy")
+		clientDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request did not reach the store")
+	}
+	cancel()
+	waitFor(t, func() bool { _, err := os.Stat(path); return os.IsNotExist(err) })
+	if next, err := daemon.Listen(path); err == nil {
+		next.Close()
+		t.Fatal("another daemon started while the old request was draining")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run after cancel = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown hung on a blocked store request")
+	}
+	select {
+	case err := <-clientDone:
+		if err == nil {
+			t.Error("interrupted request succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not disconnect the waiting client")
+	}
+	next, err := daemon.Listen(path)
+	if err != nil {
+		t.Fatalf("instance lock was not released after shutdown: %v", err)
+	}
+	next.Close()
+}
+
+func TestShutdownFinishesRequestsWithinGracePeriod(t *testing.T) {
+	path := socketPath(t)
+	l, err := daemon.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	release := make(chan struct{})
+	defer close(release)
+	entered := make(chan struct{})
+	srv := &daemon.Server{Store: shutdownStore{entered: entered, release: release}}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(l) }()
+	clientDone := make(chan error, 1)
+	go func() {
+		_, err := (&daemon.Client{Path: path}).Get("dummy")
+		clientDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request did not reach the store")
+	}
+	l.Close()
+	select {
+	case <-done:
+		t.Fatal("shutdown did not wait for the in-flight request")
+	case <-time.After(20 * time.Millisecond):
+	}
+	release <- struct{}{}
+	if err := <-clientDone; !errors.Is(err, vault.ErrNotFound) {
+		t.Errorf("in-flight request = %v, want ErrNotFound", err)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("Serve = %v", err)
+	}
+}
+
 // ===========================================================================
 // What the daemon writes down
 // ===========================================================================
@@ -318,6 +406,18 @@ func (f failingStore) Entries() ([]vault.Entry, error)  { return nil, f.err }
 type blockingStore struct {
 	vault.Store
 	release chan struct{}
+}
+
+type shutdownStore struct {
+	vault.Store
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s shutdownStore) Get(string) (vault.Secret, error) {
+	close(s.entered)
+	<-s.release
+	return vault.Secret{}, vault.ErrNotFound
 }
 
 func (b blockingStore) Get(string) (vault.Secret, error) {
