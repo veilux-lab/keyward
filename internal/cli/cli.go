@@ -83,12 +83,15 @@ commands:
   service install      install the signed CLI and start the daemon at login
   service status       check whether the login agent is loaded
   service uninstall    stop the login agent and remove automatic startup
+  service uninstall --restore <file>...  restore first, then remove startup
   add [-force] <name>   store a secret read from stdin
   ls                    list stored secret names
   rm <name>             remove a secret
   run [--] <cmd>...     resolve cap:// references and run a command
   migrate <file>        move a file's secrets into the Keychain (asks first)
   migrate --dry-run <f> describe what would move, and stop
+  restore <file>...     return referenced secrets to files (requires "yes")
+  restore --dry-run <f> preview restoration without reading secret values
   doctor [file...]      check references against what is stored
   version               print the version
   help                  print this message
@@ -98,6 +101,7 @@ examples:
   keyward run -- npm test
   keyward migrate --dry-run ~/.zshrc   # describe, change nothing
   keyward migrate ~/.zshrc             # describe, then confirm with "yes"
+  keyward restore ~/.zshrc             # list, then confirm plaintext restoration
 `
 
 // Run dispatches a command and returns a process exit code.
@@ -124,6 +128,8 @@ func (c *CLI) Run(args []string) int {
 		return c.run(args[1:])
 	case "migrate":
 		return c.migrate(args[1:])
+	case "restore":
+		return c.restore(args[1:])
 	case "doctor":
 		return c.doctor(args[1:])
 	case "daemon":
@@ -137,6 +143,26 @@ func (c *CLI) Run(args []string) int {
 }
 
 func (c *CLI) service(args []string) int {
+	if len(args) >= 2 && args[0] == "uninstall" && args[1] == "--restore" {
+		if len(args) < 3 {
+			fmt.Fprintln(c.Stderr, "usage: keyward service uninstall --restore <file>...")
+			return exitUsage
+		}
+		for _, arg := range args[2:] {
+			if arg == "--dry-run" || arg == "-dry-run" {
+				fmt.Fprintln(c.Stderr, "preview with `keyward restore --dry-run <file>...` before uninstalling")
+				return exitUsage
+			}
+		}
+		if c.Service == nil {
+			return c.fail("keyward service: service manager is unavailable")
+		}
+		if code := c.restore(args[2:]); code != exitOK {
+			fmt.Fprintln(c.Stderr, "Service uninstall cancelled.")
+			return code
+		}
+		args = []string{"uninstall"}
+	}
 	if len(args) != 1 || (args[0] != "install" && args[0] != "status" && args[0] != "uninstall") {
 		fmt.Fprintln(c.Stderr, "usage: keyward service install|status|uninstall")
 		return exitUsage
@@ -379,7 +405,10 @@ func (c *CLI) confirm(count int, path string) (bool, error) {
 	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into the Keychain?\n", count, path)
 	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is copied to a timestamped backup first.\n")
 	fmt.Fprintf(c.Stderr, "  Only %q will be accepted.\n\n  Enter a value: ", confirmWord)
+	return c.readConfirmation()
+}
 
+func (c *CLI) readConfirmation() (bool, error) {
 	if c.Stdin == nil {
 		return false, nil
 	}

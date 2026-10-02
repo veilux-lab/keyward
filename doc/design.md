@@ -21,6 +21,7 @@ credentials that are not there.
 | `internal/resolve` | Scan an environment, resolve references to values | Implemented |
 | `internal/audit` | Append-only JSONL record of every resolution | Not started |
 | `internal/migrate` | Detect secrets in a file, rewrite to references | Implemented |
+| `internal/restore` | Return current referenced values to explicitly selected files | Implemented; exact `yes` required |
 | `internal/mcpconfig` | Rewrite MCP server configs to launch via keyward | Not started |
 | `cmd/keyward` | CLI surface | Implemented |
 | `internal/daemon` | Own Keychain access behind a same-user socket | Implemented |
@@ -105,6 +106,29 @@ random is listed as possibly a secret and left in place. On a real `~/.zshrc`,
 entropy alone picked `CPPFLAGS` and an ECR registry host, and moving those breaks
 every build outside keyward. No list of safe names can be complete, so the user
 decides these, with `keyward add` printed alongside.
+
+### Restoring before uninstall
+
+`keyward restore [--dry-run] <file>...` reverses the current references in
+explicitly selected files. Migration notes are provenance hints, not permission
+to overwrite an old path. Values come from today's Keychain entries, including
+manually added entries; historical values are not recoverable through this command.
+
+The plan lists locations, variables, and reference names without retrieving
+values. Applying requires the exact lowercase word `yes` after that plan and a
+plaintext warning. Dry runs and refusals read no values. There is no bypass flag.
+
+Restoration is best effort: unsupported syntax or file formats, missing or denied
+items, and edits since the preview are reported and left alone. Shell values are
+single-quoted without evaluating expansions. Dotenv values with ambiguous quoting
+or escapes are refused. Files are replaced atomically, made private to the owner,
+and retain owner execute permission. No backup of the restored values is created;
+Keychain entries stay intact. Any skip gives a nonzero exit status.
+
+`keyward service uninstall --restore <file>...` runs this same confirmation flow
+while the daemon is available and stops startup only after complete restoration.
+Cancellation or partial restoration keeps the service available for a retry.
+Plain `service uninstall` retains its existing behavior.
 
 ### Secrets you want in an interactive shell
 

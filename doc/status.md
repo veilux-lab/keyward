@@ -1,11 +1,11 @@
 # Status
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 ## Where things stand
 
 The tool works end to end on the real Keychain. `add`, `ls`, `rm`, `run`,
-`migrate`, `doctor`, `daemon`, and `service` are implemented. The daemon is the only
+`migrate`, `restore`, `doctor`, `daemon`, and `service` are implemented. The daemon is the only
 process that touches the Keychain, so CLI rebuilds never prompt. `make install`
 builds and signs a local installation with a per-user login agent. Installed on this
 Mac: the signed daemon is running and configured to start at login. Automated checks
@@ -45,6 +45,7 @@ Shipping to other people needs a Developer ID, which is untested.
 | `internal/audit` | Not started | Independent; can land any time. |
 | `cmd/keyward` | **Done** | `add`, `ls`, `rm`, `run`. Logic in `internal/cli` with store, streams, environ, and exec injected. |
 | `internal/migrate` | **Done** | Scan, detect, `Plan`, `Apply`. Dry run by default, redacted diff, backup, atomic write, idempotent. |
+| `internal/restore` | **Done** | Redacted plan for explicitly selected files, mandatory exact `yes`, metadata-only dry run, best-effort atomic private writes, retained Keychain entries. Optional restoration before service uninstall; cancellation or skips keep startup available. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
 | `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. |
@@ -98,6 +99,19 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-02 (restore)** — Added `keyward restore [--dry-run] <file>...` and
+`keyward service uninstall --restore <file>...`. The plan precedes mandatory exact
+`yes` confirmation; there is no bypass flag. No values are fetched before approval.
+Tests cover cancellation, redaction, safe shell quoting, dotenv limitations,
+missing or denied items, file changes, symlinks, private modes, and uninstall
+ordering. Restoration uses current references and current stored values, retains
+Keychain entries, and does not recreate plaintext backups.
+`make verify` passed. A disposable real-Keychain test exercised dry runs,
+refusals, approved restoration, shell quoting, private file permissions, and
+retained entries. Reading across signed builds took 0.030s. The updated signed
+CLI and companion app are installed, and the login daemon is running. The owner's
+real startup file and GitHub item were not restored or read during these checks.
 
 **2026-10-01 (Veilux branding)** — Added the Keyward by Veilux status app, signed
 alongside the CLI by `make sign` and installed by `make install`. Its native window

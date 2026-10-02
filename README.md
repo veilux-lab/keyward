@@ -46,6 +46,10 @@ keyward daemon
 keyward migrate --dry-run ~/.zshrc   # describe what would move, change nothing
 keyward migrate ~/.zshrc             # describe, then confirm by typing "yes"
 
+# return referenced secrets to selected files; Keychain entries are kept
+keyward restore --dry-run ~/.zshrc    # list items without reading secret values
+keyward restore ~/.zshrc              # list items, then require explicit "yes"
+
 # store one by hand — piped, so it never appears in argv or shell history
 pbpaste | keyward add splunk-mcp-token
 
@@ -118,7 +122,13 @@ activity logs; rotation and a separate append-only audit trail are not implement
 
 ```sh
 keyward service uninstall   # stop automatic startup; keep the app, CLI, and stored items
+keyward service uninstall --restore ~/.zshrc .env  # restore first, then stop startup
 ```
+
+The optional restore step lists each file, variable, and reference name before
+requiring the exact lowercase word `yes`. Declining or an incomplete restoration
+leaves automatic startup in place. Plain `service uninstall` leaves references
+and Keychain entries alone.
 
 This installation is for personal use. Distribution requires a paid Developer ID
 and remains untested. Certificate renewal and changes of team are also untested.
@@ -132,6 +142,7 @@ notarised release or Homebrew formula. For an unsigned development build, use
 Implemented:
 
 - `keyward migrate` — move an rc file's secrets into the Keychain
+- `keyward restore` — return referenced secrets to selected files after explicit approval
 - `keyward add` / `ls` / `rm` / `run`
 - `keyward daemon` — the single Keychain owner the other commands talk to
 - macOS Keychain storage
@@ -166,6 +177,32 @@ Before writing anything it stores each secret, so a failure never leaves the fil
 pointing at values that are not in the Keychain. The original is copied to a
 timestamped backup beside it, the rewrite is atomic, and the file mode is
 preserved. Running it twice is safe.
+
+### On restore
+
+`keyward restore [--dry-run] <file>...` uses the references currently in the
+selected files and the values currently stored in the Keychain. This also works
+for secrets added manually. It does not overwrite a file based on old migration
+notes or recover a historical value.
+
+The plan shows paths, line numbers, variable names, and reference names, never
+values. `--dry-run` does not retrieve values. Actual restoration requires typing
+`yes`; `y`, `Yes`, and end of input cancel. There is no approval-bypass flag.
+The prompt explains that the files will contain plaintext secrets again.
+
+Simple shell assignments and ordinary dotenv values are supported. Unsupported
+syntax, JSON/TOML files, missing secrets, denied reads, and files edited after the
+preview are skipped. References within multiline quoted text or continued
+commands are skipped; references after a heredoc are left for manual restoration.
+Dotenv values containing single quotes, backslashes, or newlines
+are skipped when their interpretation could depend on the dotenv parser. The
+command exits unsuccessfully if anything is skipped, even if other items were
+restored successfully.
+
+Writes are atomic and private to your user (mode `600`, or `700` when preserving
+the owner's execute permission). Unrelated lines remain unchanged. Keychain
+entries are retained, and restoration makes no backup containing the restored
+values. Review the reported skips before removing Keyward.
 
 ## Development
 
