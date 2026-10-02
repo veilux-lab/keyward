@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nwokolo24/keyward/internal/appbundle"
 	"github.com/nwokolo24/keyward/internal/launchd"
 )
 
@@ -32,6 +33,12 @@ func setup(t *testing.T) *harness {
 	h := &harness{}
 	h.m = launchd.Manager{Home: home, Executable: source, UID: 501}
 	h.m.Ready = func(string) error { return nil }
+	h.m.Team = func(string) (string, error) { return "TESTTEAMID", nil }
+	h.m.Register = func(string) error { return nil }
+	h.m.Bundle = filepath.Join(t.TempDir(), "Keyward.app")
+	if err := appbundle.Build(h.m.Bundle, source, source); err != nil {
+		t.Fatal(err)
+	}
 	h.m.Command = func(program string, args ...string) error {
 		h.calls = append(h.calls, filepath.Base(program)+" "+strings.Join(args, " "))
 		if filepath.Base(program) == "codesign" {
@@ -95,6 +102,12 @@ func TestInstallStartsSignedDaemonAndPreservesArguments(t *testing.T) {
 	if !strings.Contains(string(plist), "KEYWARD_SOCKET") || !strings.Contains(string(plist), "keyward-dummy-test") {
 		t.Fatal("test service and socket were not retained")
 	}
+	if !strings.Contains(string(plist), "AssociatedBundleIdentifiers") || !strings.Contains(string(plist), appbundle.ID) {
+		t.Fatal("daemon was not associated with the branded app")
+	}
+	if _, err := os.Stat(filepath.Join(h.m.Home, "Applications", "Keyward.app", "Contents", "Info.plist")); err != nil {
+		t.Fatal(err)
+	}
 	for _, path := range []string{h.plist(), filepath.Join(h.m.Home, "Library", "Logs", "keyward", "daemon.log")} {
 		info, err := os.Stat(path)
 		if err != nil || info.Mode().Perm() != 0o600 {
@@ -114,6 +127,61 @@ func TestInstallRefusesUnsignedBinaryBeforeChangingAnything(t *testing.T) {
 	}
 	if h.loaded {
 		t.Fatal("unsigned daemon started")
+	}
+}
+
+func TestInstallRefusesDifferentAppAndDaemonTeams(t *testing.T) {
+	h := setup(t)
+	h.m.Team = func(path string) (string, error) {
+		if path == h.m.Bundle {
+			return "OTHERTEAM", nil
+		}
+		return "TESTTEAMID", nil
+	}
+	if _, err := h.m.Run("install"); err == nil {
+		t.Fatal("mismatched signing teams were accepted")
+	}
+	if h.loaded {
+		t.Fatal("mismatched daemon started")
+	}
+}
+
+func TestFailedRegistrationRestoresPriorInstallation(t *testing.T) {
+	h := setup(t)
+	if _, err := h.m.Run("install"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.m.Executable, []byte("build-two"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	h.m.Register = func(string) error {
+		calls++
+		if calls == 1 {
+			return errors.New("registration failed")
+		}
+		return nil
+	}
+	if _, err := h.m.Run("install"); err == nil {
+		t.Fatal("failed registration reported success")
+	}
+	b, _ := os.ReadFile(h.binary())
+	if string(b) != "build-one" || !h.loaded {
+		t.Fatal("registration failure lost the previous installation")
+	}
+}
+
+func TestFailedAppReregistrationStillRestartsPriorDaemon(t *testing.T) {
+	h := setup(t)
+	if _, err := h.m.Run("install"); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Register = func(string) error { return errors.New("Launch Services unavailable") }
+	if _, err := h.m.Run("install"); err == nil {
+		t.Fatal("registration failure reported success")
+	}
+	if !h.loaded {
+		t.Fatal("app registration failure prevented restoring the prior daemon")
 	}
 }
 

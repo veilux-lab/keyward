@@ -95,16 +95,29 @@ make install SIGN_IDENTITY='Apple Development: you@example.com (CERTIFICATE_ID)'
 ```
 
 Allow codesign's signing-key prompt if it appears. Installation puts the CLI in
-`~/.local/bin` and starts the daemon now and at login through a per-user LaunchAgent.
+`~/.local/bin` and the **Keyward by Veilux** status app in `~/Applications/Keyward.app`.
+It starts the daemon now and at login through a per-user LaunchAgent associated with
+that app. Open the app to check status, view the activity log, or change automatic startup.
 If that directory is not on your PATH, use `~/.local/bin/keyward` directly.
 The installer does not edit shell startup files or migrate secrets.
 
 Repeat the same command to upgrade using the same certificate. A failed startup
-restores the previous binary and login configuration. Daemon logs, containing
-request names and outcomes, are in `~/Library/Logs/keyward/daemon.log`.
+restores the previous app, binary, and login configuration. The app and daemon must
+be signed by the same team. The daemon's existing signing identifier stays unchanged
+to preserve Keychain access across upgrades.
+
+Product branding does not change the signing certificate's publisher identity.
+On this Mac, the existing Background App Activity entry still displays the personal
+certificate name despite recording the app association; a fresh-machine notification
+has not been tested. macOS may retain older attribution.
+
+Daemon activity logs are in `~/Library/Logs/keyward/daemon.log`. They record UTC
+timestamps, operations, reference names, outcomes, and startup/shutdown events.
+Secret values are withheld. The directory is private to your user. These are basic
+activity logs; rotation and a separate append-only audit trail are not implemented.
 
 ```sh
-keyward service uninstall   # stop automatic startup; keep the CLI and stored items
+keyward service uninstall   # stop automatic startup; keep the app, CLI, and stored items
 ```
 
 This installation is for personal use. Distribution requires a paid Developer ID

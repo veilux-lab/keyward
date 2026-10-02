@@ -9,7 +9,8 @@ The tool works end to end on the real Keychain. `add`, `ls`, `rm`, `run`,
 process that touches the Keychain, so CLI rebuilds never prompt. `make install`
 builds and signs a local installation with a per-user login agent. Installed on this
 Mac: the signed daemon is running and configured to start at login. Automated checks
-and the isolated live installation test pass.
+and the isolated live installation test pass. `~/Applications/Keyward.app` provides
+a **Keyward by Veilux** status window, activity-log access, and startup controls.
 
 `make verify` runs `go vet`, `gofmt` and `go test -race`. `make test-integration`
 also exercises the real Keychain, under a separate service name.
@@ -23,6 +24,12 @@ Shipping to other people needs a Developer ID, which is untested.
 - `Replace` succeeds across builds signed with the same Apple Development
   certificate. Replacement across unsigned builds remains untested (2a-bis).
 - Login startup is configured; an actual logout/login has not been tested.
+- The installed app and LaunchAgent are associated, but this Mac's existing
+  Background App Activity entry still shows the personal signing-certificate name.
+  Cached attribution may explain this; a fresh-machine notification is untested.
+  Product branding does not change the certificate's publisher identity.
+- Activity logs include reference names and outcomes, never values. Log rotation
+  and the separate append-only audit trail are not implemented.
 
 ## Component status
 
@@ -42,6 +49,7 @@ Shipping to other people needs a Developer ID, which is untested.
 | `keyward shell` | Not started | Independent of the above. |
 | `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. |
 | `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. Live tests passed for signed upgrade, item replacement, launchd restart, persistence, and uninstall. Rollback and path handling are covered by automated tests. |
+| `internal/appbundle` | **Done** | Signed Keyward by Veilux status app installed in `~/Applications`. Native window verified. The app is registered with Launch Services and associated with the daemon; same-team checks and app rollback are covered by tests. |
 | Code signing | Apple Development rebuild test passed twice | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s, 0.04s); unsigned control denied in both runs. Developer ID distribution signing remains untested and requires the paid programme; free Personal Team signing cannot be used for distribution to others. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
 | `internal/doctor` | **Done** | Dangling, malformed, orphaned, unknown, plus stated coverage. Report-only. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
@@ -90,6 +98,17 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-01 (Veilux branding)** — Added the Keyward by Veilux status app, signed
+alongside the CLI by `make sign` and installed by `make install`. Its native window
+shows daemon health and offers log access and startup controls. The LaunchAgent
+uses `AssociatedBundleIdentifiers`; installation verifies matching signing teams
+and restores the previous app, binary, and agent on failure. The daemon identifier
+remains unchanged. The isolated signed upgrade/replacement/restart/uninstall test
+passed in 3.43s, with cross-build access under two seconds. The real installation
+is running and the branded window was verified. This Mac's existing background
+entry still displays the personal certificate name despite recording the app
+association; fresh-machine attribution is untested. `make verify` passes.
 
 **2026-10-01 (local installation)** — `make build`, `make sign`, `make install`, and
 `keyward service install|status|uninstall`. Installation requires an Apple-signed

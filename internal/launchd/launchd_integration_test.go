@@ -32,6 +32,7 @@ func TestSignedInstallLifecycle(t *testing.T) {
 	label := "com.nwokolo24.keyward.test." + filepath.Base(dir)
 	service := "keyward-install-test-" + filepath.Base(dir)
 	m := launchd.Manager{Home: dir, UID: os.Getuid(), Executable: first, Label: label, Socket: filepath.Join(dir, "d.sock"), Service: service}
+	m.Bundle = os.Getenv("KEYWARD_TEST_APP_BUNDLE")
 	client := &daemon.Client{Path: m.Socket, Timeout: 2 * time.Second}
 	const name = "install-probe"
 	t.Cleanup(func() {

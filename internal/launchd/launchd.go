@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwokolo24/keyward/internal/appbundle"
 	"github.com/nwokolo24/keyward/internal/daemon"
 	"github.com/nwokolo24/keyward/internal/vault"
 )
@@ -21,13 +22,16 @@ const label = "com.nwokolo24.keyward"
 
 type Manager struct {
 	Home, Executable string
+	Bundle           string
 	Socket, Service  string
 	UID              int
 	// Label defaults to the production agent; integration tests use a distinct job.
 	Label string
 	// Command is injected so tests never register a real login agent.
-	Command func(program string, args ...string) error
-	Ready   func(socket string) error
+	Command  func(program string, args ...string) error
+	Ready    func(socket string) error
+	Team     func(path string) (string, error)
+	Register func(path string) error
 }
 
 func (m Manager) Run(action string) (string, error) {
@@ -78,6 +82,25 @@ func (m Manager) install(plist, domain, target string) (string, error) {
 	if err := m.command("/usr/bin/codesign", "--verify", "--strict", "-R", `=anchor apple generic and identifier "com.nwokolo24.keyward"`, m.Executable); err != nil {
 		return "", fmt.Errorf("install requires an Apple-signed keyward build: %w", err)
 	}
+	bundle := m.bundle()
+	if err := m.command("/usr/bin/codesign", "--verify", "--deep", "--strict", "-R", `=anchor apple generic and identifier "`+appbundle.ID+`"`, bundle); err != nil {
+		return "", fmt.Errorf("install requires the signed Keyward.app companion: %w", err)
+	}
+	team := m.Team
+	if team == nil {
+		team = appbundle.Team
+	}
+	cliTeam, err := team(m.Executable)
+	if err != nil {
+		return "", err
+	}
+	appTeam, err := team(bundle)
+	if err != nil {
+		return "", err
+	}
+	if cliTeam == "" || cliTeam != appTeam {
+		return "", errors.New("app and daemon must have the same signing team")
+	}
 	content, err := os.ReadFile(m.Executable)
 	if err != nil {
 		return "", err
@@ -112,6 +135,17 @@ func (m Manager) install(plist, domain, target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	appPath := filepath.Join(m.Home, "Applications", "Keyward.app")
+	_, oldAppErr := os.Lstat(appPath)
+	update, err := appbundle.Prepare(bundle, appPath)
+	if err != nil {
+		return "", err
+	}
+	defer update.Close()
+	register := m.Register
+	if register == nil {
+		register = appbundle.Register
+	}
 	loaded := m.command("/bin/launchctl", "print", target) == nil
 	if loaded {
 		if err := m.command("/bin/launchctl", "bootout", target); err != nil {
@@ -124,14 +158,23 @@ func (m Manager) install(plist, domain, target string) (string, error) {
 				return "", errors.Join(cause, err)
 			}
 		}
-		err := errors.Join(oldBinary.restore(), oldPlist.restore())
+		err := errors.Join(oldBinary.restore(), oldPlist.restore(), update.Restore())
 		if err == nil && loaded {
 			err = m.command("/bin/launchctl", "bootstrap", domain, plist)
+		}
+		if oldAppErr == nil {
+			err = errors.Join(err, register(appPath))
 		}
 		if err != nil {
 			return "", errors.Join(cause, fmt.Errorf("restoring the prior installation: %w", err))
 		}
 		return "", cause
+	}
+	if err := update.Apply(); err != nil {
+		return rollback(err)
+	}
+	if err := register(appPath); err != nil {
+		return rollback(err)
 	}
 	if err := writeAtomic(binary, content, 0o755); err != nil {
 		return rollback(err)
@@ -152,7 +195,23 @@ func (m Manager) install(plist, domain, target string) (string, error) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return fmt.Sprintf("installed %s\ndaemon starts now and at login; log: %s", binary, logPath), nil
+	update.Commit()
+	return fmt.Sprintf("installed %s and %s\ndaemon starts now and at login; log: %s", binary, appPath, logPath), nil
+}
+
+func (m Manager) bundle() string {
+	if m.Bundle != "" {
+		return m.Bundle
+	}
+	dir := filepath.Dir(m.Executable)
+	if filepath.Base(dir) == "Helpers" && filepath.Base(filepath.Dir(dir)) == "Contents" {
+		return filepath.Dir(filepath.Dir(dir))
+	}
+	companion := filepath.Join(dir, "Keyward.app")
+	if _, err := os.Stat(companion); err == nil {
+		return companion
+	}
+	return filepath.Join(m.Home, "Applications", "Keyward.app")
 }
 
 func (m Manager) socket() string {
@@ -197,6 +256,7 @@ func (m Manager) configuration(binary, log string) string {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>%s</string>
+<key>AssociatedBundleIdentifiers</key><array><string>com.nwokolo24.keyward.app</string></array>
 <key>ProgramArguments</key><array><string>%s</string><string>daemon</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><true/>

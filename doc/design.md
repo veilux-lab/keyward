@@ -26,6 +26,7 @@ credentials that are not there.
 | `internal/daemon` | Own Keychain access behind a same-user socket | Implemented |
 | `internal/doctor` | Report on references and stored metadata | Implemented |
 | `internal/launchd` | Signed local installation and per-user startup | Implemented and tested on this Mac |
+| `internal/appbundle` | Keyward by Veilux status app and bundle updates | Implemented; keeps app and daemon signing identifiers separate |
 
 ## The reference format
 
@@ -198,7 +199,15 @@ certificate preserves access on the tested Mac.
 per-user LaunchAgent. launchd starts it at login and restarts it if it exits. Updates
 replace the executable atomically, restart the agent, and check its socket without
 reading a Keychain item. A failed startup restores the prior installation. Removing
-the login agent keeps the CLI and stored items.
+the login agent keeps the app, CLI, and stored items.
+
+The installer also copies `Keyward.app` to `~/Applications`, registers it with
+Launch Services, and associates the LaunchAgent with `com.nwokolo24.keyward.app`
+through `AssociatedBundleIdentifiers`. Both must have the same Apple signing team.
+The daemon keeps `com.nwokolo24.keyward` so existing Keychain access requirements
+still match. The native status app checks availability without reading secrets;
+it can open the activity log or enable/disable automatic startup. Product branding
+does not change the certificate's personal publisher identity.
 
 The cost: any process running as the user can ask the daemon for any secret by
 name, with no prompt. The Keychain ACL used to stop `/usr/bin/security` from
