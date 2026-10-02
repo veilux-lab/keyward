@@ -4,30 +4,25 @@ Last updated: 2026-10-01
 
 ## Where things stand
 
-The reference format and the storage seam are implemented. Nothing is installable
-yet: there is no `cmd/` and no real Keychain access.
+The tool works end to end on the real Keychain. `add`, `ls`, `rm`, `run`,
+`migrate`, `doctor` and `daemon` are implemented. The daemon is the only process
+that touches the Keychain, so CLI rebuilds never prompt. Not yet packaged: build
+with `go build ./cmd/keyward`.
 
-`make verify` — `go vet`, `gofmt`, and `go test -race`. `make test-integration`
-additionally exercises the real Keychain; it is kept separate because it touches
-live OS state.
+`make verify` runs `go vet`, `gofmt` and `go test -race`. `make test-integration`
+also exercises the real Keychain, under a separate service name.
 
-**The tool works.** Verified by hand against the real Keychain: a secret is added
-from a pipe, listed by name, resolved into a child process environment, and removed.
-Non-references pass through untouched, a missing reference refuses to execute and
-says how to fix itself, and the child's exit code propagates.
+Signing: a daemon rebuilt with the same **Apple Development** certificate keeps
+Keychain access, while self-signed and unsigned rebuilds do not (obstacles.md 2a).
+Shipping to other people needs a Developer ID, which is untested.
 
-```sh
-$ SPLUNK_MCP_TOKEN='cap://splunk-mcp-token' keyward run -- printenv SPLUNK_MCP_TOKEN
-eyJraWQiOiJzcGx1bmsi...
-```
+### Known issues
 
-What remains before it is worth keeping installed is `migrate`, so moving an rc file
-over is not a manual job.
-
-Coverage is 100% of statements in `handle`, `resolve`, and the pure-Go half of
-`vault`. The package figure for `vault` reads lower under `make test` because the
-cgo Keychain file is excluded without the `integration` tag; it is covered by
-`make test-integration`.
+- **Daemon shutdown hangs** if a request is waiting on a Keychain dialog: SIGINT
+  waits for in-flight requests, so it needs `kill -9`.
+- **`Replace` (`add -force`) is untested across builds.** It uses `SecItemUpdate`,
+  which may refuse items another build created, as `SecItemDelete` did (2a-bis).
+- The daemon is started by hand; there is no launchd agent.
 
 ## Component status
 
@@ -57,20 +52,17 @@ available to work on.
 
 **Nothing gates these:**
 
-- `internal/mcpconfig` — rewrite MCP server configs to launch via `keyward run`.
+- Fix the daemon shutdown hang, and test `Replace` across builds.
+- `internal/mcpconfig`: rewrite MCP server configs to launch via `keyward run`.
   Delivers the Finder-launch fix.
-- `internal/audit` — append-only JSONL. No dependencies.
-- `keyward shell` — a time-boxed subshell holding resolved values.
-- `internal/audit` — append-only JSONL. No dependencies.
-- `internal/mcpconfig` — `run` works, so MCP configs can be rewritten to use it.
-  Delivers the Finder-launch fix.
+- `internal/audit`: append-only JSONL.
+- A launchd agent for the daemon.
+- Signed builds on the personal Mac, with the Apple Development certificate.
 
-**Gated on `keyward run` working end to end:**
+**Gated on a paid Developer ID:**
 
-- `internal/migrate` — rewrite `~/.zshrc`, values into the Keychain. Dry-run by
-  default, diff shown, backup kept.
-- `internal/mcpconfig` — rewrite MCP server configs. Delivers the
-  Finder-launch fix.
+- Signed, notarised releases and a Homebrew tap. Then decide whether the daemon is
+  still needed once releases keep Keychain access across upgrades.
 
 **Gated on the migration being lived with:**
 
@@ -85,7 +77,7 @@ these before the core is in daily use would be building on a guess.
 
 ## The decision point
 
-**This is now runnable.** `keyward migrate -apply ~/.zshrc` does the whole job in
+**This is now runnable.** `keyward migrate ~/.zshrc` does the whole job in
 one command, so the experiment costs a minute rather than an afternoon.
 
 The project has one real go/no-go, and it is not about security:

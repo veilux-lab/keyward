@@ -1,5 +1,8 @@
 # Handoff: test free Apple Development signing
 
+**Done 2026-10-01: passed.** The result is in [obstacles.md](obstacles.md) 2a. Kept
+for rerunning the test, for example against a Developer ID.
+
 Instructions for an AI agent on the owner's personal Mac. Read this file, then
 follow the steps in order. Nothing else in the repo needs reading unless a step
 names it. Your context is limited, so do not explore.
