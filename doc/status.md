@@ -46,7 +46,7 @@ cgo Keychain file is excluded without the `integration` tag; it is covered by
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
 | `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket, so CLI rebuilds no longer prompt. Verified end to end across two builds. Not yet started at login (launchd). |
-| Code signing | Apple Development rebuild test passed | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s); unsigned control denied. Developer ID distribution signing remains untested and requires the paid programme; free Personal Team signing cannot be used for distribution to others. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
+| Code signing | Apple Development rebuild test passed twice | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s, 0.04s); unsigned control denied in both runs. Developer ID distribution signing remains untested and requires the paid programme; free Personal Team signing cannot be used for distribution to others. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
 | `internal/doctor` | **Done** | Dangling, malformed, orphaned, unknown, plus stated coverage. Report-only. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
 

@@ -149,14 +149,17 @@ team ID; the unsigned control had no team ID. Their designated requirement named
 `com.nwokolo24.keyward`, Apple's generic trust anchor, and the signing certificate's
 common name.
 
-| Build | Result | Read time |
-| --- | --- | --- |
-| `kwd-a` (item creator) | READ | 0.04s |
-| `kwd-b` (signed rebuild) | READ | 0.06s |
-| `kwd-unsigned` (unsigned rebuild) | BLOCKED, access denied | 24.52s |
+| Build | Result in both runs | First valid run | Repeat run |
+| --- | --- | --- | --- |
+| `kwd-a` (item creator) | READ | 0.04s | 0.03s |
+| `kwd-b` (signed rebuild) | READ | 0.06s | 0.04s |
+| `kwd-unsigned` (unsigned rebuild) | BLOCKED, access denied | 24.52s | 74.39s |
 
 The unsigned control reported `prompt dismissed: access to the secret was denied`.
-The exact GUI wording and whether codesign displayed dialogs were not recorded.
+Its timing includes the owner's time to answer the dialog. On the repeat, the
+owner confirmed Deny on `kwd-unsigned` and no `kwd-b` dialog. The item-access dialog
+contained `your confidential information stored in`; complete wording was not
+captured. A codesign dialog requested access to the Apple Development signing key.
 
 **Pass:** the signed rebuild read in under two seconds while the unsigned control
 was denied. Apple Development signing survives a rebuild on this Mac. This supports
