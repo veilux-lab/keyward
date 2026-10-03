@@ -88,18 +88,19 @@ let you try it out without touching real entries.
 
 ## Homebrew installation
 
-The source-built formula is prepared locally; the public tap and release download
-have not been published yet. Once published, installation will be:
+The source-built formula and release are available from the public
+[Veilux Lab tap](https://github.com/veilux-lab/homebrew-tap):
 
 ```sh
 brew tap veilux-lab/tap
-brew install keyward
+brew install veilux-lab/tap/keyward
 keyward service install
 keyward service status
 ```
 
 No paid Apple Developer membership is needed. Homebrew builds the CLI using Go
-and Apple's command line tools. The daemon is managed by `brew services`, with
+and Apple's command line tools. The fully qualified install command also handles
+formula-specific trust on Homebrew versions that require it. The daemon is managed by `brew services`, with
 its executable under Homebrew's stable `opt` path. The signed status app is not
 included. `keyward service install` starts or restarts the Homebrew daemon;
 `keyward service uninstall` warns about restoration and requires `yes` before
@@ -210,8 +211,8 @@ team are also untested.
 
 ## Status
 
-Working, with signed local installation and automatic daemon startup. A source
-formula and release-preparation command are implemented; publication is pending.
+Working, with signed local installation and automatic daemon startup. The public
+Homebrew tap provides source-built release `v0.1.0` with login startup.
 There is no notarised release. For an unsigned development build, use
 `make build` and run `bin/keyward daemon` in a terminal.
 

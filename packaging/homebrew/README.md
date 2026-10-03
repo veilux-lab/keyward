@@ -11,7 +11,7 @@ required. It is macOS-only and uses Go and Apple's command line tools to build.
 
 ```sh
 brew tap veilux-lab/tap
-brew install keyward
+brew install veilux-lab/tap/keyward
 keyward service install
 keyward service status
 ```
@@ -19,6 +19,9 @@ keyward service status
 Run startup commands as your normal user. The broker starts now and at login
 through `brew services`. The signed native status app is not included.
 Installation does not migrate secrets or modify shell startup files.
+The fully qualified install command handles formula-specific trust on Homebrew
+versions that require it. To install by short name instead, first run
+`brew trust --formula veilux-lab/tap/keyward` when Homebrew requests trust.
 
 Store values through standard input, then use references in your configuration.
 See `keyward --help` for migration, restoration, and command examples. Never put a

@@ -4,11 +4,17 @@ The first Homebrew package builds the CLI from source. It uses `brew services`
 for login startup and does not require an Apple certificate, notarization, or the
 native status app. The signed local installer remains available separately.
 
-## User flow after publication
+## Install
+
+Release `v0.1.0` and its source archive are public in
+[veilux-lab/homebrew-tap](https://github.com/veilux-lab/homebrew-tap).
+The public download checksum, source installation, and formula test were verified
+on the development Mac. First-user Keychain prompts and login startup on a fresh
+Mac remain untested.
 
 ```sh
 brew tap veilux-lab/tap
-brew install keyward
+brew install veilux-lab/tap/keyward
 keyward service install
 keyward service status
 ```
@@ -20,6 +26,10 @@ installation. Startup is an explicit user action; the formula does not enable it
 in `post_install`.
 The explicit service label `com.veilux-lab.keyward.homebrew` avoids dependence on
 Homebrew's default label, which varies between releases.
+The fully qualified installation command grants formula-specific trust when
+required. Installing by short name from an untrusted tap requires
+`brew trust --formula veilux-lab/tap/keyward` first; see
+[Homebrew's tap trust documentation](https://docs.brew.sh/Tap-Trust).
 
 `keyward service install` delegates to `brew services restart
 veilux-lab/tap/keyward`. It refuses to start over another daemon or the signed
@@ -70,9 +80,9 @@ in `internal/homebrew/keyward.rb.tmpl`; rerun the command for each new release.
 The release URL is an asset on the public tap repository, allowing the primary
 source repository to remain private while publishing a reviewed source snapshot.
 
-## Publication gates
+## Publication gates for future releases
 
-The package is not publicly installable until all of these are complete:
+Before publishing a new version:
 
 1. Verify the generated formula locally with a source install, `brew test`, style
    checks, and daemon smoke testing under a separate socket and Keychain service.
@@ -80,12 +90,13 @@ The package is not publicly installable until all of these are complete:
    `veilux-lab/homebrew-tap` repository, publish the source archive as release
    `v0.1.0`, and push the formula to its `main` branch. Publishing the archive
    makes that source snapshot publicly readable.
-3. Authenticate GitHub publication. The current GitHub CLI login is unavailable;
-   the owner can run `gh auth login` without sharing credentials in chat.
+3. Authenticate GitHub publication with `gh auth login` without sharing
+   credentials in chat.
 4. Upload the exact archive used for the formula checksum. Push the formula and a
    tap README containing setup, upgrade, restoration, and uninstall instructions.
-5. Verify an install from the public URL on a fresh Mac. Until then, the local
-   packaging test is not evidence of public installation or first-user prompts.
+5. Verify the public download checksum, installation, and formula test. Verify
+   first-user prompts and login startup on a fresh Mac separately; an install on
+   the development Mac does not establish those behaviors.
 
 A paid Apple Developer account is only a gate for a later Developer ID-signed and
 notarized prebuilt distribution, not for this source formula.

@@ -18,7 +18,8 @@ also exercises the real Keychain, under a separate service name.
 Signing: a daemon rebuilt with the same **Apple Development** certificate keeps
 Keychain access, while self-signed and unsigned rebuilds do not (obstacles.md 2a).
 Prebuilt signed distribution needs a Developer ID, which is untested. Source-built
-Homebrew packaging is implemented without that requirement; publication is pending.
+Homebrew release `v0.1.0` is public in `veilux-lab/homebrew-tap` without that
+requirement. Installation from its public archive and `brew test` pass.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -78,11 +79,11 @@ available to work on.
 - Simplify signed local builds to direct Keychain access, with a cross-process
   lock and continued logging. The isolated access test has passed.
 
-**Gated on public source and tap publication:**
+**Gated on a fresh Mac:**
 
-- Source-built Homebrew installation; see [homebrew.md](homebrew.md). Local
-  package verification, explicit publication approval, and GitHub authentication
-  gate the public release.
+- First-user Keychain prompts and login startup for the public source-built
+  Homebrew package; see [homebrew.md](homebrew.md). The public installation path
+  is verified on the development Mac.
 
 **Gated on a paid Developer ID:**
 
@@ -116,6 +117,17 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-02 (public Homebrew release)** — Published the approved public
+`veilux-lab/homebrew-tap` repository and release `v0.1.0`, including the tested
+source archive from commit `821d4dd`. The primary repository remains private.
+The public download matches SHA-256
+`80fcac2040f3a841a70b6d75df3f7276e2790680145cdbf8729c76e9a2493464`.
+Verified installation from the public release and the fully qualified command
+`brew install veilux-lab/tap/keyward`, which handles formula-specific trust on
+Homebrew 7. Updated setup instructions to use that command. The signed owner
+installation was retained; first-user prompts and login startup on a fresh Mac
+remain untested.
 
 **2026-10-02 (source-built Homebrew package)** — Added a formula template and
 `cmd/keyward-release` to generate a committed source archive and matching checksum.
