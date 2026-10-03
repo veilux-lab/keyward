@@ -53,6 +53,7 @@ Commit the tested source first, then run:
 
 ```sh
 go run ./cmd/keyward-release -version 0.1.0 -out bin/homebrew
+cp packaging/homebrew/README.md bin/homebrew/README.md
 ```
 
 The command uses `git archive` at the current commit and creates:
@@ -61,6 +62,7 @@ The command uses `git archive` at the current commit and creates:
   untracked files.
 - `bin/homebrew/Formula/keyward.rb`: versioned download URL and exact archive
   SHA-256, with a source build, service definition, caveats, and formula test.
+- `bin/homebrew/README.md`: the reviewed tap installation and removal instructions.
 
 Tracked uncommitted changes and existing output files are refused. The archive's
 filename and download URL use the same version as the CLI. The template is retained

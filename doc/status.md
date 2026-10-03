@@ -127,6 +127,11 @@ restart in 19.383ms. Service metadata verification identified Homebrew's changed
 default job label; the formula and manager now use an explicit stable label,
 `com.veilux-lab.keyward.homebrew`. Public tap/source publication requires
 explicit approval and authenticated GitHub access; see [homebrew.md](homebrew.md).
+The final formula was reinstalled successfully. A real `brew services` fixture
+verified startup, automatic restart, and dummy resolution in 0.122s/0.086s, then
+removed its startup configuration and Keychain item. The installed Homebrew CLI
+also refused to start over the owner's signed agent. The owner installation was
+not replaced, and real secrets and startup files were not accessed.
 
 **2026-10-02 (Veilux Lab repository)** — The owner transferred the project to
 `veilux-lab/keyward`. Updated the local Git remote, Go module/import paths, signing
