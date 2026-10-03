@@ -10,8 +10,8 @@ package daemon
 import (
 	"errors"
 
-	"github.com/nwokolo24/keyward/internal/handle"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 // maxMessage bounds a request or response. Far above any real credential.

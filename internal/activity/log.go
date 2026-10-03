@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/handle"
 	"golang.org/x/sys/unix"
 )
 

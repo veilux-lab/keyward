@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nwokolo24/keyward/internal/appbundle"
+	"github.com/veilux-lab/keyward/internal/appbundle"
 )
 
 func main() {

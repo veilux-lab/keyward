@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/appbundle"
-	"github.com/nwokolo24/keyward/internal/launchd"
+	"github.com/veilux-lab/keyward/internal/appbundle"
+	"github.com/veilux-lab/keyward/internal/launchd"
 )
 
 type harness struct {

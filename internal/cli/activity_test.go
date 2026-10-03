@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/activity"
 )
 
 func TestActivityIsWrittenBeforeExecWithoutArgumentsOrEnvironment(t *testing.T) {

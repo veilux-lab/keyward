@@ -12,11 +12,11 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/nwokolo24/keyward/internal/activity"
-	"github.com/nwokolo24/keyward/internal/cli"
-	"github.com/nwokolo24/keyward/internal/daemon"
-	"github.com/nwokolo24/keyward/internal/launchd"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/cli"
+	"github.com/veilux-lab/keyward/internal/daemon"
+	"github.com/veilux-lab/keyward/internal/launchd"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 func main() {

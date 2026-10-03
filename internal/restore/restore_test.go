@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/restore"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/restore"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 type observedStore struct {

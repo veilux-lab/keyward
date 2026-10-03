@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/cli"
+	"github.com/veilux-lab/keyward/internal/cli"
 )
 
 func TestTrimSecret(t *testing.T) {

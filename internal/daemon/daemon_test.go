@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/daemon"
-	"github.com/nwokolo24/keyward/internal/handle"
-	"github.com/nwokolo24/keyward/internal/vault"
-	"github.com/nwokolo24/keyward/internal/vault/vaulttest"
+	"github.com/veilux-lab/keyward/internal/daemon"
+	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/vault/vaulttest"
 )
 
 // socketPath returns a path in a fresh directory. Not t.TempDir: macOS caps a

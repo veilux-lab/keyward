@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/activity"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 func TestStoreEventsContainOnlyMetadata(t *testing.T) {

@@ -59,4 +59,4 @@ It is for local use only; distribution needs a paid Developer ID.
   without the owner's explicit approval given just before that action. Say the repo,
   the branch, and the action when asking. An earlier approval does not cover the
   next push.
-- Remote: `git@github.com:nwokolo24/keyward.git` (private), branch `main`.
+- Remote: `git@github.com:veilux-lab/keyward.git` (private), branch `main`.

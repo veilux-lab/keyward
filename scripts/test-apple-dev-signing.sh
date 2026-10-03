@@ -65,7 +65,7 @@ go version
 
 echo "== build"
 for b in kwd-a kwd-b kwd-unsigned kw; do
-	go build -o "$T/$b" -ldflags "-X github.com/nwokolo24/keyward/internal/cli.Version=$b" ./cmd/keyward || exit 1
+	go build -o "$T/$b" -ldflags "-X github.com/veilux-lab/keyward/internal/cli.Version=$b" ./cmd/keyward || exit 1
 done
 
 echo "== sign (a codesign dialog here is for your signing key: Allow)"

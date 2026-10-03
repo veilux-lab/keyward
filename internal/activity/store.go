@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/handle"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 type Store struct {

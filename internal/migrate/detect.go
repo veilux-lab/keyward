@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/nwokolo24/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/handle"
 )
 
 // Detection is the verdict on one assignment, with the reasoning behind it.

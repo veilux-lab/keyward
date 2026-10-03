@@ -10,9 +10,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/nwokolo24/keyward/internal/handle"
-	"github.com/nwokolo24/keyward/internal/migrate"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/migrate"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 type Item struct {

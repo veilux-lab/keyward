@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/activity"
-	"github.com/nwokolo24/keyward/internal/handle"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 // ioTimeout bounds reading a request and writing a response. Not the store call

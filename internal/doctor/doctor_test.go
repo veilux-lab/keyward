@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/doctor"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/doctor"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 func write(t *testing.T, dir, name, content string) string {

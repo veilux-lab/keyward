@@ -3,8 +3,8 @@ package vault_test
 import (
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/vault"
-	"github.com/nwokolo24/keyward/internal/vault/vaulttest"
+	"github.com/veilux-lab/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/vault/vaulttest"
 )
 
 // The fake is held to the same contract as the real Keychain store. Every piece

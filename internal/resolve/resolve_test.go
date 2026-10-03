@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/handle"
-	"github.com/nwokolo24/keyward/internal/resolve"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/resolve"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 const token = "eyJraWQiOiJzcGx1bmsiLCJhbGciOiJIUzI1NiJ9"

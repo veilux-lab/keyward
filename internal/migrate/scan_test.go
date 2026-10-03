@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/migrate"
+	"github.com/veilux-lab/keyward/internal/migrate"
 )
 
 // Round-trip fidelity is the property everything else depends on. This tool

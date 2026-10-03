@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/handle"
 )
 
 func TestParseValid(t *testing.T) {

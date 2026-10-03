@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/activity"
-	"github.com/nwokolo24/keyward/internal/appbundle"
-	"github.com/nwokolo24/keyward/internal/daemon"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/appbundle"
+	"github.com/veilux-lab/keyward/internal/daemon"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 const label = "com.nwokolo24.keyward"

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/activity"
 )
 
 func config(t *testing.T) activity.Config {

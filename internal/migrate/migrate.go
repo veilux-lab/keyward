@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 // Change is an assignment that will become a reference.

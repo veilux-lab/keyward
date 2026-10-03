@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nwokolo24/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/handle"
 )
 
 // Memory is an in-process Store, used to test everything built above the

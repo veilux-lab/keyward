@@ -19,8 +19,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/nwokolo24/keyward/internal/handle"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 // Reference is one occurrence of a cap:// reference in a file.

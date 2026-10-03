@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/cli"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/cli"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 const token = "eyJraWQiOiJzcGx1bmsiLCJhbGciOiJIUzI1NiJ9"

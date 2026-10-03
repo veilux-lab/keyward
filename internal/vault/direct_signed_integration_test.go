@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/daemon"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/daemon"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 // Compile and sign this test binary with the daemon's identity and identifier.

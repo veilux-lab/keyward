@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/appbundle"
+	"github.com/veilux-lab/keyward/internal/appbundle"
 )
 
 func TestBuildPackagesBrandingAndKeepsDaemonSeparate(t *testing.T) {

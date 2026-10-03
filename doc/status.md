@@ -110,6 +110,12 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-02 (Veilux Lab repository)** — The owner transferred the project to
+`veilux-lab/keyward`. Updated the local Git remote, Go module/import paths, signing
+script, and repository documentation. Existing Apple signing, app, LaunchAgent,
+and Keychain service identifiers remain stable for installed users. `make verify`
+passed under the new module path.
+
 **2026-10-02 (bounded activity logging)** — CLI and daemon events now share
 `activity.jsonl`, with 30-day / 50 MiB defaults, daily / 10 MiB rotation, and
 environment overrides. Cleanup runs on CLI startup and event writes; legacy

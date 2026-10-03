@@ -1,4 +1,4 @@
-module github.com/nwokolo24/keyward
+module github.com/veilux-lab/keyward
 
 go 1.26.4
 

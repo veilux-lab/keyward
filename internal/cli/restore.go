@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nwokolo24/keyward/internal/restore"
+	"github.com/veilux-lab/keyward/internal/restore"
 )
 
 func (c *CLI) restore(args []string) int {

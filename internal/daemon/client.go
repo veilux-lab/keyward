@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 // ErrNotRunning means nothing is listening on the socket.

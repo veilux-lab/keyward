@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwokolo24/keyward/internal/migrate"
+	"github.com/veilux-lab/keyward/internal/migrate"
 )
 
 func TestDetectSecrets(t *testing.T) {
@@ -116,7 +116,7 @@ func TestDetectNonSecrets(t *testing.T) {
 		{"API_ENDPOINT2", "https://api.example.com/users/me@example.com"},
 
 		// A URL with a bare username and no password is not a credential.
-		{"GIT_REMOTE", "https://nwokolo24@github.com/nwokolo24/keyward.git"},
+		{"GIT_REMOTE", "https://nwokolo24@github.com/veilux-lab/keyward.git"},
 
 		// Prompt strings are full of punctuation but are not secrets.
 		{"PROMPT", "%n@%m %~ "},

@@ -17,12 +17,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/activity"
-	"github.com/nwokolo24/keyward/internal/doctor"
-	"github.com/nwokolo24/keyward/internal/handle"
-	"github.com/nwokolo24/keyward/internal/migrate"
-	"github.com/nwokolo24/keyward/internal/resolve"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/doctor"
+	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/migrate"
+	"github.com/veilux-lab/keyward/internal/resolve"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 // Version is the build version, overridable at link time.

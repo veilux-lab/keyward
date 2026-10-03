@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwokolo24/keyward/internal/daemon"
-	"github.com/nwokolo24/keyward/internal/launchd"
-	"github.com/nwokolo24/keyward/internal/vault"
+	"github.com/veilux-lab/keyward/internal/daemon"
+	"github.com/veilux-lab/keyward/internal/launchd"
+	"github.com/veilux-lab/keyward/internal/vault"
 )
 
 // The two binaries must be distinct builds signed with the same Apple identity.
