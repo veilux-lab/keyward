@@ -1,7 +1,7 @@
 //go:build darwin && cgo && integration
 
-// This is the only test that touches the real Keychain, which is why it sits
-// behind a build tag and out of `make test`. Run it with `make test-integration`.
+// These tests touch the real Keychain, so they sit behind a build tag and out of
+// `make test`. Run them with `make test-integration`.
 //
 // It uses a dedicated service name, so it cannot see or modify a real keyward
 // entry no matter what the contract suite does.

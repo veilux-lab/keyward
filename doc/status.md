@@ -19,6 +19,12 @@ Signing: a daemon rebuilt with the same **Apple Development** certificate keeps
 Keychain access, while self-signed and unsigned rebuilds do not (obstacles.md 2a).
 Shipping to other people needs a Developer ID, which is untested.
 
+Direct access was also verified from a distinct signed command-line test binary:
+read, replace, and delete of daemon-created dummy items all succeeded after their
+creator process exited. Production still routes through the daemon. A signed CLI
+can replace that architecture once cross-process coordination and logging are
+handled; see [obstacles.md](obstacles.md) 2a.
+
 ### Known issues
 
 - `Replace` succeeds across builds signed with the same Apple Development
@@ -66,11 +72,13 @@ available to work on.
   Delivers the Finder-launch fix.
 - `internal/audit`: append-only JSONL.
 - Verify login startup at the next logout/login.
+- Simplify signed local builds to direct Keychain access, with a cross-process
+  lock and continued logging. The isolated access test has passed.
 
 **Gated on a paid Developer ID:**
 
-- Signed, notarised releases and a Homebrew tap. Then decide whether the daemon is
-  still needed once releases keep Keychain access across upgrades.
+- Signed, notarised releases and a Homebrew tap. Verify direct access and upgrades
+  under Developer ID before using that architecture for distribution.
 
 **Gated on the migration being lived with:**
 
@@ -99,6 +107,15 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-02 (direct signed access)** — Added a repeatable isolated test for a
+signed command-line process accessing daemon-created items directly. It enforces
+matching Apple signing requirements and distinct code hashes, stops the creator
+daemon before direct access, compares values by hash, and cleans up its unique
+service and files. Read took 23.523ms, replacement 11.839ms, replacement read
+2.065ms, and deletion of replaced/untouched items 6.073ms/5.927ms. The test passed;
+the unsigned build failed its signing preflight without touching items.
+`make verify` passed. No production routing or real user secrets were changed.
 
 **2026-10-02 (uninstall warning)** — Removed the combined `uninstall --restore`
 option. Restoration is an explicit command. CLI uninstall warns users to run it

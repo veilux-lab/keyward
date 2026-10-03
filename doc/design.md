@@ -221,6 +221,13 @@ only the same user can open. The CLI can be rebuilt freely. Unsigned daemon
 rebuilds need per-item approval; rebuilding with the same Apple Development
 certificate preserves access on the tested Mac.
 
+Direct access from a separately built, equally signed command-line process was
+also verified on 2026-10-02: it read, replaced, and deleted daemon-created dummy
+items after their creator process exited. Signing therefore permits a simpler
+CLI that owns its Keychain calls on this Mac. That is not the current production
+path; removing the required daemon would need a cross-process lock and continued
+activity logging. See [obstacles.md](obstacles.md) 2a for the repeatable test.
+
 `keyward service install` copies a signed build into `~/.local/bin` and registers a
 per-user LaunchAgent. launchd starts it at login and restarts it if it exits. Updates
 replace the executable atomically, restart the agent, and check its socket without

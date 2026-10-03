@@ -166,6 +166,44 @@ was denied. Apple Development signing survives a rebuild on this Mac. This suppo
 testing Developer ID for distribution, without proving that certificate renewal or
 a change of team preserves access.
 
+### Direct signed access to daemon-created items, tested (2026-10-02)
+
+A command-line integration-test binary called `vault.NewKeychainService` directly
+on macOS 27.0.1 (26A434). The installed daemon binary created two dummy items under
+a unique test service in a disposable process. That process exited and its socket
+was removed before the direct calls. The caller and daemon had different code
+hashes, the same Apple Development signing team and identifier, and identical
+designated requirements.
+
+| Direct operation | Result | Duration |
+| --- | --- | --- |
+| Read daemon-created item | Value matched by SHA-256 | 23.523ms |
+| Replace daemon-created item | Success | 11.839ms |
+| Read replacement | Value matched by SHA-256 | 2.065ms |
+| Delete replaced item | Success; subsequent read reported not found | 6.073ms |
+| Delete untouched daemon-created item | Success; subsequent read reported not found | 5.927ms |
+
+All calls succeeded well below two seconds. The test service was empty afterward;
+the temporary daemon and files were removed. No real user items were read. The
+unsigned test build was rejected by the signing preflight before creating items;
+this run did not repeat the unsigned item-access control from the earlier test.
+
+This verifies direct access with the same certificate and identifier on this Mac.
+The daemon is no longer required to solve that access problem. Production still
+uses it; removing it would also require coordination between CLI processes and
+preserving activity logging. Certificate renewal and team changes remain untested.
+
+To repeat, compile and sign the test caller with the installed daemon's identity:
+
+```sh
+go test -c -tags integration -o bin/keyward-direct-test ./internal/vault
+codesign --force --sign "$SIGN_IDENTITY" --identifier com.nwokolo24.keyward bin/keyward-direct-test
+KEYWARD_TEST_DAEMON_BINARY="$HOME/.local/bin/keyward" bin/keyward-direct-test -test.run '^TestSignedDirectAccessToDaemonItems$' -test.v -test.timeout 90s
+```
+
+Allow codesign's signing-key prompt, but Deny any item-access prompt during the
+test. A slow successful call is inconclusive, not a prompt-free pass.
+
 ### The mechanism
 
 A Keychain item carries an access control list: which programs may read its value.
