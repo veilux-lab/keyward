@@ -21,7 +21,7 @@ func TestHomebrewServiceLifecycleDoesNotCopyOrSign(t *testing.T) {
 			loaded = args[1] == "restart"
 			return nil
 		}
-		if args[1] == "gui/501/homebrew.mxcl.keyward" && loaded {
+		if args[1] == "gui/501/com.veilux-lab.keyward.homebrew" && loaded {
 			return nil
 		}
 		return errors.New("not loaded")

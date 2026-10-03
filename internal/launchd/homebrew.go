@@ -20,7 +20,7 @@ func (h Homebrew) Run(action string) (string, error) {
 		return "", errors.New("Homebrew service needs absolute home and brew paths and a user ID")
 	}
 	m := Manager{Home: h.Home, UID: h.UID, Command: h.Command, Ready: h.Ready}
-	target := fmt.Sprintf("gui/%d/homebrew.mxcl.keyward", h.UID)
+	target := fmt.Sprintf("gui/%d/com.veilux-lab.keyward.homebrew", h.UID)
 	const formula = "veilux-lab/tap/keyward"
 	switch action {
 	case "status":

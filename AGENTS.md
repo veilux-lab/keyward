@@ -49,7 +49,9 @@ go build -o bin/keyward ./cmd/keyward
 codesign --force --sign "Apple Development: …" --identifier com.nwokolo24.keyward bin/keyward
 ```
 
-It is for local use only; distribution needs a paid Developer ID.
+It is for local use only. Prebuilt Developer ID-signed and notarized distribution
+needs paid Apple membership. Source-built Homebrew distribution does not; daemon
+upgrades may require approval to read older Keychain items. See doc/homebrew.md.
 
 ## Git
 

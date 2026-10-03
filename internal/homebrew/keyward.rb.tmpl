@@ -18,6 +18,7 @@ class Keyward < Formula
   end
 
   service do
+    name macos: "com.veilux-lab.keyward.homebrew"
     run [opt_bin/"keyward", "daemon"]
     keep_alive true
     working_dir Dir.home

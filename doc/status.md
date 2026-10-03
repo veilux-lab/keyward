@@ -121,8 +121,11 @@ correct response is to stop building, not to push through.
 `cmd/keyward-release` to generate a committed source archive and matching checksum.
 The Homebrew build delegates `service` commands to `brew services`, without a
 certificate or companion app, and refuses a second daemon. Restore warnings and
-confirmation remain in place. Unit checks pass; source-package installation and
-an isolated daemon smoke test are pending. Public tap/source publication requires
+confirmation remain in place. `make verify`, a real source install, `brew test`,
+and formula style checks passed. The formula binary read its dummy item after
+restart in 19.383ms. Service metadata verification identified Homebrew's changed
+default job label; the formula and manager now use an explicit stable label,
+`com.veilux-lab.keyward.homebrew`. Public tap/source publication requires
 explicit approval and authenticated GitHub access; see [homebrew.md](homebrew.md).
 
 **2026-10-02 (Veilux Lab repository)** — The owner transferred the project to

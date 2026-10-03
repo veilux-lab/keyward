@@ -18,6 +18,8 @@ macOS Security.framework, injects the release version and Homebrew executable
 path, and starts `opt_bin/keyward daemon`. No secret migration happens during
 installation. Startup is an explicit user action; the formula does not enable it
 in `post_install`.
+The explicit service label `com.veilux-lab.keyward.homebrew` avoids dependence on
+Homebrew's default label, which varies between releases.
 
 `keyward service install` delegates to `brew services restart
 veilux-lab/tap/keyward`. It refuses to start over another daemon or the signed
