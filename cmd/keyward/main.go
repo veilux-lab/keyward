@@ -6,10 +6,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
+	"github.com/nwokolo24/keyward/internal/activity"
 	"github.com/nwokolo24/keyward/internal/cli"
 	"github.com/nwokolo24/keyward/internal/daemon"
 	"github.com/nwokolo24/keyward/internal/launchd"
@@ -28,6 +31,26 @@ func main() {
 	// Failures here are not fatal: doctor simply reports fewer files as scanned.
 	home, _ := os.UserHomeDir()
 	workdir, _ := os.Getwd()
+	config, err := activity.FromEnv(home, os.Getenv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "keyward:", err)
+		os.Exit(2)
+	}
+	log, err := activity.New(config)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "keyward:", err)
+		os.Exit(2)
+	}
+	var warning sync.Once
+	warn := func(err error) {
+		if err != nil {
+			warning.Do(func() {
+				fmt.Fprintln(os.Stderr, "keyward: activity logging unavailable; operation continues without a complete activity log")
+			})
+		}
+	}
+	warn(log.Clean())
+	record := func(e activity.Event) { warn(log.Record(e)) }
 
 	socket := os.Getenv("KEYWARD_SOCKET")
 	if socket == "" {
@@ -44,10 +67,11 @@ func main() {
 		Exec:       syscall.Exec,
 		Home:       home,
 		Workdir:    workdir,
+		Record:     record,
 		Daemon: func() error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return daemon.Run(ctx, socket, vault.NewKeychainService(service), os.Stderr)
+			return daemon.RunLogged(ctx, socket, vault.NewKeychainService(service), record)
 		},
 		Service: func(action string) (string, error) {
 			executable, err := os.Executable()
@@ -57,6 +81,7 @@ func main() {
 			return (launchd.Manager{
 				Home: home, Executable: executable, UID: os.Getuid(),
 				Socket: socket, Service: service,
+				LogConfig: &config,
 			}).Run(action)
 		},
 	}

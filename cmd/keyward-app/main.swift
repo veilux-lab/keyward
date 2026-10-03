@@ -5,7 +5,7 @@ application.setActivationPolicy(.accessory)
 application.finishLaunching()
 let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/keyward")
 let log = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Logs/keyward/daemon.log")
+    .appendingPathComponent("Library/Logs/keyward/activity.jsonl")
 
 func service(_ action: String) -> (Bool, String) {
     let process = Process()
@@ -37,7 +37,7 @@ while true {
     let alert = NSAlert()
     alert.messageText = "Keyward by Veilux"
     alert.informativeText = status.trimmingCharacters(in: .whitespacesAndNewlines)
-        + "\n\nActivity logs record request names and outcomes. Secret values are never logged."
+        + "\n\nActivity logs record request names and outcomes. Secret values are never logged. History is kept for 30 days, capped at 50 MB by default."
     if running {
         alert.informativeText += "\n\nWarning: disabling startup stops the daemon; cap:// references will not resolve while it is stopped. Before uninstalling or deleting Keyward, run keyward restore <file>... in Terminal if you want secrets returned to your files (for example: keyward restore ~/.zshrc .env). Restored files contain plaintext secrets again. Keychain entries are kept."
     }

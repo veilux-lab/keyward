@@ -108,7 +108,10 @@ func TestInstallStartsSignedDaemonAndPreservesArguments(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(h.m.Home, "Applications", "Keyward.app", "Contents", "Info.plist")); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{h.plist(), filepath.Join(h.m.Home, "Library", "Logs", "keyward", "daemon.log")} {
+	if strings.Contains(string(plist), "daemon.log") || !strings.Contains(string(plist), "/dev/null") {
+		t.Fatal("launchd still writes an unbounded daemon log")
+	}
+	for _, path := range []string{h.plist(), filepath.Join(h.m.Home, "Library", "Logs", "keyward", "activity.jsonl")} {
 		info, err := os.Stat(path)
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("private file %s: %v", path, err)

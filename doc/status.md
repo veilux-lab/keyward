@@ -34,8 +34,9 @@ handled; see [obstacles.md](obstacles.md) 2a.
   Background App Activity entry still shows the personal signing-certificate name.
   Cached attribution may explain this; a fresh-machine notification is untested.
   Product branding does not change the certificate's publisher identity.
-- Activity logs include reference names and outcomes, never values. Log rotation
-  and the separate append-only audit trail are not implemented.
+- Activity logging is best effort: storage failures warn in the CLI and operations
+  continue. Same-user processes can read or modify it; tamper-evident audit history
+  is not implemented. Idle files are cleaned on the next use.
 
 ## Component status
 
@@ -48,7 +49,8 @@ handled; see [obstacles.md](obstacles.md) 2a.
 | `vault/vaulttest` | **Done** | Contract suite. The real Keychain store will be held to exactly this. |
 | Keychain store | **Done** | cgo against `SecItem*`. Passes the same contract suite as the fake, plus persistence and service-isolation tests. `make test-integration`. |
 | `internal/resolve` | **Done** | Environment scanning, caching, all-or-nothing resolution, aggregate errors. 100% covered. |
-| `internal/audit` | Not started | Independent; can land any time. |
+| `internal/activity` | **Done** | Private JSONL metadata, 30 days / 50 MiB defaults, daily / 10 MiB rotation, cross-process locking, legacy log retention, configurable limits. |
+| `internal/audit` | Not started | Tamper-evident history remains separate from activity logging. |
 | `cmd/keyward` | **Done** | `add`, `ls`, `rm`, `run`. Logic in `internal/cli` with store, streams, environ, and exec injected. |
 | `internal/migrate` | **Done** | Scan, detect, `Plan`, `Apply`. Dry run by default, redacted diff, backup, atomic write, idempotent. |
 | `internal/restore` | **Done** | Separate explicit command; redacted plan for selected files, mandatory exact `yes`, metadata-only dry run, best-effort atomic private writes, retained Keychain entries. Uninstall warns users to restore first and requires confirmation before stopping startup. |
@@ -70,7 +72,7 @@ available to work on.
 
 - `internal/mcpconfig`: rewrite MCP server configs to launch via `keyward run`.
   Delivers the Finder-launch fix.
-- `internal/audit`: append-only JSONL.
+- `internal/audit`: tamper-evident history if required beyond local activity logs.
 - Verify login startup at the next logout/login.
 - Simplify signed local builds to direct Keychain access, with a cross-process
   lock and continued logging. The isolated access test has passed.
@@ -107,6 +109,20 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-02 (bounded activity logging)** — CLI and daemon events now share
+`activity.jsonl`, with 30-day / 50 MiB defaults, daily / 10 MiB rotation, and
+environment overrides. Cleanup runs on CLI startup and event writes; legacy
+`daemon.log` counts toward the same budget without reading its contents. File
+locks and checked directory descriptors protect concurrent writes and rotation.
+Raw rejected names, values, arbitrary errors, provenance, environment, and child
+arguments/output are excluded. `run` logs its exec attempt before replacement.
+The status app opens the new log; LaunchAgent settings persist the selected limits.
+`make verify` passed. A disposable unsigned CLI/daemon smoke test verified real
+Keychain operations, secret redaction, rotation, expiry, the total budget including
+legacy history, and private permissions. The owner's files and Keychain items
+were untouched. Updating the signed local installation is pending macOS signing-key
+approval; the installed daemon still uses the previous logging behavior.
 
 **2026-10-02 (direct signed access)** — Added a repeatable isolated test for a
 signed command-line process accessing daemon-created items directly. It enforces

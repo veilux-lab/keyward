@@ -10,6 +10,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 T=$(mktemp -d /tmp/kwsig.XXXX) && chmod 700 "$T" || exit 1
 export KEYWARD_SOCKET="$T/d.sock" KEYWARD_SERVICE=keyward-signing-test
+export KEYWARD_LOG_DIR="$T/logs"
 ITEM=signing-probe
 VALUE="not-a-real-secret-$RANDOM$RANDOM"
 pid=

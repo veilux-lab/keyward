@@ -53,7 +53,7 @@ func TestSignedDirectAccessToDaemonItems(t *testing.T) {
 	socket := filepath.Join(dir, "d.sock")
 	cmd := exec.Command(binary, "daemon")
 	home, _ := os.UserHomeDir()
-	cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin", "KEYWARD_SERVICE=" + service, "KEYWARD_SOCKET=" + socket}
+	cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin", "KEYWARD_SERVICE=" + service, "KEYWARD_SOCKET=" + socket, "KEYWARD_LOG_DIR=" + filepath.Join(dir, "logs")}
 	cmd.Stdout, cmd.Stderr = log, log
 	const first, second = "direct-probe", "delete-probe"
 	var done chan error

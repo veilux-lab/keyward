@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwokolo24/keyward/internal/activity"
 	"github.com/nwokolo24/keyward/internal/appbundle"
 	"github.com/nwokolo24/keyward/internal/daemon"
 	"github.com/nwokolo24/keyward/internal/vault"
@@ -25,6 +26,7 @@ type Manager struct {
 	Bundle           string
 	Socket, Service  string
 	UID              int
+	LogConfig        *activity.Config
 	// Label defaults to the production agent; integration tests use a distinct job.
 	Label string
 	// Command is injected so tests never register a real login agent.
@@ -55,7 +57,7 @@ func (m Manager) Run(action string) (string, error) {
 			return "daemon is not loaded; start it with `keyward service install`", nil
 		}
 		if err := m.ready(); err != nil {
-			return "", fmt.Errorf("login agent is loaded but the daemon is not responding; check Library/Logs/keyward/daemon.log: %w", err)
+			return "", fmt.Errorf("login agent is loaded but the daemon is not responding; check Library/Logs/keyward/activity.jsonl: %w", err)
 		}
 		return "daemon is running and starts automatically at login", nil
 	case "uninstall":
@@ -106,25 +108,21 @@ func (m Manager) install(plist, domain, target string) (string, error) {
 		return "", err
 	}
 	binary := filepath.Join(m.Home, ".local", "bin", "keyward")
-	logDir := filepath.Join(m.Home, "Library", "Logs", "keyward")
-	logPath := filepath.Join(logDir, "daemon.log")
-	for dir, mode := range map[string]os.FileMode{filepath.Dir(binary): 0o755, filepath.Dir(plist): 0o755, logDir: 0o700} {
+	logConfig := activity.DefaultConfig(m.Home)
+	if m.LogConfig != nil {
+		logConfig = *m.LogConfig
+	}
+	logPath := filepath.Join(logConfig.Dir, "activity.jsonl")
+	for dir, mode := range map[string]os.FileMode{filepath.Dir(binary): 0o755, filepath.Dir(plist): 0o755} {
 		if err := os.MkdirAll(dir, mode); err != nil {
 			return "", err
 		}
 	}
-	info, err := os.Stat(logDir)
+	log, err := activity.New(logConfig)
 	if err != nil {
 		return "", err
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return "", errors.New("daemon log directory must be private (mode 700)")
-	}
-	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return "", err
-	}
-	if err := log.Close(); err != nil {
+	if err := log.Clean(); err != nil {
 		return "", err
 	}
 	oldBinary, err := snapshot(binary)
@@ -179,7 +177,7 @@ func (m Manager) install(plist, domain, target string) (string, error) {
 	if err := writeAtomic(binary, content, 0o755); err != nil {
 		return rollback(err)
 	}
-	if err := writeAtomic(plist, []byte(m.configuration(binary, logPath)), 0o600); err != nil {
+	if err := writeAtomic(plist, []byte(m.configuration(binary, logConfig)), 0o600); err != nil {
 		return rollback(err)
 	}
 	if err := m.command("/bin/launchctl", "bootstrap", domain, plist); err != nil {
@@ -241,7 +239,7 @@ func (m Manager) command(program string, args ...string) error {
 	return nil
 }
 
-func (m Manager) configuration(binary, log string) string {
+func (m Manager) configuration(binary string, config activity.Config) string {
 	socket := m.socket()
 	service := m.Service
 	if service == "" {
@@ -262,13 +260,17 @@ func (m Manager) configuration(binary, log string) string {
 <key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>2</integer>
 <key>Umask</key><integer>63</integer>
-<key>StandardErrorPath</key><string>%s</string>
+<key>StandardErrorPath</key><string>/dev/null</string>
 <key>EnvironmentVariables</key><dict>
 <key>KEYWARD_SOCKET</key><string>%s</string>
 <key>KEYWARD_SERVICE</key><string>%s</string>
+<key>KEYWARD_LOG_DIR</key><string>%s</string>
+<key>KEYWARD_LOG_RETENTION_DAYS</key><string>%d</string>
+<key>KEYWARD_LOG_MAX_MB</key><string>%d</string>
+<key>KEYWARD_LOG_ROTATE_MB</key><string>%d</string>
 </dict>
 </dict></plist>
-`, escape(m.Label), escape(binary), escape(log), escape(socket), escape(service))
+`, escape(m.Label), escape(binary), escape(socket), escape(service), escape(config.Dir), int64(config.Retention/(24*time.Hour)), config.MaxBytes>>20, config.RotateBytes>>20)
 }
 
 type savedFile struct {

@@ -15,7 +15,9 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/nwokolo24/keyward/internal/activity"
 	"github.com/nwokolo24/keyward/internal/doctor"
 	"github.com/nwokolo24/keyward/internal/handle"
 	"github.com/nwokolo24/keyward/internal/migrate"
@@ -68,6 +70,9 @@ type CLI struct {
 
 	// Service manages the signed installation and login agent.
 	Service func(action string) (string, error)
+
+	Record    func(activity.Event)
+	cancelled bool
 }
 
 const usage = `usage: keyward <command> [arguments]
@@ -101,10 +106,48 @@ examples:
   keyward migrate --dry-run ~/.zshrc   # describe, change nothing
   keyward migrate ~/.zshrc             # describe, then confirm with "yes"
   keyward restore ~/.zshrc             # list, then confirm plaintext restoration
+
+logging:
+  ~/Library/Logs/keyward/activity.jsonl (metadata only)
+  30 days, 50 MB total; rotate daily or at 10 MB by default
+  KEYWARD_LOG_RETENTION_DAYS, KEYWARD_LOG_MAX_MB, KEYWARD_LOG_ROTATE_MB
 `
 
 // Run dispatches a command and returns a process exit code.
 func (c *CLI) Run(args []string) int {
+	if c.Record == nil || len(args) == 0 {
+		return c.dispatch(args)
+	}
+	command := args[0]
+	if command == "--help" || command == "-h" {
+		command = "help"
+	}
+	switch command {
+	case "add", "ls", "rm", "run", "migrate", "restore", "doctor", "daemon", "service", "help", "version":
+	default:
+		return c.dispatch(args)
+	}
+	start := time.Now()
+	store := c.Store
+	c.cancelled = false
+	if store != nil {
+		c.Store = &activity.Store{Store: store, Command: command, Record: c.Record}
+	}
+	defer func() { c.Store = store }()
+	code := c.dispatch(args)
+	outcome := "ok"
+	if code == exitUsage {
+		outcome = "usage"
+	} else if c.cancelled {
+		outcome = "cancelled"
+	} else if code != exitOK {
+		outcome = "error"
+	}
+	c.Record(activity.Event{Command: command, Operation: "command", Outcome: outcome, DurationMS: time.Since(start).Milliseconds()})
+	return code
+}
+
+func (c *CLI) dispatch(args []string) int {
 	if len(args) == 0 {
 		fmt.Fprint(c.Stderr, usage)
 		return exitUsage
@@ -303,6 +346,9 @@ func (c *CLI) run(args []string) int {
 		return c.fail("keyward run: %v", err)
 	}
 
+	if c.Record != nil {
+		c.Record(activity.Event{Command: "run", Operation: "exec", Outcome: "started"})
+	}
 	if err := c.Exec(path, args, result.Env); err != nil {
 		return c.fail("keyward run: executing %s: %v", args[0], err)
 	}
@@ -408,6 +454,7 @@ func (c *CLI) confirm(count int, path string) (bool, error) {
 
 func (c *CLI) readConfirmation() (bool, error) {
 	if c.Stdin == nil {
+		c.cancelled = true
 		return false, nil
 	}
 	line, err := bufio.NewReader(c.Stdin).ReadString('\n')
@@ -415,7 +462,11 @@ func (c *CLI) readConfirmation() (bool, error) {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("reading the answer: %w", err)
 	}
-	return strings.TrimSpace(line) == confirmWord, nil
+	ok := strings.TrimSpace(line) == confirmWord
+	if !ok {
+		c.cancelled = true
+	}
+	return ok, nil
 }
 
 // doctor reports on the health of the setup: references with nothing behind them,

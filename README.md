@@ -115,10 +115,38 @@ On this Mac, the existing Background App Activity entry still displays the perso
 certificate name despite recording the app association; a fresh-machine notification
 has not been tested. macOS may retain older attribution.
 
-Daemon activity logs are in `~/Library/Logs/keyward/daemon.log`. They record UTC
-timestamps, operations, reference names, outcomes, and startup/shutdown events.
-Secret values are withheld. The directory is private to your user. These are basic
-activity logs; rotation and a separate append-only audit trail are not implemented.
+CLI and daemon activity is recorded in `~/Library/Logs/keyward/activity.jsonl`.
+Records contain UTC timestamps, Keyward command/operation names, successful
+reference names, fixed outcome codes, and durations. They omit values, rejected
+inputs, provenance, environment variables, child command arguments, and output.
+`run` records the exec attempt before replacing the CLI; it cannot record the
+child's eventual exit status.
+
+History is kept for **30 days, capped at 50 MiB total**, removing the oldest
+history when either limit is reached. Rotation happens daily or before a file
+would exceed 10 MiB. Cleanup runs at CLI startup and on event writes; idle files
+remain until the next use. The directory is mode `700`, files mode `600`, and a
+file lock coordinates appends, rotation, and cleanup across processes. Symlinks,
+hard links, wrong ownership, and permissive modes are refused. The old
+`daemon.log` is treated as archived history, counted toward the same limits using
+its modification time; its contents are not read or converted. New installations
+stop directing daemon stderr into that unbounded file.
+
+Settings are optional environment variables; `MB` settings use MiB:
+
+```sh
+export KEYWARD_LOG_RETENTION_DAYS=7
+export KEYWARD_LOG_MAX_MB=20
+export KEYWARD_LOG_ROTATE_MB=5
+```
+
+CLI settings apply immediately. Re-run `keyward service install` to persist them
+for the daemon. `KEYWARD_LOG_DIR` selects an alternate directory for isolated
+tests; the status app's log button opens the default location. Invalid settings
+fail before running a command. A storage failure warns once per CLI process and
+allows the operation to continue. This is an activity log: a process running as
+you can read or alter it, and names reveal service-use metadata. It is not a
+tamper-proof audit trail.
 
 ```sh
 keyward restore --dry-run ~/.zshrc .env  # preview the files you want restored

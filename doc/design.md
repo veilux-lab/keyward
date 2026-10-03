@@ -19,7 +19,8 @@ credentials that are not there.
 | `internal/handle` | Parse, validate, and format `cap://` references | Implemented |
 | `internal/vault` | Keychain storage via cgo and Security.framework | Implemented |
 | `internal/resolve` | Scan an environment, resolve references to values | Implemented |
-| `internal/audit` | Append-only JSONL record of every resolution | Not started |
+| `internal/activity` | Private JSONL activity and bounded history | Implemented; 30 days / 50 MiB defaults |
+| `internal/audit` | Tamper-evident audit history | Not started |
 | `internal/migrate` | Detect secrets in a file, rewrite to references | Implemented |
 | `internal/restore` | Return current referenced values to explicitly selected files | Implemented; exact `yes` required |
 | `internal/mcpconfig` | Rewrite MCP server configs to launch via keyward | Not started |
@@ -248,6 +249,26 @@ reading a keyward value, and now a request over the socket gets it. That fits th
 cooperational model: the threat is an agent reading a file, not an agent working
 against the tool deliberately (obstacle 1). The daemon logs every request by name,
 so access can be seen, though nothing stops it.
+
+### Activity retention
+
+CLI commands and daemon requests share `activity.jsonl`. Events have only fixed
+command/operation/outcome fields, successful canonical reference names, UTC time,
+and duration. Failed names, arbitrary error text, provenance, values, environment,
+child arguments, and output are excluded. CLI `run` records the exec attempt before
+process replacement; it does not claim to know the child's exit status.
+
+Defaults are 30 days and 50 MiB total, with daily or 10 MiB rotation. Cleanup runs
+at CLI startup and event writes, so idle files may remain longer. The old
+`daemon.log` counts as an archive using its modification time, without reading it.
+An exclusive file lock protects append/rotation/cleanup across processes. Files
+are opened relative to a checked private directory descriptor, without following
+links; ownership, regular-file type, hard links, and permissions are checked.
+
+Storage failures warn once in the CLI and operations continue. Configuration
+errors fail before dispatch. Retention settings are saved into the LaunchAgent
+on installation. This preserves activity visibility for a future direct CLI,
+but same-user processes can edit or delete records; it is not a security boundary.
 
 ## MCP config rewriting
 
