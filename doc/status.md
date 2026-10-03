@@ -121,8 +121,11 @@ The status app opens the new log; LaunchAgent settings persist the selected limi
 `make verify` passed. A disposable unsigned CLI/daemon smoke test verified real
 Keychain operations, secret redaction, rotation, expiry, the total budget including
 legacy history, and private permissions. The owner's files and Keychain items
-were untouched. Updating the signed local installation is pending macOS signing-key
-approval; the installed daemon still uses the previous logging behavior.
+were untouched. The signed installation lifecycle test passed in 3.46s, including
+prompt-free cross-build reads and replacement, restart, persistence, and uninstall.
+The updated signed CLI and status app are installed, and the login daemon is
+healthy. The installed log directory is mode `700`, files mode `600`, and the
+LaunchAgent retains the default limits.
 
 **2026-10-02 (direct signed access)** — Added a repeatable isolated test for a
 signed command-line process accessing daemon-created items directly. It enforces
