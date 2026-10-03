@@ -17,7 +17,8 @@ also exercises the real Keychain, under a separate service name.
 
 Signing: a daemon rebuilt with the same **Apple Development** certificate keeps
 Keychain access, while self-signed and unsigned rebuilds do not (obstacles.md 2a).
-Shipping to other people needs a Developer ID, which is untested.
+Prebuilt signed distribution needs a Developer ID, which is untested. Source-built
+Homebrew packaging is implemented without that requirement; publication is pending.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -77,9 +78,15 @@ available to work on.
 - Simplify signed local builds to direct Keychain access, with a cross-process
   lock and continued logging. The isolated access test has passed.
 
+**Gated on public source and tap publication:**
+
+- Source-built Homebrew installation; see [homebrew.md](homebrew.md). Local
+  package verification, explicit publication approval, and GitHub authentication
+  gate the public release.
+
 **Gated on a paid Developer ID:**
 
-- Signed, notarised releases and a Homebrew tap. Verify direct access and upgrades
+- Signed, notarised prebuilt releases. Verify direct access and upgrades
   under Developer ID before using that architecture for distribution.
 
 **Gated on the migration being lived with:**
@@ -109,6 +116,14 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-02 (source-built Homebrew package)** — Added a formula template and
+`cmd/keyward-release` to generate a committed source archive and matching checksum.
+The Homebrew build delegates `service` commands to `brew services`, without a
+certificate or companion app, and refuses a second daemon. Restore warnings and
+confirmation remain in place. Unit checks pass; source-package installation and
+an isolated daemon smoke test are pending. Public tap/source publication requires
+explicit approval and authenticated GitHub access; see [homebrew.md](homebrew.md).
 
 **2026-10-02 (Veilux Lab repository)** — The owner transferred the project to
 `veilux-lab/keyward`. Updated the local Git remote, Go module/import paths, signing

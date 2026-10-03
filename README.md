@@ -86,7 +86,47 @@ Set `KEYWARD_SERVICE` on the daemon to scope items to a different Keychain servi
 name, and `KEYWARD_SOCKET` on every command to use a separate socket. Together they
 let you try it out without touching real entries.
 
-## Install on this Mac
+## Homebrew installation
+
+The source-built formula is prepared locally; the public tap and release download
+have not been published yet. Once published, installation will be:
+
+```sh
+brew tap veilux-lab/tap
+brew install keyward
+keyward service install
+keyward service status
+```
+
+No paid Apple Developer membership is needed. Homebrew builds the CLI using Go
+and Apple's command line tools. The daemon is managed by `brew services`, with
+its executable under Homebrew's stable `opt` path. The signed status app is not
+included. `keyward service install` starts or restarts the Homebrew daemon;
+`keyward service uninstall` warns about restoration and requires `yes` before
+stopping its startup. Avoid `sudo`: the broker uses your login Keychain.
+
+After `brew upgrade keyward`, run `keyward service install` to restart the broker.
+Source-built daemon upgrades may prompt for approval to read previously stored
+items. The daemon still keeps routine CLI requests from becoming separate Keychain
+callers; source builds do not promise prompt-free daemon upgrades.
+
+Before removing the formula, restore selected files if you want plaintext values
+returned, stop the daemon, then remove the package:
+
+```sh
+keyward restore ~/.zshrc .env  # choose your migrated files; requires exact yes
+keyward service uninstall    # warning, then exact yes
+brew uninstall keyward
+```
+
+Keychain items are retained. `brew uninstall` does not run restoration or its
+confirmation flow. If switching from the signed local installation, use that
+installation's `keyward service uninstall` first and remove its CLI directory
+from the front of your PATH so you invoke Homebrew's CLI.
+
+See [doc/homebrew.md](doc/homebrew.md) for release preparation and publication.
+
+## Signed local installation
 
 Requires Go 1.26.4+, Xcode command line tools, and an Apple Development certificate.
 A free Personal Team certificate can be created through Xcode's account settings.
@@ -140,8 +180,9 @@ export KEYWARD_LOG_MAX_MB=20
 export KEYWARD_LOG_ROTATE_MB=5
 ```
 
-CLI settings apply immediately. Re-run `keyward service install` to persist them
-for the daemon. `KEYWARD_LOG_DIR` selects an alternate directory for isolated
+CLI settings apply immediately. For the signed local installation, re-run
+`keyward service install` to persist them for the daemon. The Homebrew daemon uses
+the default logging limits. `KEYWARD_LOG_DIR` selects an alternate directory for isolated
 tests; the status app's log button opens the default location. Invalid settings
 fail before running a command. A storage failure warns once per CLI process and
 allows the operation to continue. This is an activity log: a process running as
@@ -162,13 +203,16 @@ References need a running daemon to resolve. Check any restoration skips before
 uninstalling or deleting the tool. The CLI, app, and Keychain entries are kept by
 `service uninstall`. The status app shows this warning before disabling startup.
 
-This installation is for personal use. Distribution requires a paid Developer ID
-and remains untested. Certificate renewal and changes of team are also untested.
+This signed installation is for personal use. Prebuilt Developer ID-signed and
+notarized releases require paid Apple membership and remain untested. Source-built
+Homebrew distribution does not require it. Certificate renewal and changes of
+team are also untested.
 
 ## Status
 
-Working, with signed local installation and automatic daemon startup. There is no
-notarised release or Homebrew formula. For an unsigned development build, use
+Working, with signed local installation and automatic daemon startup. A source
+formula and release-preparation command are implemented; publication is pending.
+There is no notarised release. For an unsigned development build, use
 `make build` and run `bin/keyward daemon` in a terminal.
 
 Implemented:

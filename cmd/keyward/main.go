@@ -19,6 +19,9 @@ import (
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
+// Set by the Homebrew formula; local signed installations use launchd directly.
+var homebrewExecutable string
+
 func main() {
 	// KEYWARD_SERVICE scopes the daemon's Keychain items to a different service
 	// name, and KEYWARD_SOCKET moves the socket, so the tool can be tried out
@@ -74,6 +77,12 @@ func main() {
 			return daemon.RunLogged(ctx, socket, vault.NewKeychainService(service), record)
 		},
 		Service: func(action string) (string, error) {
+			if homebrewExecutable != "" {
+				if socket != daemon.DefaultSocket(home) || service != vault.DefaultService {
+					return "", fmt.Errorf("Homebrew startup uses the default socket and Keychain service; run `keyward daemon` directly for an isolated instance")
+				}
+				return (launchd.Homebrew{Home: home, UID: os.Getuid(), Brew: homebrewExecutable}).Run(action)
+			}
 			executable, err := os.Executable()
 			if err != nil {
 				return "", err

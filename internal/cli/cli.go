@@ -81,11 +81,11 @@ Secrets live in the macOS Keychain. Config files hold cap://<name> references
 instead of values, so an agent reading them finds nothing worth having.
 
 Only the daemon touches the Keychain; the other commands ask it. Install automatic
-startup with keyward service install from a signed build, or run it in a terminal.
+startup with keyward service install, or run the daemon in a terminal.
 
 commands:
   daemon                hold Keychain access for the other commands
-  service install      install the signed CLI and start the daemon at login
+  service install      install or restart daemon startup at login
   service status       check whether the login agent is loaded
   service uninstall    warn about restoration, then ask to remove startup
   add [-force] <name>   store a secret read from stdin
