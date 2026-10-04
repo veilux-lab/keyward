@@ -21,7 +21,7 @@ func (h Homebrew) Run(action string) (string, error) {
 	}
 	m := Manager{Home: h.Home, UID: h.UID, Command: h.Command, Ready: h.Ready}
 	target := fmt.Sprintf("gui/%d/com.veilux-lab.keyward.homebrew", h.UID)
-	const formula = "veilux-lab/tap/keyward"
+	const formula = "veilux-lab/keyward/keyward"
 	switch action {
 	case "status":
 		if m.command("/bin/launchctl", "print", target) != nil {

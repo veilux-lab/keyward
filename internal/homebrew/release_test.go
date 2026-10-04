@@ -48,7 +48,7 @@ func TestReleaseArchivesOnlyCommittedFilesAndPinsFormula(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{checksum, `version "0.1.0"`, "releases/download/v0.1.0/keyward-0.1.0.tar.gz", "main.homebrewExecutable=", "opt_bin", "daemon"} {
+	for _, want := range []string{checksum, `version "0.1.0"`, `homepage "https://github.com/veilux-lab/keyward"`, "https://github.com/veilux-lab/keyward/releases/download/v0.1.0/keyward-0.1.0.tar.gz", "main.homebrewExecutable=", "opt_bin", "daemon"} {
 		if !strings.Contains(string(formula), want) {
 			t.Fatalf("formula missing %s", want)
 		}

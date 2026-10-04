@@ -2,6 +2,8 @@
 
 | Document | What it covers |
 | --- | --- |
+| [install.md](install.md) | Everyday commands, migration, restoration, signed local setup, and logs |
+| [homebrew.md](homebrew.md) | Homebrew setup, upgrades, switching taps, and releases |
 | [mission.md](mission.md) | The problem, the invariant, and what keyward deliberately is not |
 | [design.md](design.md) | Architecture, reference format, trust model, and the reasoning behind each decision |
 | [status.md](status.md) | Current state, component status, dependency order, and the go/no-go test |

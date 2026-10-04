@@ -64,7 +64,7 @@ xcode-select -p                # needs the full Xcode app, not just the command 
 The full Xcode app (from the App Store) is needed because a free account can only
 create a signing certificate through Xcode.
 
-The repo is private: `git@github.com:veilux-lab/keyward.git`, branch `main`. The
+The repo is `git@github.com:veilux-lab/keyward.git`, branch `main`. The
 owner clones it as GitHub user nwokolo24.
 
 ## Step 2: create the certificate (the owner does this)

@@ -1,102 +1,130 @@
-# Source-built Homebrew distribution
+# Homebrew
 
-The first Homebrew package builds the CLI from source. It uses `brew services`
-for login startup and does not require an Apple certificate, notarization, or the
-native status app. The signed local installer remains available separately.
+Homebrew packaging lives alongside the source in
+[`veilux-lab/keyward`](https://github.com/veilux-lab/keyward). Releases will supply
+source archives from the same repository. The formula builds on macOS using Go
+and Apple's command line tools. No signing certificate or paid Apple Developer
+membership is required. The signed status app is available through the separate
+[local installer](install.md#signed-local-installation).
+
+The single-repository setup is prepared for `v0.1.1`; publication is pending the
+owner making this repository public and approving the push and release.
 
 ## Install
 
-Release `v0.1.0` and its source archive are public in
-[veilux-lab/homebrew-tap](https://github.com/veilux-lab/homebrew-tap).
-The public download checksum, source installation, and formula test were verified
-on the development Mac. First-user Keychain prompts and login startup on a fresh
-Mac remain untested.
-
 ```sh
-brew tap veilux-lab/tap
-brew install veilux-lab/tap/keyward
+brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
+brew install veilux-lab/keyward/keyward
 keyward service install
 keyward service status
 ```
 
-The formula lives in `veilux-lab/homebrew-tap`. It builds with Go and cgo against
-macOS Security.framework, injects the release version and Homebrew executable
-path, and starts `opt_bin/keyward daemon`. No secret migration happens during
-installation. Startup is an explicit user action; the formula does not enable it
-in `post_install`.
-The explicit service label `com.veilux-lab.keyward.homebrew` avoids dependence on
-Homebrew's default label, which varies between releases.
-The fully qualified installation command grants formula-specific trust when
-required. Installing by short name from an untrusted tap requires
-`brew trust --formula veilux-lab/tap/keyward` first; see
-[Homebrew's tap trust documentation](https://docs.brew.sh/Tap-Trust).
+The explicit URL lets Homebrew use this repository as a tap without a separate
+`homebrew-*` repository. The fully qualified formula name also handles
+formula-specific trust on Homebrew versions that require it.
 
+Run startup commands as your normal user, without `sudo`. The daemon uses your
+login Keychain and starts now and at login through `brew services`. Installing
+the formula does not migrate secrets, change your shell config, or enable startup.
+
+The formula is [Formula/keyward.rb](../Formula/keyward.rb). It injects the release
+version and Homebrew executable path, then runs `opt_bin/keyward daemon` under the
+stable service label `com.veilux-lab.keyward.homebrew`.
 `keyward service install` delegates to `brew services restart
-veilux-lab/tap/keyward`. It refuses to start over another daemon or the signed
-local login agent. Status checks both launchd registration and the broker's socket.
-Uninstall keeps the existing restoration warning and exact-`yes` confirmation,
-then calls `brew services stop`. Homebrew owns the executable and startup files;
-Keyward does not copy them into a second installation.
+veilux-lab/keyward/keyward`. It refuses to start over another daemon or the signed
+local login agent. `service status` checks launchd registration and the socket.
 
-After an upgrade, restart the daemon. A changed source-built daemon can trigger
-Keychain access prompts for older items. Restarting an unchanged build should keep
-access, but source distribution does not inherit the Apple-signed upgrade guarantee.
-Keychain entries remain after service shutdown, formula removal, and reinstall.
+## Upgrade
 
-Before removing the formula, users may explicitly restore selected files:
+```sh
+brew upgrade veilux-lab/keyward/keyward
+keyward service install
+```
+
+The second command restarts the daemon. A changed source-built daemon may prompt
+for macOS approval to read previously stored Keychain items. Source builds do not
+promise prompt-free upgrades. The Homebrew daemon uses the default
+[logging limits](install.md#activity-logs); environment overrides on an individual
+CLI do not configure that service.
+
+### Switch from the original tap
+
+Once `v0.1.1` is published, replace an existing `v0.1.0` installation with:
+
+```sh
+"$(brew --prefix veilux-lab/tap/keyward)/bin/keyward" service uninstall
+brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
+brew uninstall veilux-lab/tap/keyward
+brew install veilux-lab/keyward/keyward
+keyward service install
+keyward service status
+```
+
+Run the first command with the old CLI, before removing it. Confirm its service
+shutdown warning with `yes`. Keep the existing `cap://` references; the stored
+items stay in your Keychain and can be used by the new daemon. This change needs
+no restoration or second migration. The new build may prompt for Keychain access.
+After switching, the old tap can be removed with `brew untap veilux-lab/tap`.
+
+If moving from a signed local installation, stop it using that installation's
+`keyward service uninstall` first. Ensure your PATH selects Homebrew's CLI rather
+than the old `~/.local/bin/keyward`. Changing daemon builds may prompt for Keychain
+approval. First-user prompts and actual login startup on a fresh Mac remain untested.
+
+## Restore and uninstall
+
+Choose the files you migrated. Restore them explicitly if you want the current
+stored values back in plaintext:
 
 ```sh
 keyward restore --dry-run ~/.zshrc .env
 keyward restore ~/.zshrc .env
 keyward service uninstall
-brew uninstall keyward
+brew uninstall veilux-lab/keyward/keyward
 ```
 
-`brew uninstall` does not automatically restore plaintext or invoke Keyward's
-interactive warning. The formula caveats and installation documentation present
-these steps before removal. The Homebrew daemon uses default logging settings;
-environment overrides passed to an individual CLI do not configure that service.
+Restore and service uninstall each require exact lowercase `yes`. Review any
+restoration skips before removal. Keychain items remain after shutdown, removal,
+and reinstall. `brew uninstall` does not restore files or run Keyward's warning
+and confirmation flow.
 
-## Prepare a release locally
+## Prepare a release
 
-Commit the tested source first, then run:
+The release tool creates a source archive from a committed Git revision and a
+formula containing its exact checksum. The template lives in
+[internal/homebrew/keyward.rb.tmpl](../internal/homebrew/keyward.rb.tmpl).
+
+After committing and verifying the source:
 
 ```sh
-go run ./cmd/keyward-release -version 0.1.0 -out bin/homebrew
-cp packaging/homebrew/README.md bin/homebrew/README.md
+go run ./cmd/keyward-release -version 0.1.1 -out bin/homebrew
+cp bin/homebrew/Formula/keyward.rb Formula/keyward.rb
 ```
 
-The command uses `git archive` at the current commit and creates:
+The output contains `keyward-0.1.1.tar.gz` and `Formula/keyward.rb`. The archive
+includes tracked source only, without Git history or untracked files. The command
+refuses tracked uncommitted changes and existing output files. Its download URL
+points to the archive asset on this repository's `v0.1.1` release.
 
-- `bin/homebrew/keyward-0.1.0.tar.gz`: tracked source only, without Git history or
-  untracked files.
-- `bin/homebrew/Formula/keyward.rb`: versioned download URL and exact archive
-  SHA-256, with a source build, service definition, caveats, and formula test.
-- `bin/homebrew/README.md`: the reviewed tap installation and removal instructions.
+Test the generated formula before committing it. Do not regenerate the archive
+from the formula-update commit: publish the exact archive used for the recorded
+checksum. For subsequent releases, substitute the new version in these commands.
 
-Tracked uncommitted changes and existing output files are refused. The archive's
-filename and download URL use the same version as the CLI. The template is retained
-in `internal/homebrew/keyward.rb.tmpl`; rerun the command for each new release.
-The release URL is an asset on the public tap repository, allowing the primary
-source repository to remain private while publishing a reviewed source snapshot.
+## Publish a release
 
-## Publication gates for future releases
+Publication requires the repository to be public. Making the complete repository
+public also exposes its Git history, unlike publishing a source archive alone.
 
-Before publishing a new version:
+1. Run `make verify`. Verify the formula with a source install, `brew test`, style
+   checks, and a daemon smoke test using a separate socket and throwaway Keychain
+   service. Delete the dummy items afterwards.
+2. Obtain the owner's explicit approval immediately before pushing the formula
+   commit to `veilux-lab/keyward` on `main`, and before publishing the tag and
+   release assets. Name the repository, branch, and action in the request.
+3. Upload the exact archive referenced by the formula to the matching release.
+   Keep the formula, source, documentation, and releases in this repository.
+4. Verify the public download checksum, source installation, and `brew test`.
+   Test first-user Keychain prompts and login startup on a fresh Mac separately.
 
-1. Verify the generated formula locally with a source install, `brew test`, style
-   checks, and daemon smoke testing under a separate socket and Keychain service.
-2. Obtain the owner's explicit approval to create the public
-   `veilux-lab/homebrew-tap` repository, publish the source archive as release
-   `v0.1.0`, and push the formula to its `main` branch. Publishing the archive
-   makes that source snapshot publicly readable.
-3. Authenticate GitHub publication with `gh auth login` without sharing
-   credentials in chat.
-4. Upload the exact archive used for the formula checksum. Push the formula and a
-   tap README containing setup, upgrade, restoration, and uninstall instructions.
-5. Verify the public download checksum, installation, and formula test. Verify
-   first-user prompts and login startup on a fresh Mac separately; an install on
-   the development Mac does not establish those behaviors.
-
-A paid Apple Developer account is only a gate for a later Developer ID-signed and
-notarized prebuilt distribution, not for this source formula.
+No Apple membership is needed for this source release. A future signed and
+notarized prebuilt release would need paid Developer ID membership.

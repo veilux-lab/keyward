@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 ## Where things stand
 
@@ -18,8 +18,11 @@ also exercises the real Keychain, under a separate service name.
 Signing: a daemon rebuilt with the same **Apple Development** certificate keeps
 Keychain access, while self-signed and unsigned rebuilds do not (obstacles.md 2a).
 Prebuilt signed distribution needs a Developer ID, which is untested. Source-built
-Homebrew release `v0.1.0` is public in `veilux-lab/homebrew-tap` without that
-requirement. Installation from its public archive and `brew test` pass.
+Homebrew release `v0.1.0` was published in `veilux-lab/homebrew-tap` without that
+requirement. Installation from its public archive and `brew test` pass. Future
+formulas, source archives, and service commands now target `veilux-lab/keyward`.
+Release `v0.1.1` is being prepared locally; publication is gated on the owner
+making this repository public and approving the push and release.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -117,6 +120,15 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-03 (one repository for Homebrew)** — Updated source release URLs,
+formula homepage, and service commands to use `veilux-lab/keyward`. The repository
+will also serve as its own Homebrew tap through an explicit clone URL. Shortened
+the README to installation and everyday use; detailed setup is in `doc/install.md`
+and `doc/homebrew.md`. Disabled Claude commit/PR attribution in project settings
+and agent instructions. Tests first failed against the old release URL and service
+name, then passed with the new targets; `make verify` passed. Public publication
+and removal of Claude trailers from GitHub history remain pending.
 
 **2026-10-02 (public Homebrew release)** — Published the approved public
 `veilux-lab/homebrew-tap` repository and release `v0.1.0`, including the tested

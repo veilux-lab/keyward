@@ -62,7 +62,7 @@ func Prepare(repo, version, output string) (Release, error) {
 	}
 	r.SHA256 = fmt.Sprintf("%x", sha256.Sum256(compressed.Bytes()))
 	filename := "keyward-" + version + ".tar.gz"
-	url := "https://github.com/veilux-lab/homebrew-tap/releases/download/v" + version + "/" + filename
+	url := "https://github.com/veilux-lab/keyward/releases/download/v" + version + "/" + filename
 	formula := strings.NewReplacer("@VERSION@", version, "@URL@", url, "@SHA256@", r.SHA256).Replace(formulaTemplate)
 	if err := os.MkdirAll(filepath.Join(output, "Formula"), 0o755); err != nil {
 		return r, err

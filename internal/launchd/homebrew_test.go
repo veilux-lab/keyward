@@ -45,7 +45,7 @@ func TestHomebrewServiceLifecycleDoesNotCopyOrSign(t *testing.T) {
 		t.Fatalf("uninstall: %v, loaded=%v", err, loaded)
 	}
 	commands := strings.Join(calls, "\n")
-	for _, want := range []string{"services restart veilux-lab/tap/keyward", "services stop veilux-lab/tap/keyward"} {
+	for _, want := range []string{"services restart veilux-lab/keyward/keyward", "services stop veilux-lab/keyward/keyward"} {
 		if !strings.Contains(commands, want) {
 			t.Fatalf("missing %s", want)
 		}
