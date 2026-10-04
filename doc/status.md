@@ -21,8 +21,8 @@ Prebuilt signed distribution needs a Developer ID, which is untested. Source-bui
 Homebrew release `v0.1.0` was published in `veilux-lab/homebrew-tap` without that
 requirement. Installation from its public archive and `brew test` pass. Future
 formulas, source archives, and service commands now target `veilux-lab/keyward`.
-Release `v0.1.1` is being prepared locally; publication is gated on the owner
-making this repository public and approving the push and release.
+Release `v0.1.1` and `Formula/keyward.rb` are prepared locally; publication is gated
+on the owner making this repository public and approving the push and release.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -122,13 +122,22 @@ correct response is to stop building, not to push through.
 ## Changelog
 
 **2026-10-03 (one repository for Homebrew)** — Updated source release URLs,
-formula homepage, and service commands to use `veilux-lab/keyward`. The repository
-will also serve as its own Homebrew tap through an explicit clone URL. Shortened
+formula homepage, and service commands to use `veilux-lab/keyward`. Added
+`Formula/keyward.rb` so the repository serves as its own tap through an explicit
+clone URL. Prepared `v0.1.1` from cleaned source commit `94a601d`; archive SHA-256
+is `a8a3b95e941541d29565b5cca44ba157ef4a9db5203018c8a9c9ecc2cfb0241a`. Shortened
 the README to installation and everyday use; detailed setup is in `doc/install.md`
 and `doc/homebrew.md`. Disabled Claude commit/PR attribution in project settings
-and agent instructions. Tests first failed against the old release URL and service
-name, then passed with the new targets; `make verify` passed. Public publication
-and removal of Claude trailers from GitHub history remain pending.
+and agent instructions. Removed 28 Claude co-author trailers from local history,
+preserving all commit trees, identities, timestamps, topology, and remaining
+message text. The rewritten commits no longer carry their invalidated signatures;
+the original history and commit map are retained under ignored `bin/history`.
+Tests first failed against the old release URL and service name, then passed with
+the new targets; `make verify` passed. A disposable Homebrew source install,
+`brew test`, formula style, and service metadata checks passed. Its dummy item
+was read after a same-binary daemon restart in 12.423ms, then deleted; the fixture
+package and tap were removed. The GitHub history rewrite and public release
+remain pending the owner's approval.
 
 **2026-10-02 (public Homebrew release)** — Published the approved public
 `veilux-lab/homebrew-tap` repository and release `v0.1.0`, including the tested

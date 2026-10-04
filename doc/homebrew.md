@@ -97,8 +97,8 @@ formula containing its exact checksum. The template lives in
 After committing and verifying the source:
 
 ```sh
-go run ./cmd/keyward-release -version 0.1.1 -out bin/homebrew
-cp bin/homebrew/Formula/keyward.rb Formula/keyward.rb
+go run ./cmd/keyward-release -version 0.1.1 -out bin/homebrew-0.1.1
+cp bin/homebrew-0.1.1/Formula/keyward.rb Formula/keyward.rb
 ```
 
 The output contains `keyward-0.1.1.tar.gz` and `Formula/keyward.rb`. The archive
@@ -108,7 +108,8 @@ points to the archive asset on this repository's `v0.1.1` release.
 
 Test the generated formula before committing it. Do not regenerate the archive
 from the formula-update commit: publish the exact archive used for the recorded
-checksum. For subsequent releases, substitute the new version in these commands.
+checksum. For subsequent releases, substitute the new version in both the version
+argument and output directory so earlier artifacts are not overwritten.
 
 ## Publish a release
 
