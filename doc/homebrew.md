@@ -1,14 +1,14 @@
 # Homebrew
 
 Homebrew packaging lives alongside the source in
-[`veilux-lab/keyward`](https://github.com/veilux-lab/keyward). Releases will supply
+[`veilux-lab/keyward`](https://github.com/veilux-lab/keyward). Releases supply
 source archives from the same repository. The formula builds on macOS using Go
 and Apple's command line tools. No signing certificate or paid Apple Developer
 membership is required. The signed status app is available through the separate
 [local installer](install.md#signed-local-installation).
 
-The single-repository setup is prepared for `v0.1.1`; publication is pending the
-owner making this repository public and approving the push and release.
+Release [`v0.1.1`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.1) uses
+this single-repository setup.
 
 ## Install
 

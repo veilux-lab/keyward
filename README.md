@@ -17,9 +17,6 @@ Your shell config holds the reference. When a command needs the real value,
 macOS only. Homebrew builds from source using Go and Apple's command line tools;
 you do not need a paid Apple Developer account.
 
-The single-repository Homebrew setup below is prepared for `v0.1.1`. It becomes
-available when this repository is public and that release is published.
-
 ```sh
 brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
 brew install veilux-lab/keyward/keyward

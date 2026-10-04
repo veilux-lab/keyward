@@ -18,11 +18,10 @@ also exercises the real Keychain, under a separate service name.
 Signing: a daemon rebuilt with the same **Apple Development** certificate keeps
 Keychain access, while self-signed and unsigned rebuilds do not (obstacles.md 2a).
 Prebuilt signed distribution needs a Developer ID, which is untested. Source-built
-Homebrew release `v0.1.0` was published in `veilux-lab/homebrew-tap` without that
-requirement. Installation from its public archive and `brew test` pass. Future
-formulas, source archives, and service commands now target `veilux-lab/keyward`.
-Release `v0.1.1` and `Formula/keyward.rb` are prepared locally; publication is gated
-on the owner making this repository public and approving the push and release.
+Homebrew release `v0.1.1` uses `veilux-lab/keyward` for the formula, source archive,
+and service commands, without that requirement. The repository is public. Source
+installation, `brew test`, formula style, service metadata, and isolated restart
+checks pass. The original `v0.1.0` tap remains available for users switching from it.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -136,8 +135,9 @@ Tests first failed against the old release URL and service name, then passed wit
 the new targets; `make verify` passed. A disposable Homebrew source install,
 `brew test`, formula style, and service metadata checks passed. Its dummy item
 was read after a same-binary daemon restart in 12.423ms, then deleted; the fixture
-package and tap were removed. The GitHub history rewrite and public release
-remain pending the owner's approval.
+package and tap were removed. The owner made the repository public and approved
+publishing the rewritten `main` and release `v0.1.1` there. The existing `v0.1.0`
+tap is only needed while switching installations.
 
 **2026-10-02 (public Homebrew release)** — Published the approved public
 `veilux-lab/homebrew-tap` repository and release `v0.1.0`, including the tested
