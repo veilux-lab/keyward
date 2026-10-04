@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-03
+Last updated: 2026-10-04
 
 ## Where things stand
 
@@ -21,7 +21,19 @@ Prebuilt signed distribution needs a Developer ID, which is untested. Source-bui
 Homebrew release `v0.1.1` uses `veilux-lab/keyward` for the formula, source archive,
 and service commands, without that requirement. The repository is public. Source
 installation, `brew test`, formula style, service metadata, and isolated restart
-checks pass. The original `v0.1.0` tap remains available for users switching from it.
+checks pass. The owner deleted the original `v0.1.0` tap on October 4; its repository
+and release assets were backed up under ignored `bin/retired-homebrew-tap`.
+The new setup has no dependency on it. Existing old installations can switch using
+their local tap checkout; new old-tap installs and uncached downloads are unavailable.
+
+New in source for `v0.1.2`: an installed CLI starts its managed daemon
+on the first vault request if the socket is absent. Checks and commands without
+vault calls leave it stopped. Explicit service uninstall disables first-use startup
+until service install re-enables it. Custom sockets and service names remain manual.
+An optional `brew keyward-install --start-daemon` command starts it during installation.
+`make verify`, isolated Memory-vault/socket tests, and installer tests pass.
+Homebrew package preparation and publication are pending; public `v0.1.1` still
+requires explicit service startup.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -60,8 +72,8 @@ handled; see [obstacles.md](obstacles.md) 2a.
 | `internal/restore` | **Done** | Separate explicit command; redacted plan for selected files, mandatory exact `yes`, metadata-only dry run, best-effort atomic private writes, retained Keychain entries. Uninstall warns users to restore first and requires confirmation before stopping startup. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
-| `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. |
-| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. Live tests passed for signed upgrade, item replacement, launchd restart, persistence, and uninstall. Rollback and path handling are covered by automated tests. |
+| `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. First-use managed startup is prepared for `v0.1.2`; requests are not replayed. |
+| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. Live tests passed for signed upgrade, item replacement, launchd restart, persistence, and uninstall. First-use startup and persistent explicit disabling are prepared for `v0.1.2`. |
 | `internal/appbundle` | **Done** | Signed Keyward by Veilux status app installed in `~/Applications`. Native window verified. The app is registered with Launch Services and associated with the daemon; same-team checks and app rollback are covered by tests. |
 | Code signing | Apple Development rebuild test passed twice | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s, 0.04s); unsigned control denied in both runs. Developer ID distribution signing remains untested and requires the paid programme; free Personal Team signing cannot be used for distribution to others. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
 | `internal/doctor` | **Done** | Dangling, malformed, orphaned, unknown, plus stated coverage. Report-only. |
@@ -119,6 +131,31 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-04 (first-use daemon startup, prepared)** — Managed vault clients start
+an absent daemon before sending a request. Homebrew enables its service; signed
+local installations bootstrap an existing LaunchAgent. Health checks and commands
+without vault calls stay passive. Custom sockets and services remain manual.
+Service uninstall saves a private disabled marker; explicit service install
+re-enables startup. Added the optional `brew keyward-install --start-daemon`
+installer command, which finishes Homebrew installation before starting the
+daemon. Normal formula installation leaves startup for first use; signed
+`make install` still starts immediately. Test-first cases cover startup before
+vault requests, no replay after a sent write, concurrent startup, private state,
+explicit disabling, installed signed configuration, and isolated namespaces.
+`make verify` passes, including race checks. The first `run` resolved a dummy
+reference through an automatically started Memory-vault daemon. Installer tests
+use fake executables; shell syntax and Homebrew command discovery also pass.
+No live services or Keychain items were accessed. Package preparation and
+`v0.1.2` publication are pending.
+
+**2026-10-04 (retired original tap)** — The owner deleted
+`veilux-lab/homebrew-tap` after the formula, source archive, and service routing
+moved to `veilux-lab/keyward`. The original repository and release assets were
+backed up under ignored `bin/retired-homebrew-tap`. Existing old installations
+retain their binaries and Keychain items; migration uses the local old tap to stop
+the service before removing it. New old-tap clones and uncached downloads no
+longer work.
 
 **2026-10-03 (one repository for Homebrew)** — Updated source release URLs,
 formula homepage, and service commands to use `veilux-lab/keyward`. Added

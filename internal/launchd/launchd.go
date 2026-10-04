@@ -27,6 +27,8 @@ type Manager struct {
 	Socket, Service  string
 	UID              int
 	LogConfig        *activity.Config
+	// StartupTimeout bounds lock and readiness waits; zero uses five seconds.
+	StartupTimeout time.Duration
 	// Label defaults to the production agent; integration tests use a distinct job.
 	Label string
 	// Command is injected so tests never register a real login agent.
@@ -37,16 +39,10 @@ type Manager struct {
 }
 
 func (m Manager) Run(action string) (string, error) {
-	if !filepath.IsAbs(m.Home) || m.UID < 0 {
-		return "", errors.New("service needs an absolute home directory and a user ID")
-	}
-	if m.Label == "" {
-		m.Label = label
-	}
-	if strings.IndexFunc(m.Label, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == '_')
-	}) >= 0 {
-		return "", errors.New("invalid service label")
+	var err error
+	m, err = m.normalized()
+	if err != nil {
+		return "", err
 	}
 	plist := filepath.Join(m.Home, "Library", "LaunchAgents", m.Label+".plist")
 	domain := fmt.Sprintf("gui/%d", m.UID)
@@ -60,7 +56,29 @@ func (m Manager) Run(action string) (string, error) {
 			return "", fmt.Errorf("login agent is loaded but the daemon is not responding; check Library/Logs/keyward/activity.jsonl: %w", err)
 		}
 		return "daemon is running and starts automatically at login", nil
-	case "uninstall":
+	case "install", "uninstall":
+		state, err := lockStartup(m.Home, m.StartupTimeout)
+		if err != nil {
+			return "", err
+		}
+		defer state.close()
+		if _, err := state.disabled(); err != nil {
+			return "", err
+		}
+		if action == "install" {
+			if m.defaultNamespace() && m.command("/bin/launchctl", "print", domain+"/"+homebrewLabel) == nil {
+				return "", errors.New("the Homebrew Keyward login agent is loaded; stop it with that installation's `keyward service uninstall` before installing the signed daemon")
+			}
+			message, err := m.install(plist, domain, target)
+			if err == nil {
+				err = state.enable()
+			}
+			return message, err
+		}
+		// Record the opt-out before stopping, so a failed state write leaves startup intact.
+		if err := state.disable(); err != nil {
+			return "", err
+		}
 		if m.command("/bin/launchctl", "print", target) == nil {
 			if err := m.command("/bin/launchctl", "bootout", target); err != nil {
 				return "", err
@@ -70,11 +88,88 @@ func (m Manager) Run(action string) (string, error) {
 			return "", err
 		}
 		return "automatic startup removed; the CLI and Keychain items are kept", nil
-	case "install":
-		return m.install(plist, domain, target)
 	default:
 		return "", errors.New("usage: keyward service install|status|uninstall")
 	}
+}
+
+func (m Manager) normalized() (Manager, error) {
+	if !filepath.IsAbs(m.Home) || m.UID < 0 {
+		return m, errors.New("service needs an absolute home directory and a user ID")
+	}
+	if m.Label == "" {
+		m.Label = label
+	}
+	if strings.IndexFunc(m.Label, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == '_')
+	}) >= 0 {
+		return m, errors.New("invalid service label")
+	}
+	return m, nil
+}
+
+func (m Manager) defaultNamespace() bool {
+	return (m.Label == "" || m.Label == label) && m.socket() == daemon.DefaultSocket(m.Home) &&
+		(m.Service == "" || m.Service == vault.DefaultService)
+}
+
+// Ensure starts only an already installed daemon, never the caller's development build.
+func (m Manager) Ensure() error {
+	var err error
+	m, err = m.normalized()
+	if err != nil {
+		return err
+	}
+	if m.Socket != "" && !filepath.IsAbs(m.Socket) {
+		return errors.New("service needs an absolute socket path")
+	}
+	if m.ready() == nil {
+		return nil
+	}
+	state, err := lockStartup(m.Home, m.StartupTimeout)
+	if err != nil {
+		return err
+	}
+	defer state.close()
+	if m.ready() == nil {
+		return nil
+	}
+	disabled, err := state.disabled()
+	if err != nil {
+		return err
+	}
+	if disabled {
+		return errStartupDisabled
+	}
+	plist := filepath.Join(m.Home, "Library", "LaunchAgents", m.Label+".plist")
+	domain := fmt.Sprintf("gui/%d", m.UID)
+	target := domain + "/" + m.Label
+	targets := []string{target}
+	if m.defaultNamespace() {
+		targets = append(targets, domain+"/"+homebrewLabel)
+	}
+	for _, loaded := range targets {
+		if m.command("/bin/launchctl", "print", loaded) == nil {
+			if err := m.waitReady(); err != nil {
+				return fmt.Errorf("the Keyward login agent is loaded but not responding; use its installation's `keyward service install` and check Library/Logs/keyward/activity.jsonl: %w", err)
+			}
+			return nil
+		}
+	}
+	binary := filepath.Join(m.Home, ".local", "bin", "keyward")
+	if err := m.installedConfiguration(plist, binary); err != nil {
+		return err
+	}
+	if err := m.command("/usr/bin/codesign", "--verify", "--strict", "-R", `=anchor apple generic and identifier "com.nwokolo24.keyward"`, binary); err != nil {
+		return fmt.Errorf("the installed daemon must be Apple-signed; run `make install` or `keyward service install` with a signed build: %w", err)
+	}
+	if err := m.command("/bin/launchctl", "bootstrap", domain, plist); err != nil {
+		return err
+	}
+	if err := m.waitReady(); err != nil {
+		return fmt.Errorf("the installed daemon did not become ready; run `keyward service install` and check Library/Logs/keyward/activity.jsonl: %w", err)
+	}
+	return nil
 }
 
 func (m Manager) install(plist, domain, target string) (string, error) {
@@ -183,15 +278,8 @@ func (m Manager) install(plist, domain, target string) (string, error) {
 	if err := m.command("/bin/launchctl", "bootstrap", domain, plist); err != nil {
 		return rollback(err)
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; {
-		err := m.ready()
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			return rollback(fmt.Errorf("installed daemon did not start: %w", err))
-		}
-		time.Sleep(50 * time.Millisecond)
+	if err := m.waitReady(); err != nil {
+		return rollback(fmt.Errorf("installed daemon did not start: %w", err))
 	}
 	update.Commit()
 	return fmt.Sprintf("installed %s and %s\ndaemon starts now and at login; log: %s", binary, appPath, logPath), nil

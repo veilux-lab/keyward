@@ -93,8 +93,11 @@ func TestNotRunning(t *testing.T) {
 	if !errors.Is(err, daemon.ErrNotRunning) {
 		t.Fatalf("Get = %v, want ErrNotRunning", err)
 	}
-	if !strings.Contains(err.Error(), "keyward daemon") {
-		t.Errorf("error = %q, want it to say how to start the daemon", err)
+	if !strings.Contains(err.Error(), "keyward service install") {
+		t.Errorf("error = %q, want service installation guidance", err)
+	}
+	if !strings.Contains(err.Error(), "for development or isolated use, run `keyward daemon`") {
+		t.Errorf("error = %q, want isolated development startup guidance", err)
 	}
 }
 
@@ -105,10 +108,15 @@ func TestClientTimesOut(t *testing.T) {
 	defer close(release)
 	c := start(t, &daemon.Server{Store: blockingStore{release: release}})
 	c.Timeout = 100 * time.Millisecond
+	starts := 0
+	c.Start = func() error { starts++; return nil }
 
 	_, err := c.Get("anything")
 	if err == nil || !strings.Contains(err.Error(), "Keychain prompt") {
 		t.Errorf("Get = %v, want a timeout pointing at the Keychain prompt", err)
+	}
+	if starts != 0 {
+		t.Errorf("Start called %d times after a sent request", starts)
 	}
 }
 

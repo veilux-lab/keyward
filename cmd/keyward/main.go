@@ -61,7 +61,7 @@ func main() {
 	}
 
 	c := &cli.CLI{
-		Store:      &daemon.Client{Path: socket},
+		Store:      managedClient(home, socket, service, homebrewExecutable),
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
@@ -95,4 +95,17 @@ func main() {
 		},
 	}
 	os.Exit(c.Run(os.Args[1:]))
+}
+
+func managedClient(home, socket, service, brew string) *daemon.Client {
+	client := &daemon.Client{Path: socket}
+	if socket != daemon.DefaultSocket(home) || service != vault.DefaultService {
+		return client
+	}
+	if brew != "" {
+		client.Start = (launchd.Homebrew{Home: home, UID: os.Getuid(), Brew: brew}).Ensure
+	} else {
+		client.Start = (launchd.Manager{Home: home, UID: os.Getuid()}).Ensure
+	}
+	return client
 }

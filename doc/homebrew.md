@@ -8,24 +8,43 @@ membership is required. The signed status app is available through the separate
 [local installer](install.md#signed-local-installation).
 
 Release [`v0.1.1`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.1) uses
-this single-repository setup.
+this single-repository setup and requires explicit `keyward service install`.
+Version `v0.1.2` adds first-use startup and the optional installer below.
 
 ## Install
 
 ```sh
 brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
 brew install veilux-lab/keyward/keyward
-keyward service install
-keyward service status
 ```
 
 The explicit URL lets Homebrew use this repository as a tap without a separate
 `homebrew-*` repository. The fully qualified formula name also handles
 formula-specific trust on Homebrew versions that require it.
 
-Run startup commands as your normal user, without `sudo`. The daemon uses your
-login Keychain and starts now and at login through `brew services`. Installing
-the formula does not migrate secrets, change your shell config, or enable startup.
+Run commands as your normal user, without `sudo`. Installing the formula does
+not migrate secrets or change your shell config. From `v0.1.2`, the daemon
+starts through `brew services` when a command first needs the Keychain; subsequent
+logins start it automatically. Help, version, status, and `run` without references
+leave it stopped. You can start it sooner with `keyward service install`.
+
+### Start during installation
+
+The tap also provides an optional installer command:
+
+```sh
+brew trust --command veilux-lab/keyward/keyward-install
+brew keyward-install --start-daemon
+```
+
+Run these after tapping the repository. The installer finishes the normal source
+installation, then starts the daemon immediately and enables login startup.
+Without `--start-daemon`, it leaves startup for first use. The command-specific
+trust is separate from the formula's trust.
+
+This is a [Homebrew external command](https://docs.brew.sh/External-Commands),
+kept in [cmd/brew-keyward-install](../cmd/brew-keyward-install). It runs startup
+after `brew install` finishes, outside the formula's post-install sandbox.
 
 The formula is [Formula/keyward.rb](../Formula/keyward.rb). It injects the release
 version and Homebrew executable path, then runs `opt_bin/keyward daemon` under the
@@ -33,6 +52,13 @@ stable service label `com.veilux-lab.keyward.homebrew`.
 `keyward service install` delegates to `brew services restart
 veilux-lab/keyward/keyward`. It refuses to start over another daemon or the signed
 local login agent. `service status` checks launchd registration and the socket.
+First-use startup uses `brew services start` for an unloaded service and respects
+`keyward service uninstall`: that command saves a private disabled marker, so a
+later vault command cannot turn startup back on. Explicit `service install`
+re-enables it. Custom sockets and Keychain service names remain manual.
+Using `brew services stop` directly only stops the service; it does not save this
+choice, so the next vault request can start it again. Use `keyward service
+uninstall` (or Disable in the status app) when you want it to stay disabled.
 
 ## Upgrade
 
@@ -49,12 +75,14 @@ CLI do not configure that service.
 
 ### Switch from the original tap
 
-Once `v0.1.1` is published, replace an existing `v0.1.0` installation with:
+The original `veilux-lab/homebrew-tap` repository was deleted on October 4, 2026.
+Existing `v0.1.0` installations can switch using their local tap checkout:
 
 ```sh
 "$(brew --prefix veilux-lab/tap/keyward)/bin/keyward" service uninstall
-brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
 brew uninstall veilux-lab/tap/keyward
+brew untap veilux-lab/tap
+brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
 brew install veilux-lab/keyward/keyward
 keyward service install
 keyward service status
@@ -64,7 +92,9 @@ Run the first command with the old CLI, before removing it. Confirm its service
 shutdown warning with `yes`. Keep the existing `cap://` references; the stored
 items stay in your Keychain and can be used by the new daemon. This change needs
 no restoration or second migration. The new build may prompt for Keychain access.
-After switching, the old tap can be removed with `brew untap veilux-lab/tap`.
+Keep the old local tap until its service is stopped and formula removed. Removing
+it before adding the new tap also avoids updates against the deleted repository.
+Fresh installs and uncached source downloads from the original tap are unavailable.
 
 If moving from a signed local installation, stop it using that installation's
 `keyward service uninstall` first. Ensure your PATH selects Homebrew's CLI rather
@@ -85,8 +115,9 @@ brew uninstall veilux-lab/keyward/keyward
 
 Restore and service uninstall each require exact lowercase `yes`. Review any
 restoration skips before removal. Keychain items remain after shutdown, removal,
-and reinstall. `brew uninstall` does not restore files or run Keyward's warning
-and confirmation flow.
+and reinstall. Service uninstall keeps first-use startup disabled until explicit
+`keyward service install`. `brew uninstall` does not restore files or run
+Keyward's warning and confirmation flow.
 
 ## Prepare a release
 
@@ -97,14 +128,14 @@ formula containing its exact checksum. The template lives in
 After committing and verifying the source:
 
 ```sh
-go run ./cmd/keyward-release -version 0.1.1 -out bin/homebrew-0.1.1
-cp bin/homebrew-0.1.1/Formula/keyward.rb Formula/keyward.rb
+go run ./cmd/keyward-release -version 0.1.2 -out bin/homebrew-0.1.2
+cp bin/homebrew-0.1.2/Formula/keyward.rb Formula/keyward.rb
 ```
 
-The output contains `keyward-0.1.1.tar.gz` and `Formula/keyward.rb`. The archive
+The output contains `keyward-0.1.2.tar.gz` and `Formula/keyward.rb`. The archive
 includes tracked source only, without Git history or untracked files. The command
 refuses tracked uncommitted changes and existing output files. Its download URL
-points to the archive asset on this repository's `v0.1.1` release.
+points to the archive asset on this repository's planned `v0.1.2` release.
 
 Test the generated formula before committing it. Do not regenerate the archive
 from the formula-update commit: publish the exact archive used for the recorded

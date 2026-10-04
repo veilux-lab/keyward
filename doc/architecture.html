@@ -446,7 +446,7 @@ h2 .accent{color:var(--stamp)}
         <div class="pipe-row">
           <div class="box hot"><div class="nm">internal/handle</div><div class="ds">Recognise and validate each reference</div></div>
           <div class="box"><div class="nm">internal/resolve</div><div class="ds">Scan the environment, resolve each name</div></div>
-          <div class="box side"><div class="nm">internal/daemon &rarr; vault</div><div class="ds">One long-lived process owns the Keychain; the CLI asks it over a same-user socket.</div></div>
+          <div class="box side"><div class="nm">internal/daemon &rarr; vault</div><div class="ds">The CLI starts its installed daemon on first vault use, then asks over a same-user socket. Explicit disabling is respected.</div></div>
         </div>
         <div class="arrow">&darr;</div>
         <div class="pipe-row"><div class="box"><div class="nm">cmd/keyward run</div><div class="ds">syscall.Exec replaces the process image, so no parent lingers holding secrets</div></div>

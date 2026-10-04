@@ -53,10 +53,13 @@ func TestHomebrewServiceLifecycleDoesNotCopyOrSign(t *testing.T) {
 	if strings.Contains(commands, "codesign") {
 		t.Fatal("Homebrew startup requires signing")
 	}
-	for _, name := range []string{".local", "Applications", "Library"} {
+	for _, name := range []string{".local", "Applications"} {
 		if _, err := os.Stat(filepath.Join(home, name)); !os.IsNotExist(err) {
 			t.Fatalf("Homebrew manager copied or wrote files: %s", name)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "Library", "LaunchAgents")); !os.IsNotExist(err) {
+		t.Fatal("Homebrew manager wrote startup files owned by brew")
 	}
 }
 

@@ -1,8 +1,32 @@
 # Using Keyward
 
 For Homebrew setup, upgrades, and removal, see [homebrew.md](homebrew.md).
-The daemon must be running before you add, migrate, restore, or resolve secrets.
+The first-use startup described below is available in source and from `v0.1.2`. With
+Homebrew `v0.1.1`, start the daemon with `keyward service install` first.
 With a development build, run `bin/keyward daemon` in a terminal.
+
+## Daemon startup
+
+An installed CLI starts its managed daemon when a command first needs the
+Keychain and the socket is absent. This includes listing names and checking
+migration or restoration metadata, even during a dry run. A command that does
+not use the Keychain, such as `run` with no references, does not start it.
+Help, version, status, and health checks do not start it either.
+
+Homebrew starts its service through `brew services`; a signed local CLI starts
+the LaunchAgent that was already installed. Once enabled, launchd starts the
+daemon at login and keeps it running. This does not install or sign a development
+build. Permission errors and an unresponsive daemon are reported without starting
+a second process or replaying a request.
+
+`keyward service uninstall` disables first-use startup as well as login startup.
+The choice is saved in a private local marker. Use `keyward service install` to
+enable startup again. The status app's Disable action makes the same choice.
+The signed `make install` continues to start the daemon immediately.
+
+Custom `KEYWARD_SOCKET` or `KEYWARD_SERVICE` values use manual startup, so isolated
+experiments never start your normal daemon. Set the service on the daemon and
+the socket on every command, then run `keyward daemon` yourself.
 
 ## Everyday commands
 
@@ -81,8 +105,9 @@ and restoration does not create another backup containing the restored values.
 Restore before stopping the daemon if you want plaintext values back. Check all
 reported skips before removing Keyward. `keyward service uninstall` warns and
 requires `yes` before stopping startup; it keeps the CLI, app, and Keychain items.
-It does not restore files. The status app gives the same warning before disabling
-startup.
+It does not restore files. First-use startup stays disabled until you explicitly
+enable it again with `keyward service install`. The status app gives the same
+warning before disabling startup.
 
 ## Signed local installation
 

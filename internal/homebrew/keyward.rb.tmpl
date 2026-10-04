@@ -28,7 +28,8 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      Start the broker now and at login:
+      The daemon starts automatically on first vault use, then at login.
+      To start it immediately or re-enable it after service uninstall:
         #{opt_bin}/keyward service install
 
       After upgrading, restart it with keyward service install. Source-built

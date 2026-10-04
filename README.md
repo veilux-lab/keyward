@@ -20,12 +20,13 @@ you do not need a paid Apple Developer account.
 ```sh
 brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
 brew install veilux-lab/keyward/keyward
-keyward service install
-keyward service status
 ```
 
-Run these as your normal user. The daemon starts now and at login. Installation
-does not change your shell files or move any secrets. A
+Run these as your normal user. Installation does not change your shell files or
+move any secrets. From `v0.1.2`, the daemon starts when you first add, list,
+or resolve secrets. With `v0.1.1`, start it once using
+`keyward service install`. See [Homebrew setup](doc/homebrew.md) to start it during
+installation. A
 [signed local installation](doc/install.md#signed-local-installation) is also available.
 
 ## Use

@@ -131,6 +131,7 @@ warns that references need a running daemon and shows restore/preview examples
 before asking for lowercase `yes` to stop the daemon and remove startup. Refusing
 keeps the service available so the user can restore first. Uninstall neither
 retrieves values nor restores files, and retains the CLI, app, and Keychain items.
+It also disables first-use startup until an explicit `keyward service install`.
 The status app presents the same warning before its Disable action.
 
 ### Secrets you want in an interactive shell
@@ -222,6 +223,19 @@ only the same user can open. The CLI can be rebuilt freely. Unsigned daemon
 rebuilds need per-item approval; rebuilding with the same Apple Development
 certificate preserves access on the tested Mac.
 
+The managed client starts the installed daemon only when a vault operation finds
+the socket absent or refused. It then connects again before sending the request;
+a request already sent is never replayed. Permission errors, timeouts, and other
+connection failures do not start a second daemon. `Ping`, help, version, service
+status, and commands with no vault calls remain checks without startup.
+
+Homebrew starts an unloaded service with `brew services start`. A signed local
+installation bootstraps its existing LaunchAgent; it never installs or signs a
+development build on first use. Custom sockets or Keychain service names keep
+manual startup. A private disabled marker records explicit service uninstall, so
+first use cannot undo the user's choice. Explicit service install re-enables it.
+These changes are prepared for the next release, `v0.1.2`.
+
 Direct access from a separately built, equally signed command-line process was
 also verified on 2026-10-02: it read, replaced, and deleted daemon-created dummy
 items after their creator process exited. Signing therefore permits a simpler
@@ -233,7 +247,12 @@ activity logging. See [obstacles.md](obstacles.md) 2a for the repeatable test.
 per-user LaunchAgent. launchd starts it at login and restarts it if it exits. Updates
 replace the executable atomically, restart the agent, and check its socket without
 reading a Keychain item. A failed startup restores the prior installation. Removing
-the login agent keeps the app, CLI, and stored items.
+the login agent keeps the app, CLI, and stored items. `make install` still starts
+the signed daemon immediately. The optional `brew keyward-install --start-daemon`
+command installs the formula, waits for Homebrew to finish, then explicitly enables
+startup. Normal Homebrew installation leaves startup for first use. Keeping this
+outside a formula post-install hook preserves the user's home and avoids its
+sandbox restrictions.
 
 The installer also copies `Keyward.app` to `~/Applications`, registers it with
 Launch Services, and associates the LaunchAgent with `com.nwokolo24.keyward.app`

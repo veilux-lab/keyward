@@ -32,7 +32,12 @@ func setup(t *testing.T) *harness {
 	}
 	h := &harness{}
 	h.m = launchd.Manager{Home: home, Executable: source, UID: 501}
-	h.m.Ready = func(string) error { return nil }
+	h.m.Ready = func(string) error {
+		if h.loaded {
+			return nil
+		}
+		return errors.New("not running")
+	}
 	h.m.Team = func(string) (string, error) { return "TESTTEAMID", nil }
 	h.m.Register = func(string) error { return nil }
 	h.m.Bundle = filepath.Join(t.TempDir(), "Keyward.app")
@@ -49,7 +54,11 @@ func setup(t *testing.T) *harness {
 		}
 		switch args[0] {
 		case "print":
-			if !h.loaded {
+			job := h.m.Label
+			if job == "" {
+				job = "com.nwokolo24.keyward"
+			}
+			if !h.loaded || !strings.HasSuffix(args[1], "/"+job) {
 				return errors.New("not loaded")
 			}
 		case "bootout":

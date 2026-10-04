@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"os"
 	"syscall"
@@ -27,6 +26,9 @@ type Client struct {
 
 	// Timeout bounds each request. Zero means DefaultTimeout.
 	Timeout time.Duration
+
+	// Start recovers a missing listener for vault requests. Ping never calls it.
+	Start func() error
 }
 
 var _ vault.Store = (*Client)(nil)
@@ -69,10 +71,21 @@ func (c *Client) Entries() ([]vault.Entry, error) {
 
 func (c *Client) do(req request) (response, error) {
 	conn, err := net.DialTimeout("unix", c.Path, 2*time.Second)
+	if err != nil && req.Op != "ping" && c.Start != nil && notRunning(err) {
+		if err := c.Start(); err != nil {
+			return response{}, fmt.Errorf("starting the keyward daemon: %w; run `keyward service install` to recover", err)
+		}
+		// No request was sent, so connecting once more cannot replay a write.
+		conn, err = net.DialTimeout("unix", c.Path, 2*time.Second)
+	}
 	if err != nil {
 		// No socket, or a socket left by a daemon that is gone.
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
-			return response{}, fmt.Errorf("%w; start it with `keyward daemon` in another terminal", ErrNotRunning)
+		if notRunning(err) {
+			hint := "run `keyward service install`"
+			if c.Start == nil {
+				hint += "; for development or isolated use, run `keyward daemon`"
+			}
+			return response{}, fmt.Errorf("%w; %s", ErrNotRunning, hint)
 		}
 		return response{}, fmt.Errorf("connecting to the keyward daemon: %w", err)
 	}
@@ -96,4 +109,8 @@ func (c *Client) do(req request) (response, error) {
 		return response{}, fmt.Errorf("talking to the keyward daemon: %w", err)
 	}
 	return resp, resp.err()
+}
+
+func notRunning(err error) bool {
+	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }

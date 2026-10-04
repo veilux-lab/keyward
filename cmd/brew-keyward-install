@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+usage() {
+  echo 'Usage: brew keyward-install [--start-daemon]'
+  echo 'Install Keyward; optionally start its daemon now and at login.'
+}
+
+start_daemon=false
+if [ "$#" -gt 1 ]; then
+  usage >&2
+  exit 2
+fi
+case "${1-}" in
+  '') ;;
+  --start-daemon) start_daemon=true ;;
+  --help|-h) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+brew_executable="${HOMEBREW_BREW_FILE:-brew}"
+"$brew_executable" install veilux-lab/keyward/keyward
+if [ "$start_daemon" = true ]; then
+  keyward_prefix=$("$brew_executable" --prefix veilux-lab/keyward/keyward)
+  "$keyward_prefix/bin/keyward" service install
+fi
