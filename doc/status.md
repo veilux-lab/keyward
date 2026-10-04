@@ -32,7 +32,9 @@ vault calls leave it stopped. Explicit service uninstall disables first-use star
 until service install re-enables it. Custom sockets and service names remain manual.
 An optional `brew keyward-install --start-daemon` command starts it during installation.
 `make verify`, isolated Memory-vault/socket tests, and installer tests pass.
-Homebrew package preparation and publication are pending; public `v0.1.1` still
+The `v0.1.2` source archive is prepared from `f724883`; source installation,
+`brew test`, formula style, checksum, service metadata, and external-command
+discovery checks pass. Publication is pending approval; public `v0.1.1` still
 requires explicit service startup.
 
 Direct access was also verified from a distinct signed command-line test binary:
@@ -146,8 +148,13 @@ explicit disabling, installed signed configuration, and isolated namespaces.
 `make verify` passes, including race checks. The first `run` resolved a dummy
 reference through an automatically started Memory-vault daemon. Installer tests
 use fake executables; shell syntax and Homebrew command discovery also pass.
-No live services or Keychain items were accessed. Package preparation and
-`v0.1.2` publication are pending.
+No live services or Keychain items were accessed. Prepared `v0.1.2` from source
+commit `f724883`; archive SHA-256 is
+`8e83d1a73f0b3561743654734357ef2ac8c0a89f9127a4c7c4f89f9c8be351d7`.
+A renamed, unlinked Homebrew fixture built from that exact archive and passed
+`brew test`. The production formula passed style and service metadata checks;
+fixture packages, tap, trust entries, cache, and logs were removed. The installed
+owner daemon and Keychain items were not changed. Publication is pending approval.
 
 **2026-10-04 (retired original tap)** — The owner deleted
 `veilux-lab/homebrew-tap` after the formula, source archive, and service routing
