@@ -5,3 +5,4 @@ coverage.html
 
 # frontend-slides working files (previews are throwaway)
 .frontend-slides/
+__pycache__/

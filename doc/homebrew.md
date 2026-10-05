@@ -122,6 +122,12 @@ Keyward's warning and confirmation flow.
 
 ## Prepare a release
 
+Pushes to `main` will prepare and publish releases automatically once the
+[GitHub Actions signing credentials](releases.md) are configured. CI uploads
+the source archive before advancing this repository's formula, and verifies
+the exact archive with a disposable Homebrew installation. The steps below
+remain available for manual source-only releases.
+
 The release tool creates a source archive from a committed Git revision and a
 formula containing its exact checksum. The template lives in
 [internal/homebrew/keyward.rb.tmpl](../internal/homebrew/keyward.rb.tmpl).
@@ -129,14 +135,15 @@ formula containing its exact checksum. The template lives in
 After committing and verifying the source:
 
 ```sh
-go run ./cmd/keyward-release -version 0.1.2 -out bin/homebrew-0.1.2
-cp bin/homebrew-0.1.2/Formula/keyward.rb Formula/keyward.rb
+release_version=0.2.0
+go run ./cmd/keyward-release -version "$release_version" -out "bin/homebrew-$release_version"
 ```
 
-The output contains `keyward-0.1.2.tar.gz` and `Formula/keyward.rb`. The archive
+Choose a version not already assigned by CI; `0.2.0` above is an example. The output contains
+`keyward-<version>.tar.gz` and `Formula/keyward.rb`. The archive
 includes tracked source only, without Git history or untracked files. The command
 refuses tracked uncommitted changes and existing output files. Its download URL
-points to the archive asset on this repository's planned `v0.1.2` release.
+points to the matching release asset in this repository.
 
 Test the generated formula before committing it. Do not regenerate the archive
 from the formula-update commit: publish the exact archive used for the recorded
@@ -154,10 +161,12 @@ public also exposes its Git history, unlike publishing a source archive alone.
 2. Obtain the owner's explicit approval immediately before pushing the formula
    commit to `veilux-lab/keyward` on `main`, and before publishing the tag and
    release assets. Name the repository, branch, and action in the request.
-3. Upload the exact archive referenced by the formula to the matching release.
-   Keep the formula, source, documentation, and releases in this repository.
+3. Upload the exact archive referenced by the formula to the matching release,
+   then copy the generated formula into `Formula/keyward.rb`, verify, commit,
+   and obtain approval to push that formula update. Keep the formula, source,
+   documentation, and releases in this repository.
 4. Verify the public download checksum, source installation, and `brew test`.
    Test first-user Keychain prompts and login startup on a fresh Mac separately.
 
-No Apple membership is needed for this source release. A future signed and
-notarized prebuilt release would need paid Developer ID membership.
+No Apple membership is needed for a manual source-only release. Automated signed
+and notarized prebuilt releases need paid Developer ID membership.

@@ -113,6 +113,7 @@ enable it again with `keyward service install`.
 
 Requires Go 1.26.4+, Xcode command line tools, and an Apple Development certificate.
 A free Personal Team certificate can be created through Xcode's account settings.
+Development verification (`make verify`) also requires Python 3.
 Find its exact identity, then build, sign, and install:
 
 ```sh

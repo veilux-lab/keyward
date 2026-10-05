@@ -16,7 +16,8 @@ untouched; the app is unnecessary for CLI startup. The CLI-only signed lifecycle
 test passed in 3.54s, including upgrades, prompt-free reads and replacement,
 restart, persistence, and uninstall under an isolated service.
 
-`make verify` runs `go vet`, `gofmt` and `go test -race`. `make test-integration`
+`make verify` runs `go vet`, `gofmt`, `go test -race`, and Python release tests.
+It requires Python 3 alongside Go and Apple's command line tools. `make test-integration`
 also exercises the real Keychain, under a separate service name.
 
 Signing: a daemon rebuilt with the same **Apple Development** certificate keeps
@@ -37,9 +38,17 @@ until service install re-enables it. Custom sockets and service names remain man
 An optional `brew keyward-install --start-daemon` command starts it during installation.
 `make verify`, isolated Memory-vault/socket tests, and installer tests pass with
 the CLI-only build. The first `v0.1.2` source archive from
-`f724883` passed packaging checks but is superseded. A new CLI-only archive and
-packaging verification are pending before publication. Public `v0.1.1` still
-requires explicit service startup.
+`f724883` passed packaging checks but is superseded. The replacement CLI-only
+archive from `5929237` passed a real source install, `brew test`, formula style,
+and service metadata checks. Public `v0.1.1` still requires explicit service startup.
+
+Automatic signed releases are prepared for pushes to `main`; see
+[release setup](releases.md). Native ARM and Intel checks gate a universal
+Developer ID-signed, notarized, stapled CLI disk image. CI publishes the exact
+source archive before updating Homebrew's formula in this repository. The root
+formula remains on public `v0.1.1` until then. Apple credentials are not configured
+in GitHub, and an end-to-end CI release remains untested. These local changes
+still need owner approval to push before work can continue from another clone.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -136,6 +145,22 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-05 (automatic releases, prepared)** — Added a main-only GitHub Actions
+workflow with native ARM/Intel verification, a universal CLI build, Developer ID
+signing, notarization, and a stapled disk image. Each run uses version
+`0.1.(run number + 1)`; queued publishers retain pending pushes. Source archives,
+checksums, and provenance accompany the signed CLI. Draft uploads can resume;
+published assets are retained and tags must match the tested source commit.
+The Homebrew bot updates only the formula after publication, verifies before
+each commit, retries ordinary fast-forward races, and refuses version downgrades
+or changed checksums at the same version. Signing credentials stay in environment
+variables and private temporary files, with cleanup on exit. The owner's keys
+were not exported. Failure/rerun/concurrent-update tests and shell checks pass.
+Workflow validation passes apart from actionlint 1.7.12's lack of support for
+GitHub's documented `queue: max` property, which was checked separately. Actual
+Developer ID signing and notarization still require the secrets described
+in `doc/releases.md`, an approved push, and a successful first CI run.
+
 **2026-10-05 (CLI-only installation, prepared)** — Removed the companion app,
 Swift build, bundle generation, Launch Services registration, and app association
 from the project. Signed installation now contains the CLI and a per-user
@@ -146,8 +171,12 @@ compilation, and CLI-only sign/install dry runs passed. The isolated
 `TestSignedInstallLifecycle` passed in 3.54s: distinct CLI builds signed with the
 same Apple Development certificate read and replaced dummy items in under two
 seconds, then verified restart, persistence, and uninstall. The initial `v0.1.2`
-candidate from `f724883` is superseded; a replacement CLI-only source archive and
-packaging verification are pending before publication.
+candidate from `f724883` is superseded. The replacement from `5929237` has SHA-256
+`2f2c5541f465676b2e3eea6ea771cad5cb12b66edac09a8b167a4cf3a203f90d`.
+Its real source installation, `brew test`, formula style, service metadata, and
+absence of Swift/app-bundle components passed; the fixture was removed. It is
+retained under ignored `bin/homebrew-0.1.2-cli` as packaging evidence. CI will
+generate its own archive from the triggering commit, including the workflow.
 
 **2026-10-04 (first-use daemon startup, prepared)** — Managed vault clients start
 an absent daemon before sending a request. Homebrew enables its service; signed

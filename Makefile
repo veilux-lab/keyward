@@ -1,4 +1,4 @@
-.PHONY: test test-race test-integration vet fmt cover verify build sign install clean
+.PHONY: test test-race test-release test-integration vet fmt cover verify build sign install clean
 
 build:
 	go build -o bin/keyward ./cmd/keyward
@@ -17,6 +17,10 @@ test:
 test-race:
 	go test -race ./...
 
+test-release:
+	bash -n scripts/sign-release.sh scripts/publish-release.sh scripts/update-homebrew.sh scripts/test-homebrew-release.sh
+	python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
 # Touches the real Keychain, so it is kept out of `test` and `verify`. Items are
 # written under a dedicated service name and removed afterwards, so it cannot
 # affect real keyward entries.
@@ -34,7 +38,7 @@ cover:
 	go tool cover -func=coverage.out | tail -1
 
 # What CI would run. Fails on unformatted code rather than quietly reformatting.
-verify: vet test-race
+verify: vet test-race test-release
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 	@echo "verify: ok"
 

@@ -84,4 +84,6 @@ deliberate attempt to obtain credentials.
 Homebrew daemon upgrades may prompt for access to older Keychain items. See
 [Homebrew setup and upgrades](doc/homebrew.md) and [project status](doc/status.md).
 
+See [GitHub Actions release setup](doc/releases.md) for publishing signed builds.
+
 MIT licensed. See [LICENSE](LICENSE).
