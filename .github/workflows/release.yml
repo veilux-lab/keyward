@@ -3,6 +3,10 @@ name: Release
 on:
   push:
     branches: [main]
+    # Documentation-only pushes would otherwise publish an unchanged release.
+    paths-ignore:
+      - "**.md"
+      - "doc/**"
   workflow_dispatch:
 
 permissions:

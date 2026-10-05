@@ -9,8 +9,9 @@ publisher-token requirement.
 ## What runs
 
 [.github/workflows/release.yml](../.github/workflows/release.yml) runs on pushes
-to `main`, the repository's default branch. Manual runs from the Actions page
-must also select `main`; other branches cannot publish.
+to `main`, the repository's default branch. Pushes that change only Markdown
+files or `doc/` do not start it; their changes ship with the next release. Manual
+runs from the Actions page must also select `main`; other branches cannot publish.
 
 Each successful run:
 
