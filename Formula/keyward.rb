@@ -1,9 +1,9 @@
 class Keyward < Formula
   desc "Keep shell secrets in macOS Keychain and resolve them through a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.1/keyward-0.1.1.tar.gz"
-  version "0.1.1"
-  sha256 "a8a3b95e941541d29565b5cca44ba157ef4a9db5203018c8a9c9ecc2cfb0241a"
+  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.3/keyward-0.1.3.tar.gz"
+  version "0.1.3"
+  sha256 "6b588d57fcf329d3e6a143225389f7ae11f01853e3217164e2c8db62a4ef3f20"
   license "MIT"
 
   depends_on "go" => :build
@@ -28,7 +28,8 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      Start the broker now and at login:
+      The daemon starts automatically on first vault use, then at login.
+      To start it immediately or re-enable it after service uninstall:
         #{opt_bin}/keyward service install
 
       After upgrading, restart it with keyward service install. Source-built
