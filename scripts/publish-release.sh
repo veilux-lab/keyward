@@ -1,13 +1,33 @@
 #!/bin/bash
 set -euo pipefail
 
-version=${1:?usage: publish-release.sh version output-directory}
-output=${2:?usage: publish-release.sh version output-directory}
+version=${1:?usage: publish-release.sh version output-directory [source|signed]}
+output=${2:?usage: publish-release.sh version output-directory [source|signed]}
+release_type=${3:-source}
 tag="v$version"
-assets=("keyward-$version.tar.gz" "keyward-$version-darwin-universal.dmg" SHA256SUMS release.json)
+assets=("keyward-$version.tar.gz" SHA256SUMS release.json)
+case "$release_type" in
+  source) ;;
+  signed) assets+=("keyward-$version-darwin-universal.dmg") ;;
+  *) echo "Release type must be source or signed" >&2; exit 1 ;;
+esac
 for asset in "${assets[@]}"; do
   test -f "$output/$asset" || { echo "Missing release asset: $asset" >&2; exit 1; }
 done
+validate_manifest() {
+  python3 - "$1" "$version" "$release_type" "${assets[@]}" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1]) as source:
+    release = json.load(source)
+if release.get("version") != sys.argv[2] or release.get("source_commit") != os.environ["GITHUB_SHA"] or \
+        release.get("release_type") != sys.argv[3] or release.get("assets") != sys.argv[4:]:
+    sys.exit("Release provenance or asset list does not match this run")
+PY
+}
+validate_manifest "$output/release.json"
 remote=$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")
 if [ -n "$remote" ]; then
   revision=$(printf '%s\n' "$remote" | tail -1 | cut -f1)
@@ -34,16 +54,32 @@ else:
     print("published")
 PY
   )
-  if [ "$state" = published ]; then
-    python3 - "$directory/state.json" "${assets[@]}" <<'PY'
+  python3 - "$directory/state.json" "${assets[@]}" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1]) as source:
-    names = {asset["name"] for asset in json.load(source)["assets"]}
-if not set(sys.argv[2:]).issubset(names):
-    sys.exit("Existing public release is incomplete; refusing to overwrite it")
+    release = json.load(source)
+names = {asset["name"] for asset in release["assets"]}
+expected = set(sys.argv[2:])
+if release["isDraft"]:
+    if not names.issubset(expected):
+        sys.exit("Existing draft contains assets for another release type")
+elif names != expected:
+    sys.exit("Existing public release is incomplete or has unexpected assets; refusing to overwrite it")
 PY
+  if python3 - "$directory/state.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as source:
+    sys.exit(0 if any(asset["name"] == "release.json" for asset in json.load(source)["assets"]) else 1)
+PY
+  then
+    gh release download "$tag" --pattern release.json --dir "$directory"
+    validate_manifest "$directory/release.json"
+  fi
+  if [ "$state" = published ]; then
     gh release download "$tag" --pattern "keyward-$version.tar.gz" --dir "$directory"
     cmp "$directory/keyward-$version.tar.gz" "$output/keyward-$version.tar.gz"
     echo "Published release retained; source archive matches"
@@ -56,4 +92,4 @@ paths=()
 for asset in "${assets[@]}"; do paths+=("$output/$asset"); done
 # Drafts can resume an interrupted upload; public assets are never replaced.
 gh release upload "$tag" "${paths[@]}" --clobber
-gh release edit "$tag" --draft=false --latest=false
+gh release edit "$tag" --notes-file "$output/notes.md" --draft=false --latest=false

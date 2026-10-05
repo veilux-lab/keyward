@@ -23,7 +23,7 @@ brew install veilux-lab/keyward/keyward
 ```
 
 Run these as your normal user. Installation does not change your shell files or
-move any secrets. From `v0.1.2`, the daemon starts when you first add, list,
+move any secrets. The next release starts the daemon when you first add, list,
 or resolve secrets. With `v0.1.1`, start it once using
 `keyward service install`. See [Homebrew setup](doc/homebrew.md) to start it during
 installation. A
@@ -84,6 +84,7 @@ deliberate attempt to obtain credentials.
 Homebrew daemon upgrades may prompt for access to older Keychain items. See
 [Homebrew setup and upgrades](doc/homebrew.md) and [project status](doc/status.md).
 
-See [GitHub Actions release setup](doc/releases.md) for publishing signed builds.
+See [GitHub Actions release setup](doc/releases.md) for free source releases and
+optional signed downloads.
 
 MIT licensed. See [LICENSE](LICENSE).

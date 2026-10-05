@@ -76,16 +76,23 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
-      - name: Check publisher configuration
+      - name: Select release type
         env:
-          RELEASE_PUBLISH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+          KEYWARD_SIGNED_RELEASES: ${{ vars.KEYWARD_SIGNED_RELEASES }}
         run: |
-          test -n "$RELEASE_PUBLISH_TOKEN" || { echo 'Missing GitHub secret: RELEASE_PUBLISH_TOKEN' >&2; exit 1; }
+          case "$KEYWARD_SIGNED_RELEASES" in
+            ""|false) release_type=source ;;
+            true) release_type=signed ;;
+            *) echo 'KEYWARD_SIGNED_RELEASES must be true or false' >&2; exit 1 ;;
+          esac
+          echo "RELEASE_TYPE=$release_type" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: env.RELEASE_TYPE == 'signed'
         with:
           name: unsigned-arm64
           path: bin/release/unsigned/arm64
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: env.RELEASE_TYPE == 'signed'
         with:
           name: unsigned-amd64
           path: bin/release/unsigned/amd64
@@ -99,6 +106,7 @@ jobs:
       - name: Verify Homebrew source installation
         run: bash scripts/test-homebrew-release.sh "$RELEASE_VERSION" bin/release
       - name: Sign and notarize universal CLI
+        if: env.RELEASE_TYPE == 'signed'
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -109,34 +117,16 @@ jobs:
         run: bash scripts/sign-release.sh "$RELEASE_VERSION" bin/release
       - name: Record release provenance and checksums
         run: |
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          output = Path("bin/release")
-          version = os.environ["RELEASE_VERSION"]
-          provenance = {"version": version, "source_commit": os.environ["GITHUB_SHA"],
-                        "run_id": os.environ["GITHUB_RUN_ID"], "macos_minimum": "15.0",
-                        "signing_identifier": "com.nwokolo24.keyward"}
-          (output / "release.json").write_text(json.dumps(provenance, indent=2) + "\n")
-          (output / "notes.md").write_text(
-              f"Built from `{provenance['source_commit']}`.\n\n"
-              "The disk image contains a Developer ID-signed, notarized universal CLI "
-              "for macOS 15 or later. Follow INSTALL.txt inside the image.\n\n"
-              "Homebrew continues to build from the matching source archive. "
-              "Changing signing identities may require Keychain approval.\n")
-          PY
+          python3 scripts/prepare-release.py "$RELEASE_VERSION" bin/release --release-type "$RELEASE_TYPE"
           cd bin/release
-          shasum -a 256 "keyward-$RELEASE_VERSION.tar.gz" "keyward-$RELEASE_VERSION-darwin-universal.dmg" release.json > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
       - name: Publish release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN || github.token }}
           GH_REPO: veilux-lab/keyward
         run: |
           gh auth setup-git --hostname github.com
-          bash scripts/publish-release.sh "$RELEASE_VERSION" bin/release
+          bash scripts/publish-release.sh "$RELEASE_VERSION" bin/release "$RELEASE_TYPE"
       - name: Update Homebrew
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,7 +135,7 @@ jobs:
           bash scripts/update-homebrew.sh bin/release/Formula/keyward.rb
       - name: Mark the current version latest
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN || github.token }}
           GH_REPO: veilux-lab/keyward
         run: |
           git fetch --no-tags origin main

@@ -9,8 +9,8 @@ membership is required. A separate
 
 Release [`v0.1.1`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.1) uses
 this single-repository setup and requires explicit `keyward service install`.
-The planned `v0.1.2` adds first-use startup, the optional installer below, and
-CLI-only signed installation. Publication is pending.
+The next published release adds first-use startup, the optional installer below,
+and CLI-only local installation. Publication is pending.
 
 ## Install
 
@@ -24,9 +24,9 @@ The explicit URL lets Homebrew use this repository as a tap without a separate
 formula-specific trust on Homebrew versions that require it.
 
 Run commands as your normal user, without `sudo`. Installing the formula does
-not migrate secrets or change your shell config. From `v0.1.2`, the daemon
-starts through `brew services` when a command first needs the Keychain; subsequent
-logins start it automatically. Help, version, status, and `run` without references
+not migrate secrets or change your shell config. In the next published release,
+the daemon starts through `brew services` when a command first needs the Keychain;
+subsequent logins start it automatically. Help, version, status, and `run` without references
 leave it stopped. You can start it sooner with `keyward service install`.
 
 ### Start during installation
@@ -122,11 +122,11 @@ Keyward's warning and confirmation flow.
 
 ## Prepare a release
 
-Pushes to `main` will prepare and publish releases automatically once the
-[GitHub Actions signing credentials](releases.md) are configured. CI uploads
-the source archive before advancing this repository's formula, and verifies
-the exact archive with a disposable Homebrew installation. The steps below
-remain available for manual source-only releases.
+The default [GitHub Actions release workflow](releases.md) prepares free source
+releases on pushes to `main`, verifies the exact archive with `brew test`, then
+publishes it before advancing this repository's formula. No Apple credentials or
+personal access token are normally needed. This free default is prepared locally
+and awaits an approved push. The steps below remain available for manual releases.
 
 The release tool creates a source archive from a committed Git revision and a
 formula containing its exact checksum. The template lives in
@@ -135,13 +135,14 @@ formula containing its exact checksum. The template lives in
 After committing and verifying the source:
 
 ```sh
-release_version=0.2.0
+release_version=0.1.2
 go run ./cmd/keyward-release -version "$release_version" -out "bin/homebrew-$release_version"
 ```
 
-Choose a version not already assigned by CI; `0.2.0` above is an example. The output contains
-`keyward-<version>.tar.gz` and `Formula/keyward.rb`. The archive
-includes tracked source only, without Git history or untracked files. The command
+For manual recovery, use the failed CI run's version and source commit;
+`0.1.2` above is an example. Coordinate manual numbering with CI's `0.1.*`
+sequence. The output contains `keyward-<version>.tar.gz` and `Formula/keyward.rb`.
+The archive includes tracked source only, without Git history or untracked files. The command
 refuses tracked uncommitted changes and existing output files. Its download URL
 points to the matching release asset in this repository.
 
@@ -168,5 +169,7 @@ public also exposes its Git history, unlike publishing a source archive alone.
 4. Verify the public download checksum, source installation, and `brew test`.
    Test first-user Keychain prompts and login startup on a fresh Mac separately.
 
-No Apple membership is needed for a manual source-only release. Automated signed
-and notarized prebuilt releases need paid Developer ID membership.
+Automated and manual source releases need no Apple membership. Signed and
+notarized prebuilt downloads are optional: they require paid Developer ID
+membership and an explicit `KEYWARD_SIGNED_RELEASES=true` Actions variable. See
+[release setup](releases.md#optional-signed-downloads).

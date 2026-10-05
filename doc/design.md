@@ -232,7 +232,7 @@ installation bootstraps its existing LaunchAgent; it never installs or signs a
 development build on first use. Custom sockets or Keychain service names keep
 manual startup. A private disabled marker records explicit service uninstall, so
 first use cannot undo the user's choice. Explicit service install re-enables it.
-These changes are prepared for the next release, `v0.1.2`.
+These changes are prepared for the next source release.
 
 Direct access from a separately built, equally signed command-line process was
 also verified on 2026-10-02: it read, replaced, and deleted daemon-created dummy

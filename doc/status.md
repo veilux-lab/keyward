@@ -31,7 +31,7 @@ and release assets were backed up under ignored `bin/retired-homebrew-tap`.
 The new setup has no dependency on it. Existing old installations can switch using
 their local tap checkout; new old-tap installs and uncached downloads are unavailable.
 
-New in source for `v0.1.2`: an installed CLI starts its managed daemon
+New in source for the next release: an installed CLI starts its managed daemon
 on the first vault request if the socket is absent. Checks and commands without
 vault calls leave it stopped. Explicit service uninstall disables first-use startup
 until service install re-enables it. Custom sockets and service names remain manual.
@@ -42,13 +42,21 @@ the CLI-only build. The first `v0.1.2` source archive from
 archive from `5929237` passed a real source install, `brew test`, formula style,
 and service metadata checks. Public `v0.1.1` still requires explicit service startup.
 
-Automatic signed releases are prepared for pushes to `main`; see
-[release setup](releases.md). Native ARM and Intel checks gate a universal
-Developer ID-signed, notarized, stapled CLI disk image. CI publishes the exact
-source archive before updating Homebrew's formula in this repository. The root
-formula remains on public `v0.1.1` until then. Apple credentials are not configured
-in GitHub, and an end-to-end CI release remains untested. These local changes
-still need owner approval to push before work can continue from another clone.
+The automatic release workflow is published on `main`; see
+[release setup](releases.md). A local update makes source/Homebrew releases the
+default, using GitHub's built-in token without Apple credentials or membership.
+Native ARM and Intel checks gate publication of the exact source archive,
+checksums, and provenance before the formula updates in this repository.
+Developer ID-signed, notarized downloads become optional, enabled explicitly with
+`KEYWARD_SIGNED_RELEASES=true`. The root formula remains on public `v0.1.1` until
+CI publishes its next release. This free-default change awaits an approved push;
+an end-to-end signed CI release remains untested. The earlier approved four
+commits landed on `main` at `0c594dd`. Their first
+[CI run](https://github.com/veilux-lab/keyward/actions/runs/37283711186) passed
+native ARM and Intel verification, builds, and artifact upload. Publishing
+stopped at `Missing GitHub secret: RELEASE_PUBLISH_TOKEN`; archive preparation,
+signing, release creation, and formula updates were skipped under the earlier
+configuration. Source development can continue from another clone of `main`.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -86,9 +94,9 @@ handled; see [obstacles.md](obstacles.md) 2a.
 | `internal/restore` | **Done** | Separate explicit command; redacted plan for selected files, mandatory exact `yes`, metadata-only dry run, best-effort atomic private writes, retained Keychain entries. Uninstall warns users to restore first and requires confirmation before stopping startup. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
-| `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. First-use managed startup is prepared for `v0.1.2`; requests are not replayed. |
-| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. The isolated CLI-only lifecycle test passed in 3.54s for signed upgrade, reads and replacement, launchd restart, persistence, and uninstall. First-use startup and persistent explicit disabling are prepared for `v0.1.2`. |
-| Code signing | Apple Development rebuild test passed twice | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s, 0.04s); unsigned control denied in both runs. Developer ID distribution signing remains untested and requires the paid programme; free Personal Team signing cannot be used for distribution to others. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
+| `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. First-use managed startup is prepared for the next release; requests are not replayed. |
+| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. The isolated CLI-only lifecycle test passed in 3.54s for signed upgrade, reads and replacement, launchd restart, persistence, and uninstall. First-use startup and persistent explicit disabling are prepared for the next release. |
+| Code signing | Apple Development rebuild test passed twice | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s, 0.04s); unsigned control denied in both runs. Free Apple Development signing supports local use; Developer ID signing and notarization require paid membership and remain untested. Homebrew source distribution needs neither. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
 | `internal/doctor` | **Done** | Dangling, malformed, orphaned, unknown, plus stated coverage. Report-only. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
 
@@ -145,6 +153,17 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-05 (free automatic releases, prepared)** — Source/Homebrew publication
+is now the default, using `GITHUB_TOKEN`. No Apple credentials or paid membership
+are needed. Developer ID signing runs only when `KEYWARD_SIGNED_RELEASES=true`;
+enabling it still requires all signing credentials and successful notarization.
+An optional publication token handles older queued commits when GitHub requires
+workflow permission. Release manifests record the selected type and exact asset
+list. Draft retries and published reruns refuse mismatched provenance or mixed
+source/signed assets; resumed drafts refresh their notes. The default source path,
+signed failures, and retry guards have regression coverage. This change is local
+until an approved push.
+
 **2026-10-05 (automatic releases, prepared)** — Added a main-only GitHub Actions
 workflow with native ARM/Intel verification, a universal CLI build, Developer ID
 signing, notarization, and a stapled disk image. Each run uses version
@@ -160,6 +179,9 @@ Workflow validation passes apart from actionlint 1.7.12's lack of support for
 GitHub's documented `queue: max` property, which was checked separately. Actual
 Developer ID signing and notarization still require the secrets described
 in `doc/releases.md`, an approved push, and a successful first CI run.
+The owner approved pushing the four pending commits to `main`. GitHub now points
+to `0c594dd`; both native CI build jobs passed. The publisher stopped at its
+missing-token configuration check before any signing or release mutation.
 
 **2026-10-05 (CLI-only installation, prepared)** — Removed the companion app,
 Swift build, bundle generation, Launch Services registration, and app association
