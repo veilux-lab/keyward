@@ -1,16 +1,20 @@
 # Status
 
-Last updated: 2026-10-04
+Last updated: 2026-10-05
 
 ## Where things stand
 
 The tool works end to end on the real Keychain. `add`, `ls`, `rm`, `run`,
 `migrate`, `restore`, `doctor`, `daemon`, and `service` are implemented. The daemon is the only
 process that touches the Keychain, so CLI rebuilds never prompt. `make install`
-builds and signs a local installation with a per-user login agent. Installed on this
-Mac: the signed daemon is running and configured to start at login. Automated checks
-and the isolated live installation test pass. `~/Applications/Keyward.app` provides
-a **Keyward by Veilux** status window, activity-log access, and startup controls.
+builds and signs the CLI with a per-user login agent. The project no longer builds
+a companion app. Use `keyward service status`, `install`, and `uninstall` for
+startup controls, and `~/Library/Logs/keyward/activity.jsonl` for activity.
+Installed on this Mac: the signed daemon is running and configured to start at
+login. The owner's previously installed app and live daemon have been left
+untouched; the app is unnecessary for CLI startup. The CLI-only signed lifecycle
+test passed in 3.54s, including upgrades, prompt-free reads and replacement,
+restart, persistence, and uninstall under an isolated service.
 
 `make verify` runs `go vet`, `gofmt` and `go test -race`. `make test-integration`
 also exercises the real Keychain, under a separate service name.
@@ -31,10 +35,10 @@ on the first vault request if the socket is absent. Checks and commands without
 vault calls leave it stopped. Explicit service uninstall disables first-use startup
 until service install re-enables it. Custom sockets and service names remain manual.
 An optional `brew keyward-install --start-daemon` command starts it during installation.
-`make verify`, isolated Memory-vault/socket tests, and installer tests pass.
-The `v0.1.2` source archive is prepared from `f724883`; source installation,
-`brew test`, formula style, checksum, service metadata, and external-command
-discovery checks pass. Publication is pending approval; public `v0.1.1` still
+`make verify`, isolated Memory-vault/socket tests, and installer tests pass with
+the CLI-only build. The first `v0.1.2` source archive from
+`f724883` passed packaging checks but is superseded. A new CLI-only archive and
+packaging verification are pending before publication. Public `v0.1.1` still
 requires explicit service startup.
 
 Direct access was also verified from a distinct signed command-line test binary:
@@ -48,10 +52,9 @@ handled; see [obstacles.md](obstacles.md) 2a.
 - `Replace` succeeds across builds signed with the same Apple Development
   certificate. Replacement across unsigned builds remains untested (2a-bis).
 - Login startup is configured; an actual logout/login has not been tested.
-- The installed app and LaunchAgent are associated, but this Mac's existing
-  Background App Activity entry still shows the personal signing-certificate name.
-  Cached attribution may explain this; a fresh-machine notification is untested.
-  Product branding does not change the certificate's publisher identity.
+- This Mac's Background App Activity entry shows the personal
+  signing-certificate name. Fresh-machine notifications remain untested, and
+  removing the app from the project does not change the signing publisher identity.
 - Activity logging is best effort: storage failures warn in the CLI and operations
   continue. Same-user processes can read or modify it; tamper-evident audit history
   is not implemented. Idle files are cleaned on the next use.
@@ -75,8 +78,7 @@ handled; see [obstacles.md](obstacles.md) 2a.
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
 | `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. First-use managed startup is prepared for `v0.1.2`; requests are not replayed. |
-| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. Live tests passed for signed upgrade, item replacement, launchd restart, persistence, and uninstall. First-use startup and persistent explicit disabling are prepared for `v0.1.2`. |
-| `internal/appbundle` | **Done** | Signed Keyward by Veilux status app installed in `~/Applications`. Native window verified. The app is registered with Launch Services and associated with the daemon; same-team checks and app rollback are covered by tests. |
+| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. The isolated CLI-only lifecycle test passed in 3.54s for signed upgrade, reads and replacement, launchd restart, persistence, and uninstall. First-use startup and persistent explicit disabling are prepared for `v0.1.2`. |
 | Code signing | Apple Development rebuild test passed twice | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s, 0.04s); unsigned control denied in both runs. Developer ID distribution signing remains untested and requires the paid programme; free Personal Team signing cannot be used for distribution to others. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
 | `internal/doctor` | **Done** | Dangling, malformed, orphaned, unknown, plus stated coverage. Report-only. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
@@ -134,6 +136,19 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-05 (CLI-only installation, prepared)** — Removed the companion app,
+Swift build, bundle generation, Launch Services registration, and app association
+from the project. Signed installation now contains the CLI and a per-user
+LaunchAgent. Startup controls remain `keyward service status|install|uninstall`;
+activity is in `~/Library/Logs/keyward/activity.jsonl`. The owner's existing app,
+daemon, and Keychain items were left untouched. `make verify`, integration-test
+compilation, and CLI-only sign/install dry runs passed. The isolated
+`TestSignedInstallLifecycle` passed in 3.54s: distinct CLI builds signed with the
+same Apple Development certificate read and replaced dummy items in under two
+seconds, then verified restart, persistence, and uninstall. The initial `v0.1.2`
+candidate from `f724883` is superseded; a replacement CLI-only source archive and
+packaging verification are pending before publication.
+
 **2026-10-04 (first-use daemon startup, prepared)** — Managed vault clients start
 an absent daemon before sending a request. Homebrew enables its service; signed
 local installations bootstrap an existing LaunchAgent. Health checks and commands
@@ -154,7 +169,8 @@ commit `f724883`; archive SHA-256 is
 A renamed, unlinked Homebrew fixture built from that exact archive and passed
 `brew test`. The production formula passed style and service metadata checks;
 fixture packages, tap, trust entries, cache, and logs were removed. The installed
-owner daemon and Keychain items were not changed. Publication is pending approval.
+owner daemon and Keychain items were not changed. This initial archive is
+superseded by the CLI-only update and will not be published.
 
 **2026-10-04 (retired original tap)** — The owner deleted
 `veilux-lab/homebrew-tap` after the formula, source archive, and service routing

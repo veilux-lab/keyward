@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/veilux-lab/keyward/internal/appbundle"
 	"github.com/veilux-lab/keyward/internal/launchd"
 )
 
@@ -37,12 +37,6 @@ func setup(t *testing.T) *harness {
 			return nil
 		}
 		return errors.New("not running")
-	}
-	h.m.Team = func(string) (string, error) { return "TESTTEAMID", nil }
-	h.m.Register = func(string) error { return nil }
-	h.m.Bundle = filepath.Join(t.TempDir(), "Keyward.app")
-	if err := appbundle.Build(h.m.Bundle, source, source); err != nil {
-		t.Fatal(err)
 	}
 	h.m.Command = func(program string, args ...string) error {
 		h.calls = append(h.calls, filepath.Base(program)+" "+strings.Join(args, " "))
@@ -82,6 +76,63 @@ func (h *harness) plist() string {
 	return filepath.Join(h.m.Home, "Library", "LaunchAgents", "com.nwokolo24.keyward.plist")
 }
 
+func TestInstallSignedCLIWithoutACompanion(t *testing.T) {
+	home := t.TempDir()
+	executable := filepath.Join(t.TempDir(), "keyward")
+	if err := os.WriteFile(executable, []byte("signed-cli-fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loaded := false
+	var calls []string
+	m := launchd.Manager{Home: home, Executable: executable, UID: os.Getuid()}
+	m.Ready = func(string) error {
+		if loaded {
+			return nil
+		}
+		return errors.New("not running")
+	}
+	m.Command = func(program string, args ...string) error {
+		calls = append(calls, filepath.Base(program)+" "+strings.Join(args, " "))
+		if filepath.Base(program) == "codesign" {
+			if args[len(args)-1] != executable {
+				return errors.New("only the signed CLI exists")
+			}
+			return nil
+		}
+		if program != "/bin/launchctl" {
+			t.Fatalf("unexpected companion command: %s", program)
+		}
+		switch args[0] {
+		case "print":
+			if !loaded || !strings.HasSuffix(args[1], "/com.nwokolo24.keyward") {
+				return errors.New("not loaded")
+			}
+		case "bootstrap":
+			loaded = true
+		default:
+			t.Fatalf("unexpected launchctl operation: %v", args)
+		}
+		return nil
+	}
+	message, err := m.Run("install")
+	if err != nil {
+		t.Fatalf("signed CLI-only install: %v", err)
+	}
+	if !loaded || !strings.Contains(message, filepath.Join(home, ".local", "bin", "keyward")) {
+		t.Fatal("CLI-only installation did not start the installed daemon")
+	}
+	if strings.Count(strings.Join(calls, "\n"), "codesign ") != 1 {
+		t.Fatal("installation verified more than the signed CLI")
+	}
+	plist, err := os.ReadFile(filepath.Join(home, "Library", "LaunchAgents", "com.nwokolo24.keyward.plist"))
+	if err != nil || strings.Contains(string(plist), "AssociatedBundleIdentifiers") || strings.Contains(string(plist), "com.nwokolo24.keyward.app") {
+		t.Fatalf("CLI-only daemon retained app association: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "Applications")); !os.IsNotExist(err) {
+		t.Fatal("CLI-only installation created an application directory")
+	}
+}
+
 func TestInstallStartsSignedDaemonAndPreservesArguments(t *testing.T) {
 	h := setup(t)
 	h.m.Socket = filepath.Join(h.m.Home, "private", "daemon.sock")
@@ -111,11 +162,8 @@ func TestInstallStartsSignedDaemonAndPreservesArguments(t *testing.T) {
 	if !strings.Contains(string(plist), "KEYWARD_SOCKET") || !strings.Contains(string(plist), "keyward-dummy-test") {
 		t.Fatal("test service and socket were not retained")
 	}
-	if !strings.Contains(string(plist), "AssociatedBundleIdentifiers") || !strings.Contains(string(plist), appbundle.ID) {
-		t.Fatal("daemon was not associated with the branded app")
-	}
-	if _, err := os.Stat(filepath.Join(h.m.Home, "Applications", "Keyward.app", "Contents", "Info.plist")); err != nil {
-		t.Fatal(err)
+	if strings.Contains(string(plist), "AssociatedBundleIdentifiers") {
+		t.Fatal("CLI-only daemon retained app association")
 	}
 	if strings.Contains(string(plist), "daemon.log") || !strings.Contains(string(plist), "/dev/null") {
 		t.Fatal("launchd still writes an unbounded daemon log")
@@ -139,61 +187,6 @@ func TestInstallRefusesUnsignedBinaryBeforeChangingAnything(t *testing.T) {
 	}
 	if h.loaded {
 		t.Fatal("unsigned daemon started")
-	}
-}
-
-func TestInstallRefusesDifferentAppAndDaemonTeams(t *testing.T) {
-	h := setup(t)
-	h.m.Team = func(path string) (string, error) {
-		if path == h.m.Bundle {
-			return "OTHERTEAM", nil
-		}
-		return "TESTTEAMID", nil
-	}
-	if _, err := h.m.Run("install"); err == nil {
-		t.Fatal("mismatched signing teams were accepted")
-	}
-	if h.loaded {
-		t.Fatal("mismatched daemon started")
-	}
-}
-
-func TestFailedRegistrationRestoresPriorInstallation(t *testing.T) {
-	h := setup(t)
-	if _, err := h.m.Run("install"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(h.m.Executable, []byte("build-two"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	h.m.Register = func(string) error {
-		calls++
-		if calls == 1 {
-			return errors.New("registration failed")
-		}
-		return nil
-	}
-	if _, err := h.m.Run("install"); err == nil {
-		t.Fatal("failed registration reported success")
-	}
-	b, _ := os.ReadFile(h.binary())
-	if string(b) != "build-one" || !h.loaded {
-		t.Fatal("registration failure lost the previous installation")
-	}
-}
-
-func TestFailedAppReregistrationStillRestartsPriorDaemon(t *testing.T) {
-	h := setup(t)
-	if _, err := h.m.Run("install"); err != nil {
-		t.Fatal(err)
-	}
-	h.m.Register = func(string) error { return errors.New("Launch Services unavailable") }
-	if _, err := h.m.Run("install"); err == nil {
-		t.Fatal("registration failure reported success")
-	}
-	if !h.loaded {
-		t.Fatal("app registration failure prevented restoring the prior daemon")
 	}
 }
 
@@ -253,6 +246,46 @@ func TestFailedFirstInstallLeavesNoLoginAgent(t *testing.T) {
 	}
 	if h.loaded {
 		t.Fatal("failed install left a registered job")
+	}
+}
+
+func TestReadinessFailureRestoresThePreviousCLIAndPlist(t *testing.T) {
+	h := setup(t)
+	if _, err := h.m.Run("install"); err != nil {
+		t.Fatal(err)
+	}
+	oldPlist, err := os.ReadFile(h.plist())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.m.Executable, []byte("build-two"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Service = "changed-service"
+	h.m.StartupTimeout = 20 * time.Millisecond
+	h.m.Ready = func(string) error {
+		binary, err := os.ReadFile(h.binary())
+		if err == nil && string(binary) == "build-one" && h.loaded {
+			return nil
+		}
+		return errors.New("new daemon is not responding")
+	}
+	if _, err := h.m.Run("install"); err == nil {
+		t.Fatal("unresponsive upgrade reported success")
+	}
+	binary, err := os.ReadFile(h.binary())
+	if err != nil || string(binary) != "build-one" || !h.loaded {
+		t.Fatal("readiness failure did not restore the previous daemon")
+	}
+	plist, err := os.ReadFile(h.plist())
+	if err != nil || string(plist) != string(oldPlist) {
+		t.Fatal("readiness failure did not restore the previous configuration")
+	}
+	for path, mode := range map[string]os.FileMode{h.binary(): 0o755, h.plist(): 0o600} {
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != mode {
+			t.Fatalf("rollback changed mode for %s: %v", path, err)
+		}
 	}
 }
 

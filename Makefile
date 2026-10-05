@@ -1,23 +1,12 @@
-.PHONY: test test-race test-integration vet fmt cover verify build app-ui app sign install clean
-
-SWIFT_MODULE_CACHE ?= bin/.swift-module-cache
+.PHONY: test test-race test-integration vet fmt cover verify build sign install clean
 
 build:
 	go build -o bin/keyward ./cmd/keyward
 
-app-ui:
-	@mkdir -p bin
-	xcrun swiftc -module-cache-path "$(SWIFT_MODULE_CACHE)" -O -o bin/keyward-app cmd/keyward-app/main.swift
-
-app: build app-ui
-	go run ./cmd/keyward-bundle
-
 # SIGN_IDENTITY is the exact Apple Development identity from security find-identity.
-sign: build app-ui
+sign: build
 	@test -n "$(SIGN_IDENTITY)" || { echo 'set SIGN_IDENTITY to your Apple Development certificate name'; exit 1; }
 	codesign --force --sign "$(SIGN_IDENTITY)" --identifier com.nwokolo24.keyward bin/keyward
-	go run ./cmd/keyward-bundle
-	codesign --force --sign "$(SIGN_IDENTITY)" bin/Keyward.app
 
 install: sign
 	bin/keyward service install

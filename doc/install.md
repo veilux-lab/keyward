@@ -1,8 +1,9 @@
 # Using Keyward
 
 For Homebrew setup, upgrades, and removal, see [homebrew.md](homebrew.md).
-The first-use startup described below is available in source and from `v0.1.2`. With
-Homebrew `v0.1.1`, start the daemon with `keyward service install` first.
+The first-use startup and CLI-only installation described below are available in
+source for the planned `v0.1.2`. With Homebrew `v0.1.1`, start the daemon with
+`keyward service install` first.
 With a development build, run `bin/keyward daemon` in a terminal.
 
 ## Daemon startup
@@ -21,8 +22,8 @@ a second process or replaying a request.
 
 `keyward service uninstall` disables first-use startup as well as login startup.
 The choice is saved in a private local marker. Use `keyward service install` to
-enable startup again. The status app's Disable action makes the same choice.
-The signed `make install` continues to start the daemon immediately.
+enable startup again. The signed `make install` continues to start the daemon
+immediately.
 
 Custom `KEYWARD_SOCKET` or `KEYWARD_SERVICE` values use manual startup, so isolated
 experiments never start your normal daemon. Set the service on the daemon and
@@ -104,10 +105,9 @@ and restoration does not create another backup containing the restored values.
 
 Restore before stopping the daemon if you want plaintext values back. Check all
 reported skips before removing Keyward. `keyward service uninstall` warns and
-requires `yes` before stopping startup; it keeps the CLI, app, and Keychain items.
+requires `yes` before stopping startup; it keeps the CLI and Keychain items.
 It does not restore files. First-use startup stays disabled until you explicitly
-enable it again with `keyward service install`. The status app gives the same
-warning before disabling startup.
+enable it again with `keyward service install`.
 
 ## Signed local installation
 
@@ -122,22 +122,22 @@ make install SIGN_IDENTITY='Apple Development: you@example.com (CERTIFICATE_ID)'
 ```
 
 Allow codesign's signing-key prompt if it appears. Installation puts the CLI in
-`~/.local/bin` and **Keyward by Veilux** in `~/Applications/Keyward.app`. It starts
-the daemon now and at login through a per-user LaunchAgent associated with the
-app. Open the app to check status, view the activity log, or change startup.
+`~/.local/bin` and starts the daemon now and at login through a per-user
+LaunchAgent. Use `keyward service status` to check it, `keyward service install`
+to enable or restart it, and `keyward service uninstall` to disable startup.
+Activity is recorded in `~/Library/Logs/keyward/activity.jsonl`.
 If the CLI directory is not on your PATH, use `~/.local/bin/keyward` directly.
 Installation does not edit shell files or migrate secrets.
 
 Repeat the same command to upgrade using the same certificate. A failed startup
-restores the previous app, binary, and login configuration. The app and daemon
-must be signed by the same team. The daemon keeps its signing identifier to
-preserve Keychain access across upgrades.
+restores the previous binary and login configuration. The daemon keeps its
+signing identifier to preserve Keychain access across upgrades.
 
 Rebuilds signed with the same Apple Development certificate retained access on
 the tested Mac. Certificate renewal, changes of team, and Developer ID-signed
 distribution remain untested. Actual logout/login and fresh-machine background
 notifications are also untested. macOS may display the certificate owner's name
-in Background App Activity despite the app's branding.
+in Background App Activity.
 
 This installation is for personal use. Prebuilt Developer ID-signed and notarized
 distribution requires paid Apple membership. Source-built Homebrew distribution
@@ -171,7 +171,7 @@ export KEYWARD_LOG_ROTATE_MB=5
 CLI settings apply immediately. For the signed installation, rerun
 `keyward service install` to persist them for the daemon. Homebrew's daemon uses
 the defaults. `KEYWARD_LOG_DIR` selects a different log directory for isolated
-tests; the app's log button opens the default location.
+tests.
 
 Invalid settings fail before a command runs. A storage failure warns once per CLI
 process and lets the operation continue. Names reveal service-use metadata, and

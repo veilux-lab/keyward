@@ -200,7 +200,7 @@ func (c *CLI) service(args []string) int {
 			"  keyward restore --dry-run ~/.zshrc .env\n"+
 			"  keyward restore ~/.zshrc .env\n"+
 			"Check any skipped items. Restored files contain plaintext secrets again.\n"+
-			"Uninstall keeps the CLI, app, and Keychain entries; it does not restore secrets.\n\n"+
+			"Uninstall keeps the CLI and Keychain entries; it does not restore secrets.\n\n"+
 			"Type \"yes\" to stop the daemon and remove automatic startup, or anything else to cancel: "); err != nil {
 			return exitFailure
 		}

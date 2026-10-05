@@ -4,12 +4,13 @@ Homebrew packaging lives alongside the source in
 [`veilux-lab/keyward`](https://github.com/veilux-lab/keyward). Releases supply
 source archives from the same repository. The formula builds on macOS using Go
 and Apple's command line tools. No signing certificate or paid Apple Developer
-membership is required. The signed status app is available through the separate
-[local installer](install.md#signed-local-installation).
+membership is required. A separate
+[signed CLI installation](install.md#signed-local-installation) is also available.
 
 Release [`v0.1.1`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.1) uses
 this single-repository setup and requires explicit `keyward service install`.
-Version `v0.1.2` adds first-use startup and the optional installer below.
+The planned `v0.1.2` adds first-use startup, the optional installer below, and
+CLI-only signed installation. Publication is pending.
 
 ## Install
 
@@ -58,7 +59,7 @@ later vault command cannot turn startup back on. Explicit `service install`
 re-enables it. Custom sockets and Keychain service names remain manual.
 Using `brew services stop` directly only stops the service; it does not save this
 choice, so the next vault request can start it again. Use `keyward service
-uninstall` (or Disable in the status app) when you want it to stay disabled.
+uninstall` when you want it to stay disabled.
 
 ## Upgrade
 

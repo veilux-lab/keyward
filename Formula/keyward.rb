@@ -34,7 +34,6 @@ class Keyward < Formula
 
       After upgrading, restart it with keyward service install. Source-built
       daemon upgrades may require approval to read previously stored Keychain items.
-      This formula does not install the signed Keyward.app companion.
 
       Before uninstalling, run keyward restore <file>... if you want secrets
       returned to your files, then keyward service uninstall and brew uninstall keyward.

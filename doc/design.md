@@ -28,7 +28,6 @@ credentials that are not there.
 | `internal/daemon` | Own Keychain access behind a same-user socket | Implemented |
 | `internal/doctor` | Report on references and stored metadata | Implemented |
 | `internal/launchd` | Signed local installation and per-user startup | Implemented and tested on this Mac |
-| `internal/appbundle` | Keyward by Veilux status app and bundle updates | Implemented; keeps app and daemon signing identifiers separate |
 
 ## The reference format
 
@@ -132,7 +131,6 @@ before asking for lowercase `yes` to stop the daemon and remove startup. Refusin
 keeps the service available so the user can restore first. Uninstall neither
 retrieves values nor restores files, and retains the CLI, app, and Keychain items.
 It also disables first-use startup until an explicit `keyward service install`.
-The status app presents the same warning before its Disable action.
 
 ### Secrets you want in an interactive shell
 
@@ -247,20 +245,19 @@ activity logging. See [obstacles.md](obstacles.md) 2a for the repeatable test.
 per-user LaunchAgent. launchd starts it at login and restarts it if it exits. Updates
 replace the executable atomically, restart the agent, and check its socket without
 reading a Keychain item. A failed startup restores the prior installation. Removing
-the login agent keeps the app, CLI, and stored items. `make install` still starts
+the login agent keeps the CLI and stored items. `make install` still starts
 the signed daemon immediately. The optional `brew keyward-install --start-daemon`
 command installs the formula, waits for Homebrew to finish, then explicitly enables
 startup. Normal Homebrew installation leaves startup for first use. Keeping this
 outside a formula post-install hook preserves the user's home and avoids its
 sandbox restrictions.
 
-The installer also copies `Keyward.app` to `~/Applications`, registers it with
-Launch Services, and associates the LaunchAgent with `com.nwokolo24.keyward.app`
-through `AssociatedBundleIdentifiers`. Both must have the same Apple signing team.
-The daemon keeps `com.nwokolo24.keyward` so existing Keychain access requirements
-still match. The native status app checks availability without reading secrets;
-it can open the activity log or enable/disable automatic startup. Product branding
-does not change the certificate's personal publisher identity.
+The signed installation contains the CLI and a per-user LaunchAgent. The daemon
+keeps `com.nwokolo24.keyward` so existing Keychain access requirements still match.
+`keyward service status` checks availability without reading secrets; `service
+install` and `service uninstall` control startup. Activity is available in
+`~/Library/Logs/keyward/activity.jsonl`. Signing still carries the certificate's
+publisher identity.
 
 The cost: any process running as the user can ask the daemon for any secret by
 name, with no prompt. The Keychain ACL used to stop `/usr/bin/security` from
