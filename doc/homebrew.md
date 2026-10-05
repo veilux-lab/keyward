@@ -23,8 +23,7 @@ The explicit URL lets Homebrew use this repository as a tap without a separate
 formula-specific trust on Homebrew versions that require it.
 
 Run commands as your normal user, without `sudo`. Installing the formula does
-not migrate secrets or change your shell config. In the next published release,
-the daemon starts through `brew services` when a command first needs the Keychain;
+not migrate secrets or change your shell config. From `v0.1.3`, the daemon starts through `brew services` when a command first needs the Keychain;
 subsequent logins start it automatically. Help, version, status, and `run` without references
 leave it stopped. You can start it sooner with `keyward service install`.
 
