@@ -7,10 +7,9 @@ and Apple's command line tools. No signing certificate or paid Apple Developer
 membership is required. A separate
 [signed CLI installation](install.md#signed-local-installation) is also available.
 
-Release [`v0.1.1`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.1) uses
-this single-repository setup and requires explicit `keyward service install`.
-The next published release adds first-use startup, the optional installer below,
-and CLI-only local installation. Publication is pending.
+Release [`v0.1.3`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.3) adds
+first-use startup, the optional installer below, and CLI-only local installation.
+`v0.1.1` requires explicit `keyward service install`. `v0.1.2` was never published.
 
 ## Install
 
@@ -125,8 +124,8 @@ Keyward's warning and confirmation flow.
 The default [GitHub Actions release workflow](releases.md) prepares free source
 releases on pushes to `main`, verifies the exact archive with `brew test`, then
 publishes it before advancing this repository's formula. No Apple credentials or
-personal access token are normally needed. This free default is prepared locally
-and awaits an approved push. The steps below remain available for manual releases.
+personal access token are normally needed. The steps below remain available for
+manual releases.
 
 The release tool creates a source archive from a committed Git revision and a
 formula containing its exact checksum. The template lives in

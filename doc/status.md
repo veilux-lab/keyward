@@ -23,40 +23,28 @@ also exercises the real Keychain, under a separate service name.
 Signing: a daemon rebuilt with the same **Apple Development** certificate keeps
 Keychain access, while self-signed and unsigned rebuilds do not (obstacles.md 2a).
 Prebuilt signed distribution needs a Developer ID, which is untested. Source-built
-Homebrew release `v0.1.1` uses `veilux-lab/keyward` for the formula, source archive,
-and service commands, without that requirement. The repository is public. Source
-installation, `brew test`, formula style, service metadata, and isolated restart
-checks pass. The owner deleted the original `v0.1.0` tap on October 4; its repository
-and release assets were backed up under ignored `bin/retired-homebrew-tap`.
-The new setup has no dependency on it. Existing old installations can switch using
-their local tap checkout; new old-tap installs and uncached downloads are unavailable.
+Homebrew releases use `veilux-lab/keyward` for the formula, source archive, and
+service commands, without that requirement. The repository is public. The owner
+deleted the original `v0.1.0` tap on October 4; its repository and release assets
+were backed up under ignored `bin/retired-homebrew-tap`. Existing old installations
+can switch using their local tap checkout.
 
-New in source for the next release: an installed CLI starts its managed daemon
-on the first vault request if the socket is absent. Checks and commands without
-vault calls leave it stopped. Explicit service uninstall disables first-use startup
-until service install re-enables it. Custom sockets and service names remain manual.
-An optional `brew keyward-install --start-daemon` command starts it during installation.
-`make verify`, isolated Memory-vault/socket tests, and installer tests pass with
-the CLI-only build. The first `v0.1.2` source archive from
-`f724883` passed packaging checks but is superseded. The replacement CLI-only
-archive from `5929237` passed a real source install, `brew test`, formula style,
-and service metadata checks. Public `v0.1.1` still requires explicit service startup.
+Public release
+[`v0.1.3`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.3) is the
+current formula. It adds first-use daemon startup, the optional
+`brew keyward-install --start-daemon` installer, and CLI-only local installation.
+Checks and commands without vault calls leave the daemon stopped; explicit service
+uninstall disables first-use startup until service install re-enables it. Custom
+sockets and service names remain manual. `v0.1.2` was never published. `v0.1.1`
+still requires explicit service startup.
 
-The automatic release workflow is published on `main`; see
-[release setup](releases.md). A local update makes source/Homebrew releases the
-default, using GitHub's built-in token without Apple credentials or membership.
-Native ARM and Intel checks gate publication of the exact source archive,
-checksums, and provenance before the formula updates in this repository.
-Developer ID-signed, notarized downloads become optional, enabled explicitly with
-`KEYWARD_SIGNED_RELEASES=true`. The root formula remains on public `v0.1.1` until
-CI publishes its next release. This free-default change awaits an approved push;
-an end-to-end signed CI release remains untested. The earlier approved four
-commits landed on `main` at `0c594dd`. Their first
-[CI run](https://github.com/veilux-lab/keyward/actions/runs/37283711186) passed
-native ARM and Intel verification, builds, and artifact upload. Publishing
-stopped at `Missing GitHub secret: RELEASE_PUBLISH_TOKEN`; archive preparation,
-signing, release creation, and formula updates were skipped under the earlier
-configuration. Source development can continue from another clone of `main`.
+The free [release workflow](releases.md) published `v0.1.3` from `8940863` in
+[CI run 37361912182](https://github.com/veilux-lab/keyward/actions/runs/37361912182):
+native ARM and Intel verification, `brew test` on the exact archive, publication,
+and the bot's formula update (`db15932`). A local install from the public
+`v0.1.3` release has not been checked. Developer ID-signed, notarized downloads
+stay optional behind `KEYWARD_SIGNED_RELEASES=true`; an end-to-end signed CI
+release remains untested.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -94,8 +82,8 @@ handled; see [obstacles.md](obstacles.md) 2a.
 | `internal/restore` | **Done** | Separate explicit command; redacted plan for selected files, mandatory exact `yes`, metadata-only dry run, best-effort atomic private writes, retained Keychain entries. Uninstall warns users to restore first and requires confirmation before stopping startup. |
 | `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
 | `keyward shell` | Not started | Independent of the above. |
-| `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. First-use managed startup is prepared for the next release; requests are not replayed. |
-| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. The isolated CLI-only lifecycle test passed in 3.54s for signed upgrade, reads and replacement, launchd restart, persistence, and uninstall. First-use startup and persistent explicit disabling are prepared for the next release. |
+| `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. First-use managed startup shipped in `v0.1.3`; requests are not replayed. |
+| `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. The isolated CLI-only lifecycle test passed in 3.54s for signed upgrade, reads and replacement, launchd restart, persistence, and uninstall. First-use startup and persistent explicit disabling shipped in `v0.1.3`. |
 | Code signing | Apple Development rebuild test passed twice | macOS 27.0.1: same-certificate rebuild reads without a prompt (0.06s, 0.04s); unsigned control denied in both runs. Free Apple Development signing supports local use; Developer ID signing and notarization require paid membership and remain untested. Homebrew source distribution needs neither. See [obstacles.md](obstacles.md) 2a. Biometric entitlements remain untested. |
 | `internal/doctor` | **Done** | Dangling, malformed, orphaned, unknown, plus stated coverage. Report-only. |
 | Biometric gating | Not started | Feasibility unconfirmed — see [obstacles.md](obstacles.md). |
@@ -152,6 +140,12 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-05 (v0.1.3 published)** — The free-default release change was pushed to
+`main`. CI run 37361912182 verified and published `v0.1.3`, then updated the
+formula. It is the first public release with first-use daemon startup. Run numbering
+skipped `v0.1.2`, whose earlier run stopped at the old token check. Updated the
+README and setup docs to match.
 
 **2026-10-05 (free automatic releases, prepared)** — Source/Homebrew publication
 is now the default, using `GITHUB_TOKEN`. No Apple credentials or paid membership

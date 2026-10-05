@@ -1,9 +1,8 @@
 # Using Keyward
 
 For Homebrew setup, upgrades, and removal, see [homebrew.md](homebrew.md).
-The first-use startup and CLI-only installation described below are available in
-source for the planned `v0.1.2`. With Homebrew `v0.1.1`, start the daemon with
-`keyward service install` first.
+First-use startup and CLI-only installation are available from `v0.1.3`. With
+Homebrew `v0.1.1`, start the daemon with `keyward service install` first.
 With a development build, run `bin/keyward daemon` in a terminal.
 
 ## Daemon startup

@@ -1,9 +1,9 @@
 # Automated releases
 
 The default release publishes free source/Homebrew packages. It needs no Apple
-credentials or personal access token. This default is prepared locally and
-awaits an approved push to `main`; it has not published a release yet. The earlier
-CI run passed native Apple Silicon and Intel checks, then stopped at its old
+credentials or personal access token. Its first run published
+[`v0.1.3`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.3) and updated
+the formula. The earlier run that would have been `v0.1.2` stopped at its old
 publisher-token requirement.
 
 ## What runs

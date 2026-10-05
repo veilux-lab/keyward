@@ -23,10 +23,8 @@ brew install veilux-lab/keyward/keyward
 ```
 
 Run these as your normal user. Installation does not change your shell files or
-move any secrets. The next release starts the daemon when you first add, list,
-or resolve secrets. With `v0.1.1`, start it once using
-`keyward service install`. See [Homebrew setup](doc/homebrew.md) to start it during
-installation. A
+move any secrets. The daemon starts when you first add, list, or resolve
+secrets. See [Homebrew setup](doc/homebrew.md) to start it during installation. A
 [signed local installation](doc/install.md#signed-local-installation) is also available.
 
 ## Use
