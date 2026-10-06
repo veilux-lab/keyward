@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
@@ -265,7 +266,7 @@ func (p *Plan) Diff() string {
 // as they were, so nothing is lost and the command can simply be re-run. The
 // reverse order would, on a failure, leave a file referencing secrets that do not
 // exist with the only copies already overwritten.
-func (p *Plan) Apply(store vault.Store) (*Applied, error) {
+func (p *Plan) Apply(store vault.Store, backups backup.Dir) (*Applied, error) {
 	if p.Empty() {
 		return &Applied{}, nil
 	}
@@ -298,8 +299,8 @@ func (p *Plan) Apply(store vault.Store) (*Applied, error) {
 	}
 	sort.Strings(stored)
 
-	backup := backupPath(p.Path, time.Now())
-	if err := os.WriteFile(backup, p.original, mode); err != nil {
+	saved, err := backups.Save(p.Path, p.original, time.Now())
+	if err != nil {
 		return nil, fmt.Errorf("writing the backup: %w", err)
 	}
 
@@ -307,10 +308,10 @@ func (p *Plan) Apply(store vault.Store) (*Applied, error) {
 		p.file.Replace(c.Line, c.Rewritten(c.RefName))
 	}
 	if err := writeAtomic(p.Path, p.file.Bytes(), mode); err != nil {
-		return nil, fmt.Errorf("rewriting %s (the original is at %s): %w", p.Path, backup, err)
+		return nil, fmt.Errorf("rewriting %s (the original is at %s): %w", p.Path, saved, err)
 	}
 
-	return &Applied{BackupPath: backup, Stored: stored}, nil
+	return &Applied{BackupPath: saved, Stored: stored}, nil
 }
 
 // storeSecret writes one value, tolerating a previous run having already done so.
@@ -340,12 +341,6 @@ func storeSecret(store vault.Store, name, value, note string) error {
 		return nil
 	}
 	return fmt.Errorf("%q already holds a different value; remove it or rename the variable", name)
-}
-
-// backupPath names a timestamped sibling of path, so repeated runs never overwrite
-// an earlier backup.
-func backupPath(path string, now time.Time) string {
-	return path + ".keyward-backup-" + now.UTC().Format("20060102T150405Z")
 }
 
 // writeAtomic replaces path via a temporary file in the same directory and a

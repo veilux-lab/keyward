@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/cli"
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/launchd"
@@ -73,6 +74,7 @@ func main() {
 		Exec:       syscall.Exec,
 		Home:       home,
 		Workdir:    workdir,
+		Backups:    backup.Default(home),
 		Record:     record,
 		Daemon: func() error {
 			if socket == daemon.DefaultSocket(home) && service == vault.DefaultService {

@@ -56,6 +56,14 @@ func (c *CLI) restore(args []string) int {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("  skipped %s  %s", issue.Location(), issue.Reason)))
 	}
 	fmt.Fprintf(c.Stdout, "\nRestored %d value(s); %d item(s) skipped. Keychain entries were kept.\n", len(r.Restored), len(r.Skipped))
+	var restored, skipped []string
+	for _, item := range r.Restored {
+		restored = append(restored, item.File)
+	}
+	for _, issue := range r.Skipped {
+		skipped = append(skipped, issue.File)
+	}
+	c.removeRestoredBackups(restored, skipped)
 	if len(r.Skipped) != 0 {
 		return exitFailure
 	}

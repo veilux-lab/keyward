@@ -107,6 +107,11 @@ entropy alone picked `CPPFLAGS` and an ECR registry host, and moving those break
 every build outside keyward. No list of safe names can be complete, so the user
 decides these, with `keyward add` printed alongside.
 
+Migration keeps a byte-for-byte backup of the original so a bad rewrite can be
+undone exactly; `restore` rebuilds values but not the original quoting. Backups
+live in a private directory rather than beside the file: a plaintext copy next to
+`~/.zshrc` is exactly what an agent reading the home directory would find.
+
 ### Restoring before uninstall
 
 `keyward restore [--dry-run] <file>...` reverses the current references in
@@ -123,7 +128,9 @@ items, and edits since the preview are reported and left alone. Shell values are
 single-quoted without evaluating expansions. Dotenv values with ambiguous quoting
 or escapes are refused. Files are replaced atomically, made private to the owner,
 and retain owner execute permission. No backup of the restored values is created;
-Keychain entries stay intact. Any skip gives a nonzero exit status.
+Keychain entries stay intact. Migrate backups of a fully restored file are removed:
+they would be a second plaintext copy. A skip keeps them, since the backup may be
+the only record of the skipped value. Any skip gives a nonzero exit status.
 
 Restoration remains an explicit, separate command. `keyward service uninstall`
 warns that references need a running daemon and shows restore/preview examples

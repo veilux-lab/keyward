@@ -163,6 +163,18 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-06 (backups, stop, options, colour, prepared)** — Migrate backups move to a
+private `~/Library/Application Support/keyward/backups` (mode `600`) instead of
+beside the original, which copied the original's mode. `keyward backups` lists them,
+`keyward backups rm <file>...|--all` removes them, a restore without skips removes
+that file's backups (including older siblings), and `doctor` reminds while any
+remain. `keyward service stop` unloads the daemon and blocks first-use startup until
+`service start` or the next daemon start, such as at login; Homebrew's login
+registration is kept. Service messages are rewritten in plain language. Options
+may follow arguments or precede the command, except before `run`. Output is
+coloured only on terminals, honouring `NO_COLOR`. Tests came first.
+Local until an approved push.
+
 **2026-10-05 (Homebrew bottles, prepared)** — The release workflow builds the
 source archive once, then builds and pours an Apple Silicon bottle before
 publishing. `scripts/merge-homebrew-bottles.sh` checks the bottle's release, root

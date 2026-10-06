@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/migrate"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
@@ -366,7 +367,7 @@ func TestApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	applied, err := p.Apply(store)
+	applied, err := p.Apply(store, backups(t))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -415,7 +416,7 @@ func TestApplyRecordsProvenance(t *testing.T) {
 	path := writeRC(t, rcFile)
 	store := vault.NewMemory()
 
-	if _, err := mustReadPlan(t, path).Apply(store); err != nil {
+	if _, err := mustReadPlan(t, path).Apply(store, backups(t)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -448,7 +449,7 @@ func TestApplyWritesABackupOfTheOriginal(t *testing.T) {
 	path := writeRC(t, rcFile)
 	p, _ := migrate.Read(path)
 
-	applied, err := p.Apply(vault.NewMemory())
+	applied, err := p.Apply(vault.NewMemory(), backups(t))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -460,9 +461,17 @@ func TestApplyWritesABackupOfTheOriginal(t *testing.T) {
 	if string(backup) != rcFile {
 		t.Error("the backup does not match the original file")
 	}
-	if filepath.Dir(applied.BackupPath) != filepath.Dir(path) {
-		t.Error("the backup was not written beside the original")
+	if filepath.Dir(applied.BackupPath) == filepath.Dir(path) {
+		t.Error("the plaintext backup was written beside the original, where other tools read")
 	}
+	if info, err := os.Stat(applied.BackupPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("the backup is not private to its owner: %v", err)
+	}
+}
+
+func backups(t *testing.T) backup.Dir {
+	t.Helper()
+	return backup.Dir{Path: filepath.Join(t.TempDir(), "backups")}
 }
 
 func TestApplyPreservesFileMode(t *testing.T) {
@@ -472,7 +481,7 @@ func TestApplyPreservesFileMode(t *testing.T) {
 	}
 
 	p, _ := migrate.Read(path)
-	if _, err := p.Apply(vault.NewMemory()); err != nil {
+	if _, err := p.Apply(vault.NewMemory(), backups(t)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -492,7 +501,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 	store := vault.NewMemory()
 
 	p, _ := migrate.Read(path)
-	if _, err := p.Apply(store); err != nil {
+	if _, err := p.Apply(store, backups(t)); err != nil {
 		t.Fatalf("first Apply: %v", err)
 	}
 	afterFirst, _ := os.ReadFile(path)
@@ -504,7 +513,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 	if !p2.Empty() {
 		t.Errorf("second plan has %d changes, want none", len(p2.Changes))
 	}
-	if _, err := p2.Apply(store); err != nil {
+	if _, err := p2.Apply(store, backups(t)); err != nil {
 		t.Fatalf("second Apply: %v", err)
 	}
 
@@ -526,7 +535,7 @@ func TestApplyToleratesAlreadyStoredIdenticalValue(t *testing.T) {
 	}
 
 	p, _ := migrate.Read(path)
-	if _, err := p.Apply(store); err != nil {
+	if _, err := p.Apply(store, backups(t)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if got, _ := os.ReadFile(path); !strings.Contains(string(got), "cap://splunk-mcp-token") {
@@ -544,7 +553,7 @@ func TestApplyRefusesToOverwriteADifferentValue(t *testing.T) {
 	}
 
 	p, _ := migrate.Read(path)
-	_, err := p.Apply(store)
+	_, err := p.Apply(store, backups(t))
 	if err == nil {
 		t.Fatal("Apply overwrote a secret that held a different value")
 	}
@@ -562,7 +571,7 @@ func TestApplyRefusesToOverwriteADifferentValue(t *testing.T) {
 func TestApplyLeavesFileUntouchedWhenStoringFails(t *testing.T) {
 	path := writeRC(t, rcFile)
 
-	_, err := mustReadPlan(t, path).Apply(brokenPutStore{Store: vault.NewMemory()})
+	_, err := mustReadPlan(t, path).Apply(brokenPutStore{Store: vault.NewMemory()}, backups(t))
 	if err == nil {
 		t.Fatal("Apply succeeded despite the store failing")
 	}
@@ -584,14 +593,14 @@ func TestApplyRefusesIfTheFileChanged(t *testing.T) {
 		t.Fatalf("rewriting the fixture: %v", err)
 	}
 
-	if _, err := p.Apply(vault.NewMemory()); err == nil {
+	if _, err := p.Apply(vault.NewMemory(), backups(t)); err == nil {
 		t.Fatal("Apply proceeded against a file that had changed")
 	}
 }
 
 func TestApplyLeavesNoTemporaryFiles(t *testing.T) {
 	path := writeRC(t, rcFile)
-	applied, err := mustReadPlan(t, path).Apply(vault.NewMemory())
+	applied, err := mustReadPlan(t, path).Apply(vault.NewMemory(), backups(t))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -610,7 +619,7 @@ func TestApplyLeavesNoTemporaryFiles(t *testing.T) {
 
 func TestApplyOnEmptyPlanChangesNothing(t *testing.T) {
 	path := writeRC(t, "export EDITOR=vim\n")
-	applied, err := mustReadPlan(t, path).Apply(vault.NewMemory())
+	applied, err := mustReadPlan(t, path).Apply(vault.NewMemory(), backups(t))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -641,7 +650,7 @@ func TestApplyStopsWhenTheBackupCannotBeWritten(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0o700) })
 
-	_, err := p.Apply(store)
+	_, err := p.Apply(store, backups(t))
 	if err == nil {
 		t.Fatal("Apply succeeded with an unwritable directory")
 	}
@@ -664,7 +673,7 @@ func TestApplyReportsAFailedConflictCheck(t *testing.T) {
 	path := writeRC(t, rcFile)
 	store := existsButUnreadable{Store: vault.NewMemory()}
 
-	_, err := mustReadPlan(t, path).Apply(store)
+	_, err := mustReadPlan(t, path).Apply(store, backups(t))
 	if err == nil {
 		t.Fatal("Apply succeeded when the conflict check could not be made")
 	}

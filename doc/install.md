@@ -19,9 +19,11 @@ daemon at login and keeps it running. This does not install or sign a developmen
 build. Permission errors and an unresponsive daemon are reported without starting
 a second process or replaying a request.
 
-`keyward service uninstall` disables first-use startup as well as login startup.
-The choice is saved in a private local marker. Use `keyward service install` to
-enable startup again. The signed `make install` continues to start the daemon
+`keyward service stop` stops the daemon and keeps first-use startup from bringing
+it back; `keyward service start` resumes it, and so does the next login. Use it to
+cut off access for a while. `keyward service uninstall` disables first-use startup
+as well as login startup. Both choices are saved in private local markers. Use
+`keyward service install` to enable startup again after uninstall. The signed `make install` continues to start the daemon
 immediately.
 
 Custom `KEYWARD_SOCKET` or `KEYWARD_SERVICE` values use manual startup, so isolated
@@ -67,9 +69,15 @@ exact lowercase `yes`; `y`, `Yes`, and end of input cancel. `--dry-run` changes
 nothing. Scripts can use `-auto-approve`; it cannot be combined with `--dry-run`.
 
 Secrets are stored before the file is rewritten. The rewrite is atomic and
-preserves the file mode. A timestamped backup beside the original still contains
-plaintext secrets: keep it only as long as you need it. Open a new terminal after
-migration so exported variables contain references rather than the old values.
+preserves the file mode. The original is first copied to a private backup (mode
+`600`) in `~/Library/Application Support/keyward/backups`, away from the files
+tools read. It still contains plaintext secrets: `keyward backups` lists them and
+`keyward backups rm <file>...` or `--all` removes them. `keyward doctor` reminds you
+while any remain, including older backups beside the original. Open a new terminal
+after migration so exported variables contain references rather than the old values.
+
+Options may come before or after a command's arguments, so
+`keyward migrate ~/.zshrc --dry-run` works; `--` ends options.
 
 Re-running migration skips existing references. Removing a line does not delete
 its Keychain item. If a variable returns with a different value, migration asks
@@ -101,6 +109,8 @@ items were restored.
 Writes are atomic and private to your user: mode `600`, or `700` when preserving
 your execute permission. Unrelated lines are unchanged. Keychain items remain,
 and restoration does not create another backup containing the restored values.
+A file restored without skips has its migrate backups removed, since it holds the
+values again; files with skips keep theirs.
 
 Restore before stopping the daemon if you want plaintext values back. Check all
 reported skips before removing Keyward. `keyward service uninstall` warns and

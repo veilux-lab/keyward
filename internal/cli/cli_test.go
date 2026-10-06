@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/cli"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
@@ -51,6 +52,7 @@ func newHarness(t *testing.T, stdin string, seed map[string]string, environ []st
 	}
 	h.cli = &cli.CLI{
 		Store:   store,
+		Backups: backup.Dir{Path: filepath.Join(t.TempDir(), "backups")},
 		Stdin:   strings.NewReader(stdin),
 		Stdout:  h.stdout,
 		Stderr:  h.stderr,
@@ -708,8 +710,8 @@ func TestMigrateAppliesOnYes(t *testing.T) {
 	if _, err := h.store.Get("splunk-mcp-token"); err != nil {
 		t.Errorf("the secret was not stored: %v", err)
 	}
-	if !strings.Contains(h.out(), "keyward-backup") {
-		t.Errorf("the backup location was not reported:\n%s", h.out())
+	if !strings.Contains(h.out(), h.cli.Backups.Path) || !strings.Contains(h.out(), "keyward backups rm") {
+		t.Errorf("the backup location and cleanup were not reported:\n%s", h.out())
 	}
 }
 

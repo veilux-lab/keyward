@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/doctor"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/migrate"
@@ -69,6 +70,9 @@ type CLI struct {
 	// Injected because it binds a socket and owns the real Keychain.
 	Daemon func() error
 
+	// Backups holds migrate's private plaintext copies of the originals.
+	Backups backup.Dir
+
 	// Service manages the signed installation and login agent.
 	Service func(action string) (string, error)
 
@@ -103,6 +107,8 @@ commands:
   migrate --dry-run <f> describe what would move, and stop
   restore <file>...     return referenced secrets to files (requires "yes")
   restore --dry-run <f> preview restoration without reading secret values
+  backups               list migrate's private plaintext backups
+  backups rm <file>...  remove backups of files (or --all)
   doctor [file...]      check references against what is stored
   version               print the version
   help                  print this message
@@ -139,7 +145,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "ls", "rm", "run", "migrate", "restore", "doctor", "daemon", "service", "help", "version":
+	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "doctor", "daemon", "service", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -188,6 +194,8 @@ func (c *CLI) dispatch(args []string) int {
 		return c.migrate(args[1:])
 	case "restore":
 		return c.restore(args[1:])
+	case "backups":
+		return c.backups(args[1:])
 	case "doctor":
 		return c.doctor(args[1:])
 	case "daemon":
@@ -444,13 +452,14 @@ func (c *CLI) migrate(args []string) int {
 		}
 	}
 
-	applied, err := plan.Apply(c.Store)
+	applied, err := plan.Apply(c.Store, c.Backups)
 	if err != nil {
 		return c.fail("keyward migrate: %v", err)
 	}
 
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
-	fmt.Fprintf(c.Stdout, "Original saved to %s\n", applied.BackupPath)
+	fmt.Fprintf(c.Stdout, "Plaintext backup of the original: %s\n", applied.BackupPath)
+	fmt.Fprintf(c.Stdout, "  It holds the old values. Remove it once the new file works: keyward backups rm %s\n", plan.Path)
 	fmt.Fprintf(c.Stdout, "\nRun commands that need these values through keyward, for example:\n  keyward run -- your-command\n")
 	return exitOK
 }
@@ -466,7 +475,7 @@ const confirmWord = "yes"
 // the worst possible default for a command that rewrites a file.
 func (c *CLI) confirm(count int, path string) (bool, error) {
 	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into the Keychain?\n", count, path)
-	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is copied to a timestamped backup first.\n")
+	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is first copied to a private backup.\n")
 	fmt.Fprintf(c.Stderr, "  %s\n\n  Enter a value: ", c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord)))
 	return c.readConfirmation()
 }
@@ -507,6 +516,11 @@ func (c *CLI) doctor(args []string) int {
 	}
 
 	fmt.Fprint(c.Stdout, report.String())
+	if found, err := c.knownBackups(); err != nil {
+		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check for plaintext backups: %v", err)))
+	} else if len(found) > 0 {
+		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d plaintext backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
+	}
 	if report.HasProblems() {
 		return exitFailure
 	}

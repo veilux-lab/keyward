@@ -38,9 +38,10 @@ keyward migrate ~/.zshrc
 ```
 
 Migration shows what will move without printing secret values and asks you to
-type `yes`. It keeps a timestamped plaintext backup beside the original file.
-Check the result, then delete backups you no longer need. Open a new terminal
-so your environment uses the references.
+type `yes`. It keeps a private plaintext backup of the original under
+`~/Library/Application Support/keyward/backups`. Check the result, then remove it
+with `keyward backups rm ~/.zshrc`. Open a new terminal so your environment uses
+the references.
 
 Run commands that need those secrets through Keyward:
 
