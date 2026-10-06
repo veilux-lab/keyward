@@ -20,7 +20,10 @@ brew install veilux-lab/keyward/keyward
 
 The explicit URL lets Homebrew use this repository as a tap without a separate
 `homebrew-*` repository. The fully qualified formula name also handles
-formula-specific trust on Homebrew versions that require it.
+formula-specific trust on Homebrew versions that require it. Homebrew 7 still
+warns that the tap is not trusted before it trusts the formula; the warnings are
+expected. Homebrew's own caveat suggests `brew services start`; prefer
+`keyward service install`, which also re-enables startup after service uninstall.
 
 Run commands as your normal user, without `sudo`. Installing the formula does
 not migrate secrets or change your shell config. From `v0.1.3`, the daemon starts through `brew services` when a command first needs the Keychain;

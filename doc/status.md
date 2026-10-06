@@ -30,8 +30,9 @@ were backed up under ignored `bin/retired-homebrew-tap`. Existing old installati
 can switch using their local tap checkout.
 
 Public release
-[`v0.1.3`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.3) is the
-current formula. It adds first-use daemon startup, the optional
+[`v0.1.4`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.4) is the
+current formula; it matches `v0.1.3` apart from documentation and the release
+workflow. `v0.1.3` added first-use daemon startup, the optional
 `brew keyward-install --start-daemon` installer, and CLI-only local installation.
 Checks and commands without vault calls leave the daemon stopped; explicit service
 uninstall disables first-use startup until service install re-enables it. Custom
@@ -41,10 +42,19 @@ still requires explicit service startup.
 The free [release workflow](releases.md) published `v0.1.3` from `8940863` in
 [CI run 37361912182](https://github.com/veilux-lab/keyward/actions/runs/37361912182):
 native ARM and Intel verification, `brew test` on the exact archive, publication,
-and the bot's formula update (`db15932`). A local install from the public
-`v0.1.3` release has not been checked. Developer ID-signed, notarized downloads
+and the bot's formula update (`db15932`). Pushes that change only Markdown or
+`doc/` no longer release; `v0.1.4` came from the push that added that rule. Developer ID-signed, notarized downloads
 stay optional behind `KEYWARD_SIGNED_RELEASES=true`; an end-to-end signed CI
 release remains untested.
+
+First install on a second Mac (macOS 27.0, Homebrew 7.0.7, no earlier Keyward)
+is in progress. `brew tap` printed two "not trusted" warnings and skipped the
+formula. `brew install veilux-lab/keyward/keyward` printed the same warnings,
+trusted only the Keyward formula, and installed `0.1.4`. It also upgraded the
+user's Homebrew Go from 1.26.4 to 1.27.1 as a build dependency, and Homebrew's
+generic caveat suggests `brew services start` beside Keyward's own
+`keyward service install`. Keychain prompts, the background-item notice, and
+login startup are not yet observed.
 
 Direct access was also verified from a distinct signed command-line test binary:
 read, replace, and delete of daemon-created dummy items all succeeded after their
@@ -105,8 +115,8 @@ available to work on.
 **Gated on a fresh Mac:**
 
 - First-user Keychain prompts and login startup for the public source-built
-  Homebrew package; see [homebrew.md](homebrew.md). The public installation path
-  is verified on the development Mac.
+  Homebrew package; see [homebrew.md](homebrew.md). In progress on a second Mac;
+  installation itself succeeded.
 
 **Gated on a paid Developer ID:**
 
@@ -140,6 +150,11 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-05 (first install on a second Mac)** — Installed public `v0.1.4` through
+the documented tap and formula commands. Recorded the trust warnings, the Go
+build-dependency upgrade, and Homebrew's `brew services` caveat. Prebuilt bottles
+would remove the Go and command line tools requirement for matching Macs.
 
 **2026-10-05 (v0.1.3 published)** — The free-default release change was pushed to
 `main`. CI run 37361912182 verified and published `v0.1.3`, then updated the

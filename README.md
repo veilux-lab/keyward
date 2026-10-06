@@ -22,6 +22,7 @@ brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
 brew install veilux-lab/keyward/keyward
 ```
 
+Homebrew 7 warns that the tap is not trusted, then trusts only this formula.
 Run these as your normal user. Installation does not change your shell files or
 move any secrets. The daemon starts when you first add, list, or resolve
 secrets. See [Homebrew setup](doc/homebrew.md) to start it during installation. A
