@@ -47,14 +47,17 @@ and the bot's formula update (`db15932`). Pushes that change only Markdown or
 stay optional behind `KEYWARD_SIGNED_RELEASES=true`; an end-to-end signed CI
 release remains untested.
 
-Prebuilt Homebrew bottles are prepared locally and await an approved push. CI
-builds one per native runner, pours it through the formula, merges both into the
-release formula, and refuses to publish without matching Apple Silicon and Intel
-bottles. Installing from a bottle needs no Go, so `brew install` stops upgrading the
-user's Go. A local probe under Homebrew 7.0.7 confirmed the build, merge, and pour
-commands and an ad-hoc signed binary. Bottles embed `/opt/homebrew` or
-`/usr/local`, so custom prefixes still build from source. The first CI bottle
-release is untested.
+Prebuilt Apple Silicon Homebrew bottles are prepared locally and await an
+approved push. CI builds the bottle, pours it through the formula, merges it into
+the release formula, and refuses to publish without it. Installing from a bottle
+needs no Go, so `brew install` stops upgrading the user's Go. The bottle embeds
+`/opt/homebrew`, so custom prefixes still build from source. The first CI attempt
+([run 37411212115](https://github.com/veilux-lab/keyward/actions/runs/37411212115))
+published nothing. On ARM, `brew uninstall` dropped the formula's trust before the
+merge; a local probe reproduced that and confirmed that trusting again fixes it.
+On Intel, Homebrew 7 has no Go bottle (Tier 3), so the formula cannot build there.
+Intel is no longer bottled, and Intel Homebrew installation is unsupported until
+Go is built from source.
 
 First install on a second Mac (macOS 27.0, Homebrew 7.0.7, no earlier Keyward)
 is in progress. `brew tap` printed two "not trusted" warnings and skipped the
@@ -161,13 +164,14 @@ correct response is to stop building, not to push through.
 ## Changelog
 
 **2026-10-05 (Homebrew bottles, prepared)** — The release workflow builds the
-source archive once, then builds and pours a bottle on native ARM and Intel
-runners before publishing. `scripts/merge-homebrew-bottles.sh` checks each bottle's
-release, root URL, and checksum before Homebrew writes the formula's bottle block;
-release metadata and publication require both bottles. Tests came first and cover
-refusal outside CI, mismatched archives or bottles, a missing architecture, another
-release's bottles, and an existing tap. Manual releases remain source-only. This
-change is local until an approved push.
+source archive once, then builds and pours an Apple Silicon bottle before
+publishing. `scripts/merge-homebrew-bottles.sh` checks the bottle's release, root
+URL, and checksum before Homebrew writes the formula's bottle block; release
+metadata and publication require it. The first CI run failed safely; the fix
+re-trusts the formula after uninstalling and drops the Intel bottle. Tests came
+first and cover refusal outside CI, re-trust after uninstall, mismatched archives
+or bottles, a wrong or extra architecture, another release's bottles, and an
+existing tap. Manual releases remain source-only.
 
 **2026-10-05 (first install on a second Mac)** — Installed public `v0.1.4` through
 the documented tap and formula commands. Recorded the trust warnings, the Go

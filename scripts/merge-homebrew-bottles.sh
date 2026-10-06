@@ -25,9 +25,8 @@ for path in sorted((directory / "bottles").glob("*.bottle.json")):
     if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != item["sha256"]:
         sys.exit(f"{item['filename']} does not match its checksum")
     tags.append(tag)
-arm = [tag for tag in tags if tag.startswith("arm64_")]
-if len(arm) != 1 or len(tags) != 2:
-    sys.exit("Expected exactly one Apple Silicon and one Intel bottle")
+if len(tags) != 1 or not tags[0].startswith("arm64_"):
+    sys.exit("Expected exactly one Apple Silicon bottle")
 print(directory)
 PY
 )
@@ -79,4 +78,4 @@ for path in Path(sys.argv[2]).glob("*.bottle.json"):
 PY
 cp "$tap_checkout/Formula/keyward.rb" "$output/Formula/keyward.rb"
 mv "$output"/bottles/*.bottle.tar.gz "$output/"
-echo "Merged Apple Silicon and Intel bottles into the release formula"
+echo "Merged the Apple Silicon bottle into the release formula"

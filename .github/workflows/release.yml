@@ -90,18 +90,11 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Bottles let Homebrew install without Go or a compiler.
+  # Bottles let Homebrew install without Go or a compiler. Homebrew has no Intel
+  # Go bottle, so only Apple Silicon is bottled.
   bottle:
     needs: source
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-15-intel
-            arch: amd64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-15
     timeout-minutes: 30
     env:
       RELEASE_VERSION: ${{ needs.source.outputs.version }}
@@ -119,7 +112,7 @@ jobs:
         run: bash scripts/build-homebrew-bottle.sh "$RELEASE_VERSION" bin/release
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: bottle-${{ matrix.arch }}
+          name: bottle-arm64
           path: bin/release/bottles/
           if-no-files-found: error
           retention-days: 1
@@ -171,10 +164,6 @@ jobs:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: bottle-arm64
-          path: bin/release/bottles
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
-        with:
-          name: bottle-amd64
           path: bin/release/bottles
       - name: Merge Homebrew bottles into the formula
         run: |

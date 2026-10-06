@@ -18,11 +18,12 @@ Each successful run:
 1. Runs `make verify` and builds the CLI on native Apple Silicon and Intel runners.
 2. Creates a source archive from the triggering commit and checks that exact
    archive with a disposable Homebrew source installation and `brew test`.
-3. Builds a Homebrew bottle from that archive on each native runner, then pours
-   it through the formula and runs `brew test` again. Bottles carry the default
-   Homebrew prefix, so other prefixes fall back to source builds.
-4. Merges both bottles into the formula and publishes `keyward-<version>.tar.gz`,
-   the bottles, `SHA256SUMS`, and `release.json`, which records the source commit
+3. Builds an Apple Silicon Homebrew bottle from that archive, then pours it
+   through the formula and runs `brew test` again. The bottle carries the default
+   Homebrew prefix, so other prefixes fall back to source builds. Homebrew has no
+   Intel Go bottle, so Intel is not bottled.
+4. Merges the bottle into the formula and publishes `keyward-<version>.tar.gz`,
+   the bottle, `SHA256SUMS`, and `release.json`, which records the source commit
    and CI run. It then updates this repository's `Formula/keyward.rb` with the
    archive and bottle checksums.
 

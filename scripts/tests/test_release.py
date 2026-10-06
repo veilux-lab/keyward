@@ -9,7 +9,7 @@ import unittest
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
-BOTTLES = ["keyward-0.1.2.arm64_sequoia.bottle.tar.gz", "keyward-0.1.2.sequoia.bottle.tar.gz"]
+BOTTLES = ["keyward-0.1.2.arm64_sequoia.bottle.tar.gz"]
 
 
 class ReleaseTests(unittest.TestCase):
@@ -301,8 +301,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         for name in BOTTLES:
             self.assertIn(name, checksums)
 
-    def test_metadata_requires_both_bottles(self):
-        (self.output / BOTTLES[1]).unlink()
+    def test_metadata_requires_the_apple_silicon_bottle(self):
+        (self.output / BOTTLES[0]).rename(self.output / "keyward-0.1.2.sequoia.bottle.tar.gz")
         result = self.metadata()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bottle", result.stderr)
@@ -369,7 +369,7 @@ class BottleTests(unittest.TestCase):
         (out / "Formula/keyward.rb").write_text(f'  version "0.1.2"\n  sha256 "{digest}"\n')
         return out
 
-    def bottles(self, out, tags=("arm64_sequoia", "sequoia"), root=None, version="0.1.2"):
+    def bottles(self, out, tags=("arm64_sequoia",), root=None, version="0.1.2"):
         directory = out / "bottles"
         directory.mkdir()
         for tag in tags:
@@ -398,7 +398,30 @@ class BottleTests(unittest.TestCase):
         self.assertIn("checksum", result.stderr)
         self.assertFalse(self.events.exists())
 
-    def test_merge_writes_both_bottles_into_the_release_formula(self):
+    def test_bottle_build_trusts_the_formula_again_after_uninstalling(self):
+        # Homebrew 7 drops a formula's trust when it is uninstalled.
+        self.env["GITHUB_ACTIONS"] = "true"
+        out = self.release()
+        self.tool("brew", 'printf "brew %s\\n" "$*" >> "$EVENTS"\n'
+                  'case "$1" in\n'
+                  ' --cellar) echo "$FAKE_TAP/cellar";;\n'
+                  ' --repository) echo "$FAKE_TAP";;\n'
+                  ' tap) if [ "$#" -gt 1 ]; then mkdir -p "$FAKE_TAP"; cp -R "$3/." "$FAKE_TAP/"; fi;;\n'
+                  ' bottle) if [ "$2" = --merge ]; then printf \'    root_url "x"\\n\' >> "$FAKE_TAP/Formula/keyward.rb"; else\n'
+                  '  printf fixture > keyward--0.1.2.arm64_sequoia.bottle.tar.gz\n'
+                  '  printf \'{"veilux-lab/keyward/keyward":{"bottle":{"tags":{"arm64_sequoia":{"local_filename":"keyward--0.1.2.arm64_sequoia.bottle.tar.gz","filename":"keyward-0.1.2.arm64_sequoia.bottle.tar.gz"}}}}}\' > keyward--0.1.2.arm64_sequoia.bottle.json; fi;;\n'
+                  ' info) echo \'{"formulae":[{"installed":[{"poured_from_bottle":true}]}]}\';;\n'
+                  'esac\n')
+        result = self.run_script("build-homebrew-bottle.sh", "0.1.2", out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = self.events.read_text().splitlines()
+        uninstall = events.index("brew uninstall veilux-lab/keyward/keyward")
+        trusts = [i for i, event in enumerate(events) if event == "brew trust --formula veilux-lab/keyward/keyward"]
+        merge = next(i for i, event in enumerate(events) if event.startswith("brew bottle --merge"))
+        self.assertTrue(any(uninstall < i < merge for i in trusts))
+        self.assertTrue((out / "bottles" / BOTTLES[0]).exists())
+
+    def test_merge_writes_the_bottle_into_the_release_formula(self):
         out = self.release()
         self.bottles(out)
         result = self.run_script("merge-homebrew-bottles.sh", "0.1.2", out)
@@ -419,12 +442,15 @@ class BottleTests(unittest.TestCase):
         self.assertIn("checksum", result.stderr)
         self.assertFalse(self.events.exists())
 
-    def test_merge_requires_apple_silicon_and_intel_bottles(self):
-        out = self.release()
-        self.bottles(out, tags=("arm64_sequoia",))
-        result = self.run_script("merge-homebrew-bottles.sh", "0.1.2", out)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Intel", result.stderr)
+    def test_merge_requires_exactly_one_apple_silicon_bottle(self):
+        for tags in (("sequoia",), ("arm64_sequoia", "sequoia")):
+            with self.subTest(tags=tags):
+                out = self.release()
+                self.bottles(out, tags=tags)
+                result = self.run_script("merge-homebrew-bottles.sh", "0.1.2", out)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Apple Silicon", result.stderr)
+                subprocess.run(["rm", "-rf", str(out)], check=True)
         self.assertFalse(self.events.exists())
 
     def test_merge_refuses_bottles_from_another_release(self):

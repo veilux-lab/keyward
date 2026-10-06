@@ -3,9 +3,10 @@
 Homebrew packaging lives alongside the source in
 [`veilux-lab/keyward`](https://github.com/veilux-lab/keyward). Releases supply
 source archives and prebuilt bottles from the same repository. Bottles cover
-Apple Silicon and Intel Macs with Homebrew in its default location, so installing
-needs neither Go nor a compiler there. Other setups build from source with Go and
-Apple's command line tools. No signing certificate or paid Apple Developer
+Apple Silicon Macs with Homebrew in its default location, so installing needs
+neither Go nor a compiler there. Other setups build from source with Go and
+Apple's command line tools. Homebrew treats Intel as Tier 3 and has no Intel Go
+bottle, so Intel installation fails until Go is built from source. No signing certificate or paid Apple Developer
 membership is required. A separate
 [signed CLI installation](install.md#signed-local-installation) is also available.
 

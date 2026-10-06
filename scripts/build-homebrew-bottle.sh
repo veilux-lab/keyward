@@ -73,6 +73,8 @@ PY
 # Pour through the formula, as users will, with the bottle served locally.
 brew uninstall "$formula"
 installed=0
+# Homebrew 7 drops a formula's trust when it is uninstalled.
+brew trust --formula "$formula"
 brew bottle --merge --write --no-commit "$directory"/bottles/*.bottle.json
 cp "$directory/bottles/$local_name" "$directory/served/$release_name"
 python3 - "$tap_checkout/Formula/keyward.rb" "$directory/served" <<'PY'
