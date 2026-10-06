@@ -253,3 +253,15 @@ func TestConfigurationDefaultsAndOverrides(t *testing.T) {
 		t.Fatal("invalid setting accepted or disclosed")
 	}
 }
+
+func TestEveryCLICommandCanBeRecorded(t *testing.T) {
+	l, err := activity.New(config(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"add", "ls", "rm", "run", "migrate", "restore", "backups", "doctor", "daemon", "service", "help", "version"} {
+		if err := l.Record(activity.Event{Command: command, Operation: "command", Outcome: "ok"}); err != nil {
+			t.Errorf("%s: %v", command, err)
+		}
+	}
+}

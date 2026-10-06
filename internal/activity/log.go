@@ -97,7 +97,7 @@ func allowed(value, choices string) bool {
 }
 
 func (l *Log) Record(e Event) error {
-	if !allowed(e.Command, "add ls rm run migrate restore doctor daemon service help version") ||
+	if !allowed(e.Command, "add ls rm run migrate restore backups doctor daemon service help version") ||
 		!allowed(e.Operation, "command put replace get resolve delete list exec start stop shutdown connection request reply diagnostic install uninstall status") ||
 		!allowed(e.Outcome, "ok error denied not_found exists invalid empty_value cancelled started interrupted usage") || e.DurationMS < 0 {
 		return errors.New("invalid activity event")
