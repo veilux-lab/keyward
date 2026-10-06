@@ -1,14 +1,14 @@
 class Keyward < Formula
   desc "Keep shell secrets in macOS Keychain and resolve them through a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.7/keyward-0.1.7.tar.gz"
-  version "0.1.7"
-  sha256 "3f365b39bcf2a0f3ad1b7ae0b9d776b4b3627738a4f9e2588e49ec14afd7624b"
+  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.8/keyward-0.1.8.tar.gz"
+  version "0.1.8"
+  sha256 "082f560b396c79c8131e03560811ee833b549eeb5db6065e28322baa033de6a7"
   license "MIT"
 
   bottle do
-    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.7"
-    sha256 arm64_sequoia: "0c6c095ba9eb66f45fa95011ac37e0187fb7f45ee7b6764c87a97a134a6c8e26"
+    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.8"
+    sha256 arm64_sequoia: "db5ead9eb9cc4925baa6ce3ba785ae0b4de0565943b545a0cff137e242c9ee57"
   end
 
   depends_on "go" => :build
@@ -33,17 +33,12 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      The daemon starts automatically on first vault use, then at login.
-      To start it immediately or re-enable it after service uninstall:
-        #{opt_bin}/keyward service install
-
-      After upgrading, restart it with keyward service install. Daemon upgrades
-      may require approval to read previously stored Keychain items.
-
-      Before uninstalling, run keyward restore <file>... if you want secrets
-      returned to your files, then keyward service uninstall and brew uninstall keyward.
-      Restoration requires explicit yes and writes plaintext secrets. Keychain items
-      are retained; brew uninstall never restores secrets for you.
+      The Keyward daemon starts on first use, then at every login.
+        Start now or after an upgrade:  keyward service install
+        Pause access:                   keyward service stop
+        Remove everything:              keyward uninstall
+      Use these rather than the brew services lines below. An upgrade may ask
+      once for Keychain access.
     EOS
   end
 
