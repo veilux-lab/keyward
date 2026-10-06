@@ -1,10 +1,15 @@
 class Keyward < Formula
   desc "Keep shell secrets in macOS Keychain and resolve them through a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.4/keyward-0.1.4.tar.gz"
-  version "0.1.4"
-  sha256 "f798bbdf23d2c792febfd5c362eeca355b8086bddb89f32e2c390e8e708114e2"
+  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.6/keyward-0.1.6.tar.gz"
+  version "0.1.6"
+  sha256 "b0bd77f35e8a4cd235d98cc4ac032cd057395693c3d11abe07da04e5ec6a622c"
   license "MIT"
+
+  bottle do
+    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.6"
+    sha256 arm64_sequoia: "9c9dacfaed2af34379f86de56269cc14870fcb17a0ed55062ce4f81352f16b9a"
+  end
 
   depends_on "go" => :build
   depends_on :macos
@@ -32,8 +37,8 @@ class Keyward < Formula
       To start it immediately or re-enable it after service uninstall:
         #{opt_bin}/keyward service install
 
-      After upgrading, restart it with keyward service install. Source-built
-      daemon upgrades may require approval to read previously stored Keychain items.
+      After upgrading, restart it with keyward service install. Daemon upgrades
+      may require approval to read previously stored Keychain items.
 
       Before uninstalling, run keyward restore <file>... if you want secrets
       returned to your files, then keyward service uninstall and brew uninstall keyward.
