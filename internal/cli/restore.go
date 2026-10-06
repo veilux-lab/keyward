@@ -24,12 +24,12 @@ func (c *CLI) restore(args []string) int {
 	if err != nil {
 		return c.fail("keyward restore: %v", err)
 	}
-	if _, err := io.WriteString(c.Stdout, p.Preview()); err != nil {
+	if _, err := io.WriteString(c.Stdout, paintLines(c.ColorOut, p.Preview(), map[string]string{"  skip ": yellow})); err != nil {
 		return c.fail("keyward restore: could not print the plan; no files were changed")
 	}
 	if *dryRun || len(p.Items) == 0 {
 		if *dryRun {
-			fmt.Fprintln(c.Stdout, "Dry run: no secret values were read and no files were changed.")
+			fmt.Fprintln(c.Stdout, c.out(cyan, "Dry run: no secret values were read and no files were changed."))
 		} else {
 			fmt.Fprintln(c.Stdout, "Nothing to restore.")
 		}
@@ -38,7 +38,7 @@ func (c *CLI) restore(args []string) int {
 		}
 		return exitOK
 	}
-	if _, err := fmt.Fprintf(c.Stderr, "\nRestore %d value(s) into the files listed above?\n  These files will contain plaintext secrets again and will be private to your user.\n  Keychain entries will be kept. Only %q will be accepted.\n\n  Enter a value: ", len(p.Items), confirmWord); err != nil {
+	if _, err := fmt.Fprintf(c.Stderr, "\nRestore %d value(s) into the files listed above?\n  These files will contain plaintext secrets again and will be private to your user.\n  Keychain entries will be kept. %s\n\n  Enter a value: ", len(p.Items), c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord))); err != nil {
 		return exitFailure
 	}
 	ok, err := c.readConfirmation()
@@ -46,14 +46,14 @@ func (c *CLI) restore(args []string) int {
 		return c.fail("keyward restore: could not read confirmation; no files were changed")
 	}
 	if !ok {
-		return c.fail("Aborted. No secret values were read and no files were changed.")
+		return c.cancel("Aborted. No secret values were read and no files were changed.")
 	}
 	r := p.Apply(c.Store)
 	for _, item := range r.Restored {
-		fmt.Fprintf(c.Stdout, "  restored %s:%d  %s <- cap://%s\n", item.File, item.Line, item.Variable, item.Name)
+		fmt.Fprintln(c.Stdout, c.out(green, fmt.Sprintf("  restored %s:%d  %s <- cap://%s", item.File, item.Line, item.Variable, item.Name)))
 	}
 	for _, issue := range r.Skipped {
-		fmt.Fprintf(c.Stdout, "  skipped %s  %s\n", issue.Location(), issue.Reason)
+		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("  skipped %s  %s", issue.Location(), issue.Reason)))
 	}
 	fmt.Fprintf(c.Stdout, "\nRestored %d value(s); %d item(s) skipped. Keychain entries were kept.\n", len(r.Restored), len(r.Skipped))
 	if len(r.Skipped) != 0 {

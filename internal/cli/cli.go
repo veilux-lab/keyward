@@ -71,6 +71,9 @@ type CLI struct {
 	// Service manages the signed installation and login agent.
 	Service func(action string) (string, error)
 
+	// ColorOut and ColorErr enable ANSI colour on each stream; see ColorEnabled.
+	ColorOut, ColorErr bool
+
 	Record    func(activity.Event)
 	cancelled bool
 }
@@ -218,14 +221,14 @@ func (c *CLI) service(args []string) int {
 			return c.fail("keyward service: could not read confirmation; automatic startup was kept")
 		}
 		if !ok {
-			return c.fail("Service uninstall cancelled. Automatic startup was kept.")
+			return c.cancel("Service uninstall cancelled. Automatic startup was kept.")
 		}
 	}
 	message, err := c.Service(args[0])
 	if err != nil {
 		return c.fail("keyward service: %v", err)
 	}
-	fmt.Fprintln(c.Stdout, message)
+	fmt.Fprintln(c.Stdout, c.out(green, message))
 	return exitOK
 }
 
@@ -419,10 +422,12 @@ func (c *CLI) migrate(args []string) int {
 
 	// The plan is printed before anything else happens, so approval is never given
 	// to something unseen. The diff withholds values; see migrate.Plan.Diff.
-	fmt.Fprint(c.Stdout, plan.Diff())
+	fmt.Fprint(c.Stdout, paintLines(c.ColorOut, plan.Diff(), map[string]string{
+		"@@": cyan, "-": red, "+": green, "not moved, check these yourself:": yellow,
+	}))
 
 	if *dryRun {
-		fmt.Fprintf(c.Stdout, "\nDry run: nothing was changed.\n")
+		fmt.Fprintf(c.Stdout, "\n%s\n", c.out(cyan, "Dry run: nothing was changed."))
 		return exitOK
 	}
 
@@ -432,8 +437,8 @@ func (c *CLI) migrate(args []string) int {
 			return c.fail("keyward migrate: %v", err)
 		}
 		if !ok {
-			fmt.Fprint(c.Stderr, "\nAborted. Nothing was changed.\n")
-			return exitFailure
+			fmt.Fprintln(c.Stderr)
+			return c.cancel("Aborted. Nothing was changed.")
 		}
 	}
 
@@ -442,7 +447,7 @@ func (c *CLI) migrate(args []string) int {
 		return c.fail("keyward migrate: %v", err)
 	}
 
-	fmt.Fprintf(c.Stdout, "\nStored %d secret(s): %s\n", len(applied.Stored), strings.Join(applied.Stored, ", "))
+	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Original saved to %s\n", applied.BackupPath)
 	fmt.Fprintf(c.Stdout, "\nRun commands that need these values through keyward, for example:\n  keyward run -- your-command\n")
 	return exitOK
@@ -460,7 +465,7 @@ const confirmWord = "yes"
 func (c *CLI) confirm(count int, path string) (bool, error) {
 	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into the Keychain?\n", count, path)
 	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is copied to a timestamped backup first.\n")
-	fmt.Fprintf(c.Stderr, "  Only %q will be accepted.\n\n  Enter a value: ", confirmWord)
+	fmt.Fprintf(c.Stderr, "  %s\n\n  Enter a value: ", c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord)))
 	return c.readConfirmation()
 }
 
@@ -554,6 +559,12 @@ func fixHint(f resolve.Failure) string {
 // fail writes a message to stderr and returns the failure exit code. Callers pass
 // causes, never values.
 func (c *CLI) fail(format string, args ...any) int {
-	fmt.Fprintf(c.Stderr, format+"\n", args...)
+	fmt.Fprintln(c.Stderr, c.errs(red, fmt.Sprintf(format, args...)))
+	return exitFailure
+}
+
+// cancel reports a refusal the user chose, which is not an error.
+func (c *CLI) cancel(message string) int {
+	fmt.Fprintln(c.Stderr, c.errs(yellow, message))
 	return exitFailure
 }

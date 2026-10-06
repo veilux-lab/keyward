@@ -17,6 +17,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/launchd"
 	"github.com/veilux-lab/keyward/internal/vault"
+	"golang.org/x/term"
 )
 
 // Set by the Homebrew formula; local signed installations use launchd directly.
@@ -65,6 +66,8 @@ func main() {
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
+		ColorOut:   cli.ColorEnabled(term.IsTerminal(int(os.Stdout.Fd())), os.Getenv),
+		ColorErr:   cli.ColorEnabled(term.IsTerminal(int(os.Stderr.Fd())), os.Getenv),
 		Environ:    os.Environ,
 		ReadSecret: cli.StdinSecretReader(os.Stdin, os.Stderr),
 		Exec:       syscall.Exec,
