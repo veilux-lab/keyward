@@ -1,14 +1,14 @@
 class Keyward < Formula
   desc "Keep shell secrets in macOS Keychain and resolve them through a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.6/keyward-0.1.6.tar.gz"
-  version "0.1.6"
-  sha256 "b0bd77f35e8a4cd235d98cc4ac032cd057395693c3d11abe07da04e5ec6a622c"
+  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.7/keyward-0.1.7.tar.gz"
+  version "0.1.7"
+  sha256 "3f365b39bcf2a0f3ad1b7ae0b9d776b4b3627738a4f9e2588e49ec14afd7624b"
   license "MIT"
 
   bottle do
-    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.6"
-    sha256 arm64_sequoia: "9c9dacfaed2af34379f86de56269cc14870fcb17a0ed55062ce4f81352f16b9a"
+    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.7"
+    sha256 arm64_sequoia: "0c6c095ba9eb66f45fa95011ac37e0187fb7f45ee7b6764c87a97a134a6c8e26"
   end
 
   depends_on "go" => :build
