@@ -62,12 +62,76 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  publish:
+  source:
     needs: build
+    runs-on: macos-15
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Prepare exact source release
+        id: prepare
+        env:
+          RELEASE_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          version="0.1.$((RELEASE_RUN_NUMBER + 1))"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          go run ./cmd/keyward-release -version "$version" -out bin/release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source
+          path: bin/release
+          if-no-files-found: error
+          retention-days: 1
+
+  # Bottles let Homebrew install without Go or a compiler.
+  bottle:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      RELEASE_VERSION: ${{ needs.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: source
+          path: bin/release
+      - name: Verify Homebrew source installation
+        run: bash scripts/test-homebrew-release.sh "$RELEASE_VERSION" bin/release
+      - name: Build and pour Homebrew bottle
+        run: bash scripts/build-homebrew-bottle.sh "$RELEASE_VERSION" bin/release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bottle-${{ matrix.arch }}
+          path: bin/release/bottles/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [source, bottle]
     runs-on: macos-15
     timeout-minutes: 45
     permissions:
       contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.source.outputs.version }}
     concurrency:
       group: keyward-release-main
       # Keep pending pushes instead of replacing all but the newest one.
@@ -100,15 +164,22 @@ jobs:
         with:
           name: unsigned-amd64
           path: bin/release/unsigned/amd64
-      - name: Prepare exact source release
-        env:
-          RELEASE_RUN_NUMBER: ${{ github.run_number }}
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: source
+          path: bin/release
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: bottle-arm64
+          path: bin/release/bottles
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: bottle-amd64
+          path: bin/release/bottles
+      - name: Merge Homebrew bottles into the formula
         run: |
-          version="0.1.$((RELEASE_RUN_NUMBER + 1))"
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          go run ./cmd/keyward-release -version "$version" -out bin/release
-      - name: Verify Homebrew source installation
-        run: bash scripts/test-homebrew-release.sh "$RELEASE_VERSION" bin/release
+          python3 scripts/check-release-formula.py "$RELEASE_VERSION" bin/release
+          bash scripts/merge-homebrew-bottles.sh "$RELEASE_VERSION" bin/release
       - name: Sign and notarize universal CLI
         if: env.RELEASE_TYPE == 'signed'
         env:

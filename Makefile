@@ -18,7 +18,7 @@ test-race:
 	go test -race ./...
 
 test-release:
-	bash -n scripts/sign-release.sh scripts/publish-release.sh scripts/update-homebrew.sh scripts/test-homebrew-release.sh
+	bash -n scripts/sign-release.sh scripts/publish-release.sh scripts/update-homebrew.sh scripts/test-homebrew-release.sh scripts/build-homebrew-bottle.sh scripts/merge-homebrew-bottles.sh
 	python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
 # Touches the real Keychain, so it is kept out of `test` and `verify`. Items are

@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 
 
 def prepare(version, output, release_type, revision, run_id):
@@ -13,6 +14,11 @@ def prepare(version, output, release_type, revision, run_id):
         dmg = f"keyward-{version}-darwin-universal.dmg"
         assets.append(dmg)
         files.append(dmg)
+    bottles = sorted(path.name for path in output.glob(f"keyward-{version}.*.bottle.tar.gz"))
+    if len(bottles) != 2 or sum(".arm64_" in name for name in bottles) != 1:
+        sys.exit("Expected exactly one Apple Silicon and one Intel Homebrew bottle")
+    assets += bottles
+    files += bottles
     digests = {name: hashlib.sha256((output / name).read_bytes()).hexdigest() for name in files}
     provenance = {"version": version, "source_commit": revision, "run_id": run_id,
                   "release_type": release_type, "assets": assets}
@@ -25,11 +31,12 @@ def prepare(version, output, release_type, revision, run_id):
     if release_type == "signed":
         notes += ("The disk image contains a Developer ID-signed, notarized universal CLI "
                   "for macOS 15 or later. Follow INSTALL.txt inside the image.\n\n")
-    notes += ("Homebrew builds from the matching source archive. No paid Apple membership "
-              "is needed for source installation.\n\n"
+    notes += ("Homebrew installs a prebuilt bottle on Apple Silicon and Intel Macs that use "
+              "its default location, and builds from the matching source archive otherwise. "
+              "No paid Apple membership is needed.\n\n"
               "```sh\nbrew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git\n"
               "brew install veilux-lab/keyward/keyward\n```\n\n"
-              "Source-built daemon upgrades may require Keychain approval.\n")
+              "Daemon upgrades may require Keychain approval.\n")
     (output / "notes.md").write_text(notes)
 
 

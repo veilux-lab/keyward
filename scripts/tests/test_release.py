@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import unittest
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
+BOTTLES = ["keyward-0.1.2.arm64_sequoia.bottle.tar.gz", "keyward-0.1.2.sequoia.bottle.tar.gz"]
 
 
 class ReleaseTests(unittest.TestCase):
@@ -110,6 +112,7 @@ class ReleaseTests(unittest.TestCase):
         names = ["keyward-0.1.2.tar.gz", "SHA256SUMS", "release.json"]
         if release_type == "signed":
             names.append("keyward-0.1.2-darwin-universal.dmg")
+        names += BOTTLES
         for name in names:
             (out / name).write_text("fixture")
         (out / "release.json").write_text(json.dumps({"version": "0.1.2", "source_commit": "a" * 40,
@@ -137,6 +140,15 @@ class ReleaseTests(unittest.TestCase):
         (out / "keyward-0.1.2-darwin-universal.dmg").unlink()
         result = self.run_script("publish-release.sh", "0.1.2", out, "signed")
         self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.events.exists())
+
+    def test_release_without_bottles_cannot_be_published(self):
+        out = self.publishing_fixture(release_type="source")
+        for name in BOTTLES:
+            (out / name).unlink()
+        result = self.run_script("publish-release.sh", "0.1.2", out)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("bottle", result.stderr)
         self.assertFalse(self.events.exists())
 
     def test_new_release_uploads_all_assets_before_publication(self):
@@ -185,6 +197,8 @@ class ReleaseTests(unittest.TestCase):
         events = self.events.read_text()
         self.assertIn("release upload", events)
         self.assertNotIn("darwin-universal.dmg", events)
+        for name in BOTTLES:
+            self.assertIn(name, events)
 
     def test_source_rerun_preserves_public_assets(self):
         out = self.publishing_fixture(existing="published", release_type="source")
@@ -198,7 +212,7 @@ class ReleaseTests(unittest.TestCase):
         manifest_path = out / "release.json"
         manifest = json.loads(manifest_path.read_text())
         manifest["release_type"] = "signed"
-        manifest["assets"].append("keyward-0.1.2-darwin-universal.dmg")
+        manifest["assets"].insert(3, "keyward-0.1.2-darwin-universal.dmg")
         manifest_path.write_text(json.dumps(manifest))
         result = self.run_script("publish-release.sh", "0.1.2", out, "signed")
         self.assertNotEqual(result.returncode, 0)
@@ -261,6 +275,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.output = Path(self.temp.name)
         (self.output / "keyward-0.1.2.tar.gz").write_text("source fixture")
+        for name in BOTTLES:
+            (self.output / name).write_text("bottle fixture")
 
     def metadata(self, release_type="source"):
         return subprocess.run(["python3", str(SCRIPTS / "prepare-release.py"), "0.1.2", str(self.output),
@@ -281,6 +297,16 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("keyward-0.1.2.tar.gz", checksums)
         self.assertIn("release.json", checksums)
         self.assertNotIn(".dmg", checksums)
+        self.assertEqual(manifest["assets"][3:], BOTTLES)
+        for name in BOTTLES:
+            self.assertIn(name, checksums)
+
+    def test_metadata_requires_both_bottles(self):
+        (self.output / BOTTLES[1]).unlink()
+        result = self.metadata()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("bottle", result.stderr)
+        self.assertFalse((self.output / "release.json").exists())
 
     def test_signed_metadata_requires_the_signed_package(self):
         result = self.metadata("signed")
@@ -294,7 +320,133 @@ class ReleaseMetadataTests(unittest.TestCase):
         manifest = json.loads((self.output / "release.json").read_text())
         self.assertEqual(manifest["release_type"], "signed")
         self.assertEqual(manifest["signing_identifier"], "com.nwokolo24.keyward")
+        self.assertEqual(manifest["assets"][3:], ["keyward-0.1.2-darwin-universal.dmg", *BOTTLES])
         self.assertIn("keyward-0.1.2-darwin-universal.dmg", (self.output / "SHA256SUMS").read_text())
+
+
+class BottleTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.tools = self.root / "tools"
+        self.tools.mkdir()
+        self.events = self.root / "events"
+        self.tap = self.root / "tap-checkout"
+        self.env = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+        self.env.update(PATH=f"{self.tools}:{os.environ['PATH']}", TMPDIR=str(self.root),
+                        EVENTS=str(self.events), FAKE_TAP=str(self.tap))
+        # Records each call; merging appends the sha256 lines Homebrew would write.
+        (self.tools / "merge.py").write_text(
+            "import json, sys\n"
+            "with open(sys.argv[1], 'a') as formula:\n"
+            "    for path in sys.argv[2:]:\n"
+            "        (entry,) = json.load(open(path)).values()\n"
+            "        for tag, item in entry['bottle']['tags'].items():\n"
+            "            formula.write(f'    sha256 {tag}:  \"{item[\"sha256\"]}\"\\n')\n")
+        self.tool("brew", 'printf "brew %s\\n" "$*" >> "$EVENTS"\n'
+                  'case "$1" in\n'
+                  ' tap) if [ "$#" -gt 1 ]; then mkdir -p "$FAKE_TAP"; cp -R "$3/." "$FAKE_TAP/"; fi;;\n'
+                  ' --repository) echo "$FAKE_TAP";;\n'
+                  f' bottle) shift 4; python3 "{self.tools / "merge.py"}" "$FAKE_TAP/Formula/keyward.rb" "$@";;\n'
+                  'esac\n')
+
+    def tool(self, name, body):
+        path = self.tools / name
+        path.write_text("#!/bin/bash\nset -eu\n" + body)
+        path.chmod(0o755)
+
+    def run_script(self, name, *args):
+        return subprocess.run(["bash", str(SCRIPTS / name), *map(str, args)],
+                              env=self.env, text=True, capture_output=True)
+
+    def release(self, formula_sha=None):
+        out = self.root / "release"
+        (out / "Formula").mkdir(parents=True)
+        archive = out / "keyward-0.1.2.tar.gz"
+        archive.write_text("source fixture")
+        digest = formula_sha or hashlib.sha256(archive.read_bytes()).hexdigest()
+        (out / "Formula/keyward.rb").write_text(f'  version "0.1.2"\n  sha256 "{digest}"\n')
+        return out
+
+    def bottles(self, out, tags=("arm64_sequoia", "sequoia"), root=None, version="0.1.2"):
+        directory = out / "bottles"
+        directory.mkdir()
+        for tag in tags:
+            filename = f"keyward-0.1.2.{tag}.bottle.tar.gz"
+            (directory / filename).write_text(f"{tag} bottle fixture")
+            digest = hashlib.sha256((directory / filename).read_bytes()).hexdigest()
+            metadata = {"veilux-lab/keyward/keyward": {
+                "formula": {"name": "keyward", "pkg_version": version},
+                "bottle": {"root_url": root or "https://github.com/veilux-lab/keyward/releases/download/v0.1.2",
+                           "rebuild": 0, "tags": {tag: {"filename": filename, "sha256": digest}}}}}
+            (directory / f"keyward--0.1.2.{tag}.bottle.json").write_text(json.dumps(metadata))
+        return directory
+
+    def test_bottle_build_refuses_outside_ci(self):
+        out = self.release()
+        result = self.run_script("build-homebrew-bottle.sh", "0.1.2", out)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("CI", result.stderr)
+        self.assertFalse(self.events.exists())
+
+    def test_bottle_build_checks_the_source_archive_before_homebrew(self):
+        self.env["GITHUB_ACTIONS"] = "true"
+        out = self.release(formula_sha="0" * 64)
+        result = self.run_script("build-homebrew-bottle.sh", "0.1.2", out)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checksum", result.stderr)
+        self.assertFalse(self.events.exists())
+
+    def test_merge_writes_both_bottles_into_the_release_formula(self):
+        out = self.release()
+        self.bottles(out)
+        result = self.run_script("merge-homebrew-bottles.sh", "0.1.2", out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        formula = (out / "Formula/keyward.rb").read_text()
+        for name in BOTTLES:
+            digest = hashlib.sha256((out / name).read_bytes()).hexdigest()
+            self.assertIn(digest, formula)
+        events = self.events.read_text()
+        self.assertLess(events.index("brew bottle --merge --write --no-commit"), events.index("brew style"))
+        self.assertIn("brew untap veilux-lab/keyward", events)
+
+    def test_merge_refuses_a_bottle_that_does_not_match_its_checksum(self):
+        out = self.release()
+        (self.bottles(out) / BOTTLES[0]).write_text("tampered")
+        result = self.run_script("merge-homebrew-bottles.sh", "0.1.2", out)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checksum", result.stderr)
+        self.assertFalse(self.events.exists())
+
+    def test_merge_requires_apple_silicon_and_intel_bottles(self):
+        out = self.release()
+        self.bottles(out, tags=("arm64_sequoia",))
+        result = self.run_script("merge-homebrew-bottles.sh", "0.1.2", out)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Intel", result.stderr)
+        self.assertFalse(self.events.exists())
+
+    def test_merge_refuses_bottles_from_another_release(self):
+        for options in ({"version": "0.1.1"}, {"root": "https://example.invalid/v0.1.2"}):
+            with self.subTest(**options):
+                out = self.release()
+                self.bottles(out, **options)
+                result = self.run_script("merge-homebrew-bottles.sh", "0.1.2", out)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("another release", result.stderr)
+                self.assertFalse(self.events.exists())
+                subprocess.run(["rm", "-rf", str(out)], check=True)
+
+    def test_merge_leaves_an_existing_tap_untouched(self):
+        out = self.release()
+        self.bottles(out)
+        self.tool("brew", 'printf "brew %s\\n" "$*" >> "$EVENTS"\nif [ "$*" = tap ]; then echo veilux-lab/keyward; fi\n')
+        result = self.run_script("merge-homebrew-bottles.sh", "0.1.2", out)
+        self.assertNotEqual(result.returncode, 0)
+        events = self.events.read_text()
+        self.assertNotIn("bottle", events)
+        self.assertNotIn("untap", events)
 
 
 class FormulaUpdateTests(unittest.TestCase):

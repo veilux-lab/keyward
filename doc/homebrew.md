@@ -2,8 +2,10 @@
 
 Homebrew packaging lives alongside the source in
 [`veilux-lab/keyward`](https://github.com/veilux-lab/keyward). Releases supply
-source archives from the same repository. The formula builds on macOS using Go
-and Apple's command line tools. No signing certificate or paid Apple Developer
+source archives and prebuilt bottles from the same repository. Bottles cover
+Apple Silicon and Intel Macs with Homebrew in its default location, so installing
+needs neither Go nor a compiler there. Other setups build from source with Go and
+Apple's command line tools. No signing certificate or paid Apple Developer
 membership is required. A separate
 [signed CLI installation](install.md#signed-local-installation) is also available.
 
@@ -69,9 +71,9 @@ brew upgrade veilux-lab/keyward/keyward
 keyward service install
 ```
 
-The second command restarts the daemon. A changed source-built daemon may prompt
-for macOS approval to read previously stored Keychain items. Source builds do not
-promise prompt-free upgrades. The Homebrew daemon uses the default
+The second command restarts the daemon. A changed daemon, bottled or built from
+source, may prompt for macOS approval to read previously stored Keychain items.
+Homebrew upgrades do not promise prompt-free daemon restarts. The Homebrew daemon uses the default
 [logging limits](install.md#activity-logs); environment overrides on an individual
 CLI do not configure that service.
 
@@ -124,10 +126,10 @@ Keyward's warning and confirmation flow.
 ## Prepare a release
 
 The default [GitHub Actions release workflow](releases.md) prepares free source
-releases on pushes to `main`, verifies the exact archive with `brew test`, then
-publishes it before advancing this repository's formula. No Apple credentials or
+releases and bottles on pushes to `main`, verifies them with `brew test`, then
+publishes them before advancing this repository's formula. No Apple credentials or
 personal access token are normally needed. The steps below remain available for
-manual releases.
+manual releases, which are source-only.
 
 The release tool creates a source archive from a committed Git revision and a
 formula containing its exact checksum. The template lives in

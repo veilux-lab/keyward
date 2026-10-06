@@ -11,6 +11,16 @@ case "$release_type" in
   signed) assets+=("keyward-$version-darwin-universal.dmg") ;;
   *) echo "Release type must be source or signed" >&2; exit 1 ;;
 esac
+# Bytewise glob order matches the list recorded in release.json.
+LC_ALL=C
+bottles=0
+for bottle in "$output/keyward-$version".*.bottle.tar.gz; do
+  if [ -f "$bottle" ]; then assets+=("${bottle##*/}"); bottles=$((bottles + 1)); fi
+done
+if [ "$bottles" = 0 ]; then
+  echo "Missing Homebrew bottles" >&2
+  exit 1
+fi
 for asset in "${assets[@]}"; do
   test -f "$output/$asset" || { echo "Missing release asset: $asset" >&2; exit 1; }
 done

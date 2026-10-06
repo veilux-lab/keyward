@@ -47,6 +47,15 @@ and the bot's formula update (`db15932`). Pushes that change only Markdown or
 stay optional behind `KEYWARD_SIGNED_RELEASES=true`; an end-to-end signed CI
 release remains untested.
 
+Prebuilt Homebrew bottles are prepared locally and await an approved push. CI
+builds one per native runner, pours it through the formula, merges both into the
+release formula, and refuses to publish without matching Apple Silicon and Intel
+bottles. Installing from a bottle needs no Go, so `brew install` stops upgrading the
+user's Go. A local probe under Homebrew 7.0.7 confirmed the build, merge, and pour
+commands and an ad-hoc signed binary. Bottles embed `/opt/homebrew` or
+`/usr/local`, so custom prefixes still build from source. The first CI bottle
+release is untested.
+
 First install on a second Mac (macOS 27.0, Homebrew 7.0.7, no earlier Keyward)
 is in progress. `brew tap` printed two "not trusted" warnings and skipped the
 formula. `brew install veilux-lab/keyward/keyward` printed the same warnings,
@@ -116,7 +125,7 @@ available to work on.
 
 - First-user Keychain prompts and login startup for the public source-built
   Homebrew package; see [homebrew.md](homebrew.md). In progress on a second Mac;
-  installation itself succeeded.
+  installation itself succeeded. Repeat with the first bottled release.
 
 **Gated on a paid Developer ID:**
 
@@ -150,6 +159,15 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-05 (Homebrew bottles, prepared)** — The release workflow builds the
+source archive once, then builds and pours a bottle on native ARM and Intel
+runners before publishing. `scripts/merge-homebrew-bottles.sh` checks each bottle's
+release, root URL, and checksum before Homebrew writes the formula's bottle block;
+release metadata and publication require both bottles. Tests came first and cover
+refusal outside CI, mismatched archives or bottles, a missing architecture, another
+release's bottles, and an existing tap. Manual releases remain source-only. This
+change is local until an approved push.
 
 **2026-10-05 (first install on a second Mac)** — Installed public `v0.1.4` through
 the documented tap and formula commands. Recorded the trust warnings, the Go

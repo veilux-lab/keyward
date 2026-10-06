@@ -14,8 +14,8 @@ Your shell config holds the reference. When a command needs the real value,
 
 ## Install
 
-macOS only. Homebrew builds from source using Go and Apple's command line tools;
-you do not need a paid Apple Developer account.
+macOS only. Homebrew installs a prebuilt bottle on Apple Silicon and Intel, and
+builds from source with Go elsewhere; you do not need a paid Apple Developer account.
 
 ```sh
 brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
