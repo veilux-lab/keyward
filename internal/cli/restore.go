@@ -12,14 +12,15 @@ func (c *CLI) restore(args []string) int {
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
 	fs.SetOutput(c.Stderr)
 	dryRun := fs.Bool("dry-run", false, "list references to restore without reading secret values")
-	if err := fs.Parse(args); err != nil {
+	paths, err := parse(fs, args)
+	if err != nil {
 		return exitUsage
 	}
-	if fs.NArg() == 0 {
+	if len(paths) == 0 {
 		fmt.Fprintln(c.Stderr, "usage: keyward restore [--dry-run] <file>...")
 		return exitUsage
 	}
-	p, err := restore.Read(c.Store, fs.Args())
+	p, err := restore.Read(c.Store, paths)
 	if err != nil {
 		return c.fail("keyward restore: %v", err)
 	}

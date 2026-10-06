@@ -101,6 +101,9 @@ commands:
   version               print the version
   help                  print this message
 
+Options may go before or after a command's arguments; -- ends them. Everything
+after run's command belongs to that command.
+
 examples:
   pbpaste | keyward add splunk-mcp-token
   keyward run -- npm test
@@ -116,6 +119,12 @@ logging:
 
 // Run dispatches a command and returns a process exit code.
 func (c *CLI) Run(args []string) int {
+	args, hoisted := hoist(args)
+	if hoisted && args[0] == "run" {
+		// Options after run belong to the child command, so none can go before it.
+		fmt.Fprint(c.Stderr, "keyward run takes no options; put the command's own options after it\n")
+		return exitUsage
+	}
 	if c.Record == nil || len(args) == 0 {
 		return c.dispatch(args)
 	}
@@ -229,14 +238,15 @@ func (c *CLI) add(args []string) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(c.Stderr)
 	force := fs.Bool("force", false, "replace the value if the name already exists")
-	if err := fs.Parse(args); err != nil {
+	names, err := parse(fs, args)
+	if err != nil {
 		return exitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(names) != 1 {
 		fmt.Fprint(c.Stderr, "usage: keyward add [-force] <name>\n")
 		return exitUsage
 	}
-	name := fs.Arg(0)
+	name := names[0]
 
 	// Validate before reading, so a typo is caught without the user first typing
 	// or piping a credential.
@@ -370,7 +380,8 @@ func (c *CLI) migrate(args []string) int {
 	fs.SetOutput(c.Stderr)
 	dryRun := fs.Bool("dry-run", false, "describe what would change, and stop")
 	autoApprove := fs.Bool("auto-approve", false, "apply without asking for confirmation")
-	if err := fs.Parse(args); err != nil {
+	paths, err := parse(fs, args)
+	if err != nil {
 		return exitUsage
 	}
 	if *dryRun && *autoApprove {
@@ -379,12 +390,12 @@ func (c *CLI) migrate(args []string) int {
 		fmt.Fprint(c.Stderr, "keyward migrate: -dry-run and -auto-approve contradict each other; pass one or neither\n")
 		return exitUsage
 	}
-	if fs.NArg() != 1 {
+	if len(paths) != 1 {
 		fmt.Fprint(c.Stderr, "usage: keyward migrate [--dry-run | -auto-approve] <file>\n")
 		return exitUsage
 	}
 
-	plan, err := migrate.Read(fs.Arg(0))
+	plan, err := migrate.Read(paths[0])
 	if err != nil {
 		return c.fail("keyward migrate: %v", err)
 	}
