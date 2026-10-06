@@ -163,6 +163,13 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-06 (uninstall and caveats, prepared)** — `keyward uninstall` asks for `yes`,
+stops the daemon, deletes local state, backups, and default logs, then removes the
+Homebrew formula and tap or the signed CLI. Keychain items are kept. A plain
+`brew uninstall` cannot do this: formulas have no uninstall hook. Formula caveats
+are cut to six lines; Homebrew's own `brew services` lines cannot be suppressed
+for a formula with a service. Local until an approved push.
+
 **2026-10-06 (backups, stop, options, colour, prepared)** — Migrate backups move to a
 private `~/Library/Application Support/keyward/backups` (mode `600`) instead of
 beside the original, which copied the original's mode. `keyward backups` lists them,

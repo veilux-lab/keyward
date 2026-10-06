@@ -73,6 +73,11 @@ type CLI struct {
 	// Backups holds migrate's private plaintext copies of the originals.
 	Backups backup.Dir
 
+	// DataDirs are deleted by uninstall; empty for isolated instances.
+	DataDirs []string
+	// RemovePackage deletes the installed program after its data; nil for development builds.
+	RemovePackage func() (string, error)
+
 	// Service manages the signed installation and login agent.
 	Service func(action string) (string, error)
 
@@ -99,6 +104,8 @@ commands:
   service stop          stop the daemon until service start or next login
   service status        check whether the daemon is running
   service uninstall     warn about restoration, then ask to remove startup
+  uninstall             remove startup, local data, backups, and the package
+                        (asks first; Keychain items are kept)
   add [-force] <name>   store a secret read from stdin
   ls                    list stored secret names
   rm <name>             remove a secret
@@ -202,6 +209,9 @@ func (c *CLI) dispatch(args []string) int {
 		return c.daemon(args[1:])
 	case "service":
 		return c.service(args[1:])
+	case "uninstall":
+		// Not recorded: logging afterwards would recreate the deleted log directory.
+		return c.uninstall(args[1:])
 	default:
 		fmt.Fprintf(c.Stderr, "keyward: unknown command %q\n\n%s", args[0], usage)
 		return exitUsage

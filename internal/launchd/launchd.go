@@ -115,6 +115,15 @@ func (m Manager) Run(action string) (string, error) {
 	}
 }
 
+// Remove deletes the signed CLI that install copied into ~/.local/bin.
+func (m Manager) Remove() (string, error) {
+	binary := filepath.Join(m.Home, ".local", "bin", "keyward")
+	if err := os.Remove(binary); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	return "Deleted " + binary + ".", nil
+}
+
 func (m Manager) normalized() (Manager, error) {
 	if !filepath.IsAbs(m.Home) || m.UID < 0 {
 		return m, errors.New("service needs an absolute home directory and a user ID")

@@ -114,15 +114,19 @@ stored values back in plaintext:
 ```sh
 keyward restore --dry-run ~/.zshrc .env
 keyward restore ~/.zshrc .env
-keyward service uninstall
-brew uninstall veilux-lab/keyward/keyward
+keyward uninstall
 ```
 
-Restore and service uninstall each require exact lowercase `yes`. Review any
-restoration skips before removal. Keychain items remain after shutdown, removal,
-and reinstall. Service uninstall keeps first-use startup disabled until explicit
-`keyward service install`. `brew uninstall` does not restore files or run
-Keyward's warning and confirmation flow.
+Restore and uninstall each require exact lowercase `yes`. Review any restoration
+skips before removal. `keyward uninstall` stops the daemon, deletes
+`~/Library/Application Support/keyward` (including private backups), older
+backups beside the files doctor reads, and `~/Library/Logs/keyward`, then runs
+`brew uninstall` and `brew untap`. Formulas have no uninstall hook, so a plain
+`brew uninstall` leaves that data and the tap behind. Keychain items remain.
+
+Homebrew always adds `brew services` lines to the caveats of a formula with a
+service. Use `keyward service install`, `stop`, and `start` instead: they keep
+first-use startup in step.
 
 ## Prepare a release
 

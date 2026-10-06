@@ -48,7 +48,7 @@ func TestReleaseArchivesOnlyCommittedFilesAndPinsFormula(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{checksum, `version "0.1.0"`, `homepage "https://github.com/veilux-lab/keyward"`, "https://github.com/veilux-lab/keyward/releases/download/v0.1.0/keyward-0.1.0.tar.gz", "main.homebrewExecutable=", "opt_bin", "daemon", "automatically on first vault use"} {
+	for _, want := range []string{checksum, `version "0.1.0"`, `homepage "https://github.com/veilux-lab/keyward"`, "https://github.com/veilux-lab/keyward/releases/download/v0.1.0/keyward-0.1.0.tar.gz", "main.homebrewExecutable=", "opt_bin", "daemon", "starts on first use"} {
 		if !strings.Contains(string(formula), want) {
 			t.Fatalf("formula missing %s", want)
 		}
@@ -94,5 +94,31 @@ func TestReleaseRefusesDirtyTrackedFilesAndInvalidVersion(t *testing.T) {
 	os.WriteFile(filepath.Join(repo, "README.md"), []byte("uncommitted change"), 0o644)
 	if _, err := homebrew.Prepare(repo, "0.1.0", t.TempDir()); err == nil {
 		t.Fatal("uncommitted source accepted")
+	}
+}
+
+// Caveats print on every install; they must stay short enough to read.
+func TestFormulaCaveatsAreBrief(t *testing.T) {
+	r, err := homebrew.Prepare(repository(t), "0.1.0", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	formula, err := os.ReadFile(r.Formula)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(formula), "<<~EOS")
+	end := strings.Index(string(formula), "    EOS")
+	if start < 0 || end < start {
+		t.Fatal("formula has no caveats")
+	}
+	caveats := string(formula)[start:end]
+	if lines := strings.Count(caveats, "\n") - 1; lines > 7 {
+		t.Errorf("caveats are %d lines, want at most 7:\n%s", lines, caveats)
+	}
+	for _, want := range []string{"keyward service install", "keyward service stop", "keyward uninstall", "brew services"} {
+		if !strings.Contains(caveats, want) {
+			t.Errorf("caveats lack %q:\n%s", want, caveats)
+		}
 	}
 }

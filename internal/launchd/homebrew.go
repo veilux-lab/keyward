@@ -98,6 +98,18 @@ func (h Homebrew) Run(action string) (string, error) {
 	}
 }
 
+// Remove uninstalls the formula and its tap, which brew cannot do from a formula.
+func (h Homebrew) Remove() (string, error) {
+	m := h.manager()
+	if err := m.command(h.Brew, "uninstall", homebrewFormula); err != nil {
+		return "", err
+	}
+	if err := m.command(h.Brew, "untap", "veilux-lab/keyward"); err != nil {
+		return "", fmt.Errorf("the formula was removed, but untapping failed: %w", err)
+	}
+	return "Ran brew uninstall and brew untap veilux-lab/keyward.", nil
+}
+
 func (h Homebrew) manager() Manager {
 	return Manager{Home: h.Home, UID: h.UID, Command: h.Command, Ready: h.Ready, StartupTimeout: h.StartupTimeout}
 }

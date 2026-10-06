@@ -67,12 +67,13 @@ before stopping the daemon:
 ```sh
 keyward restore --dry-run ~/.zshrc .env
 keyward restore ~/.zshrc .env
-keyward service uninstall
-brew uninstall veilux-lab/keyward/keyward
+keyward uninstall
 ```
 
 Choose the files you migrated. Restoration writes plaintext again and requires
-`yes`. Check any reported skips before uninstalling. Keychain items are retained.
+`yes`. Check any reported skips before uninstalling. `keyward uninstall` asks for
+`yes`, then removes startup, local data, backups, the formula, and the tap.
+Keychain items are kept; remove them first with `keyward rm` if you want them gone.
 
 ## What it protects
 

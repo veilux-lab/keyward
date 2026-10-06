@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -102,6 +103,14 @@ func main() {
 				LogConfig: &config,
 			}).Run(action)
 		},
+	}
+	if socket == daemon.DefaultSocket(home) && service == vault.DefaultService {
+		c.DataDirs = []string{filepath.Dir(socket), activity.DefaultConfig(home).Dir}
+		if homebrewExecutable != "" {
+			c.RemovePackage = (launchd.Homebrew{Home: home, UID: os.Getuid(), Brew: homebrewExecutable}).Remove
+		} else if executable, err := os.Executable(); err == nil && executable == filepath.Join(home, ".local", "bin", "keyward") {
+			c.RemovePackage = (launchd.Manager{Home: home, UID: os.Getuid()}).Remove
+		}
 	}
 	os.Exit(c.Run(os.Args[1:]))
 }

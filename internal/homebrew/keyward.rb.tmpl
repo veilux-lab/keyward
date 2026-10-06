@@ -28,17 +28,12 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      The daemon starts automatically on first vault use, then at login.
-      To start it immediately or re-enable it after service uninstall:
-        #{opt_bin}/keyward service install
-
-      After upgrading, restart it with keyward service install. Daemon upgrades
-      may require approval to read previously stored Keychain items.
-
-      Before uninstalling, run keyward restore <file>... if you want secrets
-      returned to your files, then keyward service uninstall and brew uninstall keyward.
-      Restoration requires explicit yes and writes plaintext secrets. Keychain items
-      are retained; brew uninstall never restores secrets for you.
+      The Keyward daemon starts on first use, then at every login.
+        Start now or after an upgrade:  keyward service install
+        Pause access:                   keyward service stop
+        Remove everything:              keyward uninstall
+      Use these rather than the brew services lines below. An upgrade may ask
+      once for Keychain access.
     EOS
   end
 

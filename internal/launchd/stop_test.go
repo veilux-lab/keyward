@@ -101,3 +101,29 @@ func TestUninstallMessageNamesWhatIsKeptAndHowToReturn(t *testing.T) {
 		}
 	}
 }
+
+func TestHomebrewRemoveUninstallsTheFormulaThenTheTap(t *testing.T) {
+	h := brewSetup(t)
+	if _, err := h.m.Remove(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(h.calls, "\n"); got != "brew uninstall veilux-lab/keyward/keyward\nbrew untap veilux-lab/keyward" {
+		t.Fatalf("calls:\n%s", got)
+	}
+}
+
+func TestSignedRemoveDeletesTheInstalledBinary(t *testing.T) {
+	h := setup(t)
+	if _, err := h.m.Run("install"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.Remove(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(h.binary()); !os.IsNotExist(err) {
+		t.Fatal("the signed binary remains")
+	}
+	if _, err := h.m.Remove(); err != nil {
+		t.Fatalf("removing again: %v", err)
+	}
+}
