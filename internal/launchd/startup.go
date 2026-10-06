@@ -1,6 +1,7 @@
 package launchd
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -108,8 +109,14 @@ func (s *startupState) file(name string, create bool) (*os.File, error) {
 	return f, nil
 }
 
-func (s *startupState) disabled() (bool, error) {
-	f, err := s.file("startup.disabled", false)
+// Uninstall disables first-use startup until install; stop pauses it until start.
+const (
+	disabledMarker = "startup.disabled"
+	stoppedMarker  = "startup.stopped"
+)
+
+func (s *startupState) marked(name string) (bool, error) {
+	f, err := s.file(name, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -119,20 +126,63 @@ func (s *startupState) disabled() (bool, error) {
 	return true, f.Close()
 }
 
-func (s *startupState) disable() error {
-	f, err := s.file("startup.disabled", true)
+func (s *startupState) mark(name string) error {
+	f, err := s.file(name, true)
 	if err != nil {
 		return err
 	}
 	return f.Close()
 }
 
-func (s *startupState) enable() error {
-	disabled, err := s.disabled()
-	if err != nil || !disabled {
+func (s *startupState) unmark(name string) error {
+	marked, err := s.marked(name)
+	if err != nil || !marked {
 		return err
 	}
-	return s.root.Remove("startup.disabled")
+	return s.root.Remove(name)
+}
+
+// blocked explains why first-use startup must not run, or returns nil.
+func (s *startupState) blocked() error {
+	for _, marker := range []struct {
+		name   string
+		reason error
+	}{{disabledMarker, errStartupDisabled}, {stoppedMarker, errStartupStopped}} {
+		if marked, err := s.marked(marker.name); err != nil || marked {
+			return cmp.Or(err, marker.reason)
+		}
+	}
+	return nil
+}
+
+// resume clears a stop, but never an uninstall.
+func resume(home string, timeout time.Duration) error {
+	state, err := lockStartup(home, timeout)
+	if err != nil {
+		return err
+	}
+	defer state.close()
+	if disabled, err := state.marked(disabledMarker); err != nil || disabled {
+		return cmp.Or(err, errors.New("automatic startup was removed by `keyward service uninstall`; turn it back on with `keyward service install`"))
+	}
+	return state.unmark(stoppedMarker)
+}
+
+// ClearStopped ends a stop when the daemon starts another way, such as at login.
+// A busy lock means a service command is already handling startup.
+func ClearStopped(home string) error {
+	state, err := lockStartup(home, time.Millisecond)
+	if err != nil {
+		return err
+	}
+	defer state.close()
+	return state.unmark(stoppedMarker)
+}
+
+// stopped reads the marker without creating startup state, for status.
+func stopped(home string) bool {
+	_, err := os.Lstat(filepath.Join(filepath.Dir(daemon.DefaultSocket(home)), stoppedMarker))
+	return err == nil
 }
 
 func (s *startupState) close() {
@@ -142,7 +192,19 @@ func (s *startupState) close() {
 	s.root.Close()
 }
 
-var errStartupDisabled = errors.New("automatic startup is disabled; enable it with `keyward service install`")
+var (
+	errStartupDisabled = errors.New("automatic startup is disabled; enable it with `keyward service install`")
+	errStartupStopped  = errors.New("the daemon was stopped with `keyward service stop`; start it with `keyward service start`")
+)
+
+const (
+	runningMessage     = "✓ Keyward daemon is running and starts at login."
+	notRunningMessage  = "Keyward daemon is not running. Start it with: keyward service install"
+	stoppedStatus      = "Keyward daemon is stopped. Start it with: keyward service start"
+	startedMessage     = "✓ Keyward daemon started."
+	stoppedMessage     = "✓ Keyward daemon stopped.\n  cap:// references won't resolve until you run: keyward service start\n  It also starts again at your next login."
+	uninstalledMessage = "✓ Keyward daemon stopped and removed from login startup.\n  Kept: the keyward command and your Keychain items.\n  Start it again with: keyward service install"
+)
 
 func (m Manager) waitReady() error {
 	deadline := time.Now().Add(startupTimeout(m.StartupTimeout))

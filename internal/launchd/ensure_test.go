@@ -42,6 +42,10 @@ func brewSetup(t *testing.T) *brewStartup {
 			h.ready = h.loaded
 			return nil
 		}
+		if args[0] == "bootout" && strings.HasSuffix(args[1], "/com.veilux-lab.keyward.homebrew") {
+			h.loaded, h.ready = false, false
+			return nil
+		}
 		if args[0] == "print" && (strings.HasSuffix(args[1], "/com.veilux-lab.keyward.homebrew") && h.loaded || strings.HasSuffix(args[1], "/com.nwokolo24.keyward") && h.signed) {
 			return nil
 		}

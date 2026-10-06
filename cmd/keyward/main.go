@@ -75,6 +75,10 @@ func main() {
 		Workdir:    workdir,
 		Record:     record,
 		Daemon: func() error {
+			if socket == daemon.DefaultSocket(home) && service == vault.DefaultService {
+				// Best effort: a stale stop only makes first use ask for `service start`.
+				_ = launchd.ClearStopped(home)
+			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return daemon.RunLogged(ctx, socket, vault.NewKeychainService(service), record)

@@ -32,7 +32,7 @@ func TestHomebrewServiceLifecycleDoesNotCopyOrSign(t *testing.T) {
 		}
 		return errors.New("not running")
 	}
-	if status, err := m.Run("status"); err != nil || !strings.Contains(status, "not loaded") {
+	if status, err := m.Run("status"); err != nil || !strings.Contains(status, "not running") {
 		t.Fatalf("initial status = %q, %v", status, err)
 	}
 	if _, err := m.Run("install"); err != nil {

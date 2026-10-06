@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -89,9 +90,11 @@ Development builds need a signed installation or a daemon running in a terminal.
 
 commands:
   daemon                hold Keychain access for the other commands
-  service install      install or restart daemon startup at login
-  service status       check whether the login agent is loaded
-  service uninstall    warn about restoration, then ask to remove startup
+  service install       install or restart daemon startup at login
+  service start         start the daemon after service stop
+  service stop          stop the daemon until service start or next login
+  service status        check whether the daemon is running
+  service uninstall     warn about restoration, then ask to remove startup
   add [-force] <name>   store a secret read from stdin
   ls                    list stored secret names
   rm <name>             remove a secret
@@ -198,22 +201,21 @@ func (c *CLI) dispatch(args []string) int {
 }
 
 func (c *CLI) service(args []string) int {
-	if len(args) != 1 || (args[0] != "install" && args[0] != "status" && args[0] != "uninstall") {
-		fmt.Fprintln(c.Stderr, "usage: keyward service install|status|uninstall")
+	if len(args) != 1 || !slices.Contains([]string{"install", "start", "stop", "status", "uninstall"}, args[0]) {
+		fmt.Fprintln(c.Stderr, "usage: keyward service install|start|stop|status|uninstall")
 		return exitUsage
 	}
 	if c.Service == nil {
 		return c.fail("keyward service: service manager is unavailable")
 	}
 	if args[0] == "uninstall" {
-		if _, err := fmt.Fprint(c.Stderr, "Warning: stopping Keyward leaves cap:// references unresolved while the daemon is stopped.\n"+
-			"If you want secrets returned to your files, cancel and run restore BEFORE uninstalling or deleting Keyward.\n"+
-			"For example, select the files you migrated:\n"+
+		if _, err := fmt.Fprint(c.Stderr, c.errs(yellow, "Warning: while Keyward is stopped, cap:// references cannot be resolved.")+"\n\n"+
+			"To put secrets back into your files first, cancel and restore the files you migrated:\n"+
 			"  keyward restore --dry-run ~/.zshrc .env\n"+
 			"  keyward restore ~/.zshrc .env\n"+
-			"Check any skipped items. Restored files contain plaintext secrets again.\n"+
-			"Uninstall keeps the CLI and Keychain entries; it does not restore secrets.\n\n"+
-			"Type \"yes\" to stop the daemon and remove automatic startup, or anything else to cancel: "); err != nil {
+			"Restored files contain plaintext secrets again; check any skipped items.\n\n"+
+			"Uninstall keeps the keyward command and your Keychain items. It does not restore files.\n\n"+
+			c.errs(bold, `Type "yes" to stop the daemon and remove it from login startup:`)+" "); err != nil {
 			return exitFailure
 		}
 		ok, err := c.readConfirmation()
@@ -228,7 +230,7 @@ func (c *CLI) service(args []string) int {
 	if err != nil {
 		return c.fail("keyward service: %v", err)
 	}
-	fmt.Fprintln(c.Stdout, c.out(green, message))
+	fmt.Fprintln(c.Stdout, paintLines(c.ColorOut, message, map[string]string{"✓": green}))
 	return exitOK
 }
 

@@ -94,7 +94,7 @@ func TestSignedInstallLifecycle(t *testing.T) {
 	if _, err := m.Run("uninstall"); err != nil {
 		t.Fatal(err)
 	}
-	if status, err := m.Run("status"); err != nil || !strings.Contains(status, "not loaded") {
+	if status, err := m.Run("status"); err != nil || !strings.Contains(status, "not running") {
 		t.Fatalf("uninstalled status = %q, %v", status, err)
 	}
 	t.Log("launchd restart, persistence, and uninstall succeeded")

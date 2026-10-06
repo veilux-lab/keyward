@@ -46,19 +46,45 @@ func (m Manager) Run(action string) (string, error) {
 	switch action {
 	case "status":
 		if err := m.command("/bin/launchctl", "print", target); err != nil {
-			return "daemon is not loaded; start it with `keyward service install`", nil
+			if stopped(m.Home) {
+				return stoppedStatus, nil
+			}
+			return notRunningMessage, nil
 		}
 		if err := m.ready(); err != nil {
 			return "", fmt.Errorf("login agent is loaded but the daemon is not responding; check Library/Logs/keyward/activity.jsonl: %w", err)
 		}
-		return "daemon is running and starts automatically at login", nil
+		return runningMessage, nil
+	case "start":
+		if err := resume(m.Home, m.StartupTimeout); err != nil {
+			return "", err
+		}
+		if err := m.Ensure(); err != nil {
+			return "", err
+		}
+		return startedMessage, nil
+	case "stop":
+		state, err := lockStartup(m.Home, m.StartupTimeout)
+		if err != nil {
+			return "", err
+		}
+		defer state.close()
+		if err := state.mark(stoppedMarker); err != nil {
+			return "", err
+		}
+		if m.command("/bin/launchctl", "print", target) == nil {
+			if err := m.command("/bin/launchctl", "bootout", target); err != nil {
+				return "", err
+			}
+		}
+		return stoppedMessage, nil
 	case "install", "uninstall":
 		state, err := lockStartup(m.Home, m.StartupTimeout)
 		if err != nil {
 			return "", err
 		}
 		defer state.close()
-		if _, err := state.disabled(); err != nil {
+		if _, err := state.marked(disabledMarker); err != nil {
 			return "", err
 		}
 		if action == "install" {
@@ -67,12 +93,12 @@ func (m Manager) Run(action string) (string, error) {
 			}
 			message, err := m.install(plist, domain, target)
 			if err == nil {
-				err = state.enable()
+				err = errors.Join(state.unmark(disabledMarker), state.unmark(stoppedMarker))
 			}
 			return message, err
 		}
 		// Record the opt-out before stopping, so a failed state write leaves startup intact.
-		if err := state.disable(); err != nil {
+		if err := state.mark(disabledMarker); err != nil {
 			return "", err
 		}
 		if m.command("/bin/launchctl", "print", target) == nil {
@@ -83,9 +109,9 @@ func (m Manager) Run(action string) (string, error) {
 		if err := os.Remove(plist); err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
-		return "automatic startup removed; the CLI and Keychain items are kept", nil
+		return uninstalledMessage, nil
 	default:
-		return "", errors.New("usage: keyward service install|status|uninstall")
+		return "", errors.New("usage: keyward service install|start|stop|status|uninstall")
 	}
 }
 
@@ -130,12 +156,8 @@ func (m Manager) Ensure() error {
 	if m.ready() == nil {
 		return nil
 	}
-	disabled, err := state.disabled()
-	if err != nil {
+	if err := state.blocked(); err != nil {
 		return err
-	}
-	if disabled {
-		return errStartupDisabled
 	}
 	plist := filepath.Join(m.Home, "Library", "LaunchAgents", m.Label+".plist")
 	domain := fmt.Sprintf("gui/%d", m.UID)
@@ -238,7 +260,7 @@ func (m Manager) install(plist, domain, target string) (string, error) {
 	if err := m.waitReady(); err != nil {
 		return rollback(fmt.Errorf("installed daemon did not start: %w", err))
 	}
-	return fmt.Sprintf("installed %s\ndaemon starts now and at login; log: %s", binary, logPath), nil
+	return fmt.Sprintf("✓ Installed %s\n  The daemon is running and starts at login.\n  Activity log: %s", binary, logPath), nil
 }
 
 func (m Manager) socket() string {

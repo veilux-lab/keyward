@@ -332,7 +332,7 @@ func TestUninstallStopsAutomaticStartupAndKeepsCLI(t *testing.T) {
 func TestStatusAndInvalidActionDoNotWriteFiles(t *testing.T) {
 	h := setup(t)
 	status, err := h.m.Run("status")
-	if err != nil || !strings.Contains(status, "not loaded") {
+	if err != nil || !strings.Contains(status, "not running") {
 		t.Fatalf("status = %q, %v", status, err)
 	}
 	if _, err := h.m.Run("unknown"); err == nil {

@@ -117,7 +117,7 @@ func TestVersion(t *testing.T) {
 }
 
 func TestServiceActions(t *testing.T) {
-	for _, action := range []string{"install", "status", "uninstall"} {
+	for _, action := range []string{"install", "start", "stop", "status", "uninstall"} {
 		t.Run(action, func(t *testing.T) {
 			h := newHarness(t, "yes\n", nil, nil)
 			h.cli.Service = func(got string) (string, error) {
