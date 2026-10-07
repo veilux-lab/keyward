@@ -3,6 +3,7 @@
 | Document | What it covers |
 | --- | --- |
 | [install.md](install.md) | Everyday commands, migration, restoration, signed local setup, and logs |
+| [homebrew-101.md](homebrew-101.md) | Homebrew basics and how Keyward is packaged, with diagrams, for explaining it to others |
 | [homebrew.md](homebrew.md) | Homebrew setup, upgrades, switching taps, and releases |
 | [releases.md](releases.md) | Automated releases, bottles, versions, and optional signed downloads |
 | [mission.md](mission.md) | The problem, the invariant, and what keyward deliberately is not |
