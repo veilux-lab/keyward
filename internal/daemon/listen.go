@@ -12,6 +12,9 @@ import (
 
 // DefaultSocket returns where the daemon listens unless KEYWARD_SOCKET says
 // otherwise.
+// ErrRunning means another daemon already holds the socket.
+var ErrRunning = errors.New("a keyward daemon is already running")
+
 func DefaultSocket(home string) string {
 	return filepath.Join(home, "Library", "Application Support", "keyward", "daemon.sock")
 }
@@ -47,7 +50,7 @@ func listen(path string) (*listener, error) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		lock.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, fmt.Errorf("a keyward daemon is already running on %s", path)
+			return nil, fmt.Errorf("%w on %s", ErrRunning, path)
 		}
 		return nil, err
 	}

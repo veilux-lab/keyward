@@ -20,6 +20,7 @@ import (
 
 	"github.com/veilux-lab/keyward/internal/activity"
 	"github.com/veilux-lab/keyward/internal/backup"
+	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/doctor"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/migrate"
@@ -93,12 +94,11 @@ const usage = `usage: keyward <command> [arguments]
 Secrets live in the macOS Keychain. Config files hold cap://<name> references
 instead of values, so an agent reading them finds nothing worth having.
 
-Only the daemon touches the Keychain; the other commands ask it. Installed services
-start on first vault use. Start now or re-enable with keyward service install.
-Development builds need a signed installation or a daemon running in a terminal.
+Only a background daemon touches the Keychain; the other commands ask it. An
+installed daemon starts on first use and at login. Start it now, or re-enable it,
+with keyward service install.
 
 commands:
-  daemon                hold Keychain access for the other commands
   service install       install or restart daemon startup at login
   service start         start the daemon after service stop
   service stop          stop the daemon until service start or next login
@@ -119,6 +119,10 @@ commands:
   doctor [file...]      check references against what is stored
   version               print the version
   help                  print this message
+
+advanced:
+  daemon                run the Keychain daemon in this terminal; installed copies
+                        start it for you, so use this only for development builds
 
 Options may go before or after a command's arguments; -- ends them. Everything
 after run's command belongs to that command.
@@ -347,6 +351,9 @@ func (c *CLI) daemon(args []string) int {
 		return c.fail("keyward daemon: not available in this build")
 	}
 	if err := c.Daemon(); err != nil {
+		if errors.Is(err, daemon.ErrRunning) {
+			return c.fail("keyward daemon: the daemon is already running, so there is nothing to start.\n  Check it with: keyward service status")
+		}
 		return c.fail("keyward daemon: %v", err)
 	}
 	return exitOK

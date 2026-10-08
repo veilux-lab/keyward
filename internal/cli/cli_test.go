@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/cli"
+	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
@@ -179,6 +181,28 @@ func TestDaemonFailureIsReported(t *testing.T) {
 	}
 	if !strings.Contains(h.err(), "already running") {
 		t.Errorf("stderr = %q, want the reason", h.err())
+	}
+}
+
+// The service usually runs the daemon already; say how to check rather than fail obscurely.
+func TestDaemonAlreadyRunningPointsToServiceStatus(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Daemon = func() error { return fmt.Errorf("listening: %w", daemon.ErrRunning) }
+	if code := h.cli.Run([]string{"daemon"}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(h.err(), "already running") || !strings.Contains(h.err(), "keyward service status") {
+		t.Errorf("stderr = %q, want a pointer to service status", h.err())
+	}
+}
+
+// Most users never run the daemon themselves, so help lists it last.
+func TestHelpListsDaemonAsAdvanced(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Run([]string{"help"})
+	advanced := strings.Index(h.out(), "advanced:")
+	if advanced < 0 || strings.Index(h.out(), "\n  daemon ") < advanced {
+		t.Errorf("daemon is not under an advanced section:\n%s", h.out())
 	}
 }
 

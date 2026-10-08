@@ -183,8 +183,8 @@ func TestOnlyOneDaemonAtATime(t *testing.T) {
 	if second, err := daemon.Listen(path); err == nil {
 		second.Close()
 		t.Fatal("a second daemon started on the same socket")
-	} else if !strings.Contains(err.Error(), "already running") {
-		t.Errorf("error = %v, want it to say one is already running", err)
+	} else if !errors.Is(err, daemon.ErrRunning) {
+		t.Errorf("error = %v, want daemon.ErrRunning", err)
 	}
 }
 
