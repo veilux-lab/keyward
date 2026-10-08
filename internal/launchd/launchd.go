@@ -115,6 +115,23 @@ func (m Manager) Run(action string) (string, error) {
 	}
 }
 
+// Restart relaunches the login agent so it runs the installed build.
+func (m Manager) Restart() error {
+	var err error
+	if m, err = m.normalized(); err != nil {
+		return err
+	}
+	state, err := lockStartup(m.Home, m.StartupTimeout)
+	if err != nil {
+		return err
+	}
+	defer state.close()
+	if err := m.command("/bin/launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/%s", m.UID, m.Label)); err != nil {
+		return err
+	}
+	return m.waitReady()
+}
+
 // Remove deletes the signed CLI that install copied into ~/.local/bin.
 func (m Manager) Remove() (string, error) {
 	binary := filepath.Join(m.Home, ".local", "bin", "keyward")

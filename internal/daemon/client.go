@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 
@@ -15,6 +16,9 @@ import (
 
 // ErrNotRunning means nothing is listening on the socket.
 var ErrNotRunning = errors.New("the keyward daemon is not running")
+
+// ErrOutdated means the running daemon is another build, typically from before an upgrade.
+var ErrOutdated = errors.New("the keyward daemon is outdated")
 
 // DefaultTimeout is how long a client waits for an answer. Long, because the
 // daemon may be waiting on a person to approve a Keychain prompt.
@@ -29,6 +33,14 @@ type Client struct {
 
 	// Start recovers a missing listener for vault requests. Ping never calls it.
 	Start func() error
+
+	// Version is this CLI's build. A daemon reporting another is replaced through
+	// Restart before any vault request; "dev" and empty skip the check.
+	Version string
+	Restart func() error
+
+	mu      sync.Mutex
+	checked bool
 }
 
 var _ vault.Store = (*Client)(nil)
@@ -70,6 +82,51 @@ func (c *Client) Entries() ([]vault.Entry, error) {
 }
 
 func (c *Client) do(req request) (response, error) {
+	if req.Op != "ping" {
+		if err := c.current(); err != nil {
+			return response{}, err
+		}
+	}
+	return c.send(req)
+}
+
+// current replaces an outdated daemon before a request reaches it. Homebrew keeps
+// the old daemon running across an upgrade, and it can lose Keychain access.
+func (c *Client) current() error {
+	if c.Version == "" || c.Version == "dev" {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.checked {
+		return nil
+	}
+	resp, err := c.send(request{Op: "ping"})
+	if err != nil {
+		// Nothing usable is listening; the request starts or reports that itself.
+		return nil
+	}
+	if resp.Version != c.Version {
+		running := resp.Version
+		if running == "" {
+			running = "an older version"
+		}
+		if c.Restart == nil {
+			return fmt.Errorf("%w: it runs %s and this keyward is %s; restart it with `keyward service install`", ErrOutdated, running, c.Version)
+		}
+		if err := c.Restart(); err != nil {
+			return fmt.Errorf("restarting the outdated keyward daemon (%s): %w; run `keyward service install`", running, err)
+		}
+		// Another installation may own the socket; restarting again would not help.
+		if resp, err := c.send(request{Op: "ping"}); err != nil || resp.Version != c.Version {
+			return fmt.Errorf("%w: it still runs %s after a restart; check `keyward service status`", ErrOutdated, running)
+		}
+	}
+	c.checked = true
+	return nil
+}
+
+func (c *Client) send(req request) (response, error) {
 	conn, err := net.DialTimeout("unix", c.Path, 2*time.Second)
 	if err != nil && req.Op != "ping" && c.Start != nil && notRunning(err) {
 		if err := c.Start(); err != nil {

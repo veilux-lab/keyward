@@ -69,12 +69,13 @@ uninstall` when you want it to stay disabled.
 
 ```sh
 brew upgrade veilux-lab/keyward/keyward
-keyward service install
 ```
 
-The second command restarts the daemon. A changed daemon, bottled or built from
-source, may prompt for macOS approval to read previously stored Keychain items.
-Homebrew upgrades do not promise prompt-free daemon restarts. The Homebrew daemon uses the default
+Homebrew leaves the old daemon running, and it can lose Keychain access once its
+files are replaced. From `v0.1.10`, the next `keyward` command notices the version
+difference and restarts the daemon before sending anything; earlier releases need
+`keyward service install`. The new daemon may prompt once for macOS approval to
+read previously stored Keychain items. The Homebrew daemon uses the default
 [logging limits](install.md#activity-logs); environment overrides on an individual
 CLI do not configure that service.
 

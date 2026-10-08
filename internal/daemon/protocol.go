@@ -26,6 +26,8 @@ type request struct {
 }
 
 type response struct {
+	// Version answers ping, so a client can tell an outdated daemon apart.
+	Version string        `json:"version,omitempty"`
 	Value   []byte        `json:"value,omitempty"`
 	Entries []vault.Entry `json:"entries,omitempty"`
 

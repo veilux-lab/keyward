@@ -98,6 +98,20 @@ func (h Homebrew) Run(action string) (string, error) {
 	}
 }
 
+// Restart replaces a daemon left running from before `brew upgrade`.
+func (h Homebrew) Restart() error {
+	state, err := lockStartup(h.Home, h.StartupTimeout)
+	if err != nil {
+		return err
+	}
+	defer state.close()
+	m := h.manager()
+	if err := m.command(h.Brew, "services", "restart", homebrewFormula); err != nil {
+		return err
+	}
+	return m.waitReady()
+}
+
 // Remove uninstalls the formula and its tap, which brew cannot do from a formula.
 func (h Homebrew) Remove() (string, error) {
 	m := h.manager()

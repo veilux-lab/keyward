@@ -57,6 +57,8 @@ func setup(t *testing.T) *harness {
 			}
 		case "bootout":
 			h.loaded = false
+		case "kickstart":
+			h.loaded = true
 		case "bootstrap":
 			if h.failNextBootstrap {
 				h.failNextBootstrap = false

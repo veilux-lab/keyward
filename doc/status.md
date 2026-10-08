@@ -163,6 +163,13 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-08 (restart after upgrade)** — `brew upgrade` left the old daemon
+running; with its files replaced, a Keychain read failed with OSStatus 100002.
+The daemon now reports its version on ping, and the CLI checks it once before its
+first vault request. A different version is restarted through `brew services
+restart` or `launchctl kickstart -k`, then checked again; development builds skip
+the check. Without a managed restart, the error names `keyward service install`.
+
 **2026-10-06 (uninstall and caveats, prepared)** — `keyward uninstall` asks for `yes`,
 stops the daemon, deletes local state, backups, and default logs, then removes the
 Homebrew formula and tap or the signed CLI. Keychain items are kept. A plain

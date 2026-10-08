@@ -127,3 +127,31 @@ func TestSignedRemoveDeletesTheInstalledBinary(t *testing.T) {
 		t.Fatalf("removing again: %v", err)
 	}
 }
+
+func TestHomebrewRestartReplacesTheRunningDaemon(t *testing.T) {
+	h := brewSetup(t)
+	if _, err := h.m.Run("install"); err != nil {
+		t.Fatal(err)
+	}
+	h.calls = nil
+	if err := h.m.Restart(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(h.calls, "\n"); !strings.Contains(got, "brew services restart veilux-lab/keyward/keyward") {
+		t.Fatalf("calls:\n%s", got)
+	}
+}
+
+func TestSignedRestartKickstartsTheLoginAgent(t *testing.T) {
+	h := setup(t)
+	if _, err := h.m.Run("install"); err != nil {
+		t.Fatal(err)
+	}
+	h.calls = nil
+	if err := h.m.Restart(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(h.calls, "\n"); !strings.Contains(got, "launchctl kickstart -k gui/501/com.nwokolo24.keyward") {
+		t.Fatalf("calls:\n%s", got)
+	}
+}

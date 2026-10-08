@@ -27,6 +27,9 @@ const shutdownGrace = time.Second
 type Server struct {
 	Store vault.Store
 
+	// Version is the build that serves; ping reports it.
+	Version string
+
 	// Authorize vets each connection before it is read. Nil means the peer must be
 	// the same user as the daemon.
 	Authorize func(net.Conn) error
@@ -40,6 +43,9 @@ type Server struct {
 	mu          sync.Mutex
 	connections map[net.Conn]struct{}
 }
+
+// Version is the running build, set by main; Run's server reports it.
+var Version = "dev"
 
 // Run serves store on path until ctx is cancelled.
 func Run(ctx context.Context, path string, store vault.Store, log io.Writer) error {
@@ -59,7 +65,7 @@ func run(ctx context.Context, path string, store vault.Store, log io.Writer, rec
 	stop := context.AfterFunc(ctx, l.stopAccepting)
 	defer stop()
 
-	s := &Server{Store: store, Log: log, Record: record}
+	s := &Server{Store: store, Log: log, Record: record, Version: Version}
 	s.logf("listening on %s", path)
 	s.event("start", "", "ok", 0)
 	err = s.Serve(l)
@@ -174,7 +180,7 @@ func (s *Server) dispatch(req request) response {
 	var err error
 	switch req.Op {
 	case "ping":
-		return response{}
+		return response{Version: s.Version}
 	case "get":
 		var secret vault.Secret
 		if secret, err = s.Store.Get(req.Name); err == nil {

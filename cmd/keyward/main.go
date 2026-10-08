@@ -26,6 +26,7 @@ import (
 var homebrewExecutable string
 
 func main() {
+	daemon.Version = cli.Version
 	// KEYWARD_SERVICE scopes the daemon's Keychain items to a different service
 	// name, and KEYWARD_SOCKET moves the socket, so the tool can be tried out
 	// without touching real entries.
@@ -116,14 +117,16 @@ func main() {
 }
 
 func managedClient(home, socket, service, brew string) *daemon.Client {
-	client := &daemon.Client{Path: socket}
+	client := &daemon.Client{Path: socket, Version: cli.Version}
 	if socket != daemon.DefaultSocket(home) || service != vault.DefaultService {
 		return client
 	}
 	if brew != "" {
-		client.Start = (launchd.Homebrew{Home: home, UID: os.Getuid(), Brew: brew}).Ensure
+		h := launchd.Homebrew{Home: home, UID: os.Getuid(), Brew: brew}
+		client.Start, client.Restart = h.Ensure, h.Restart
 	} else {
-		client.Start = (launchd.Manager{Home: home, UID: os.Getuid()}).Ensure
+		m := launchd.Manager{Home: home, UID: os.Getuid()}
+		client.Start, client.Restart = m.Ensure, m.Restart
 	}
 	return client
 }

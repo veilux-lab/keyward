@@ -28,12 +28,13 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      The Keyward daemon starts on first use, then at every login.
-        Start now or after an upgrade:  keyward service install
-        Pause access:                   keyward service stop
-        Remove everything:              keyward uninstall
-      Use these rather than the brew services lines below. An upgrade may ask
-      once for Keychain access.
+      The Keyward daemon starts on first use, then at every login. After an
+      upgrade, the next keyward command restarts it; macOS may ask once for
+      Keychain access.
+        Start now:          keyward service install
+        Pause access:       keyward service stop
+        Remove everything:  keyward uninstall
+      Use these rather than the brew services lines below.
     EOS
   end
 

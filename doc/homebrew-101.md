@@ -100,7 +100,7 @@ sequenceDiagram
 | Task | Command |
 | --- | --- |
 | Install | `brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git` then `brew install veilux-lab/keyward/keyward` |
-| Upgrade | `brew upgrade veilux-lab/keyward/keyward` then `keyward service install` |
+| Upgrade | `brew upgrade veilux-lab/keyward/keyward` (the next command restarts the daemon) |
 | Pause access | `keyward service stop` (resume with `keyward service start`) |
 | Remove everything | `keyward uninstall` (Keychain items are kept) |
 
