@@ -1,8 +1,12 @@
 # keyward
 
-Keep API keys and tokens out of the config files your coding tools read.
+**Your dotfiles are safe from the internet, not from your AI agents.**
 
-Keyward moves secrets into the macOS Keychain and leaves references in their place:
+`~/.zshrc`, `~/.bashrc`, `~/.profile` and `.env` files hold tokens that every
+agent working on your machine can read. Keyward moves those secrets into the
+macOS Keychain.
+
+Each value is replaced by a reference:
 
 ```sh
 export API_TOKEN='cap://api-token'
