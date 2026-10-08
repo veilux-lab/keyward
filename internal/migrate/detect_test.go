@@ -29,6 +29,11 @@ func TestDetectSecrets(t *testing.T) {
 		{"NPM_TOKEN", "npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"},
 		{"SIGNING_KEY", "-----BEGIN RSA PRIVATE KEY-----"},
 		{"DB_PASSWORD", "correct-horse-battery-staple-9271"},
+		// Short forms of password, matched as whole words of the name.
+		{"ACCOUNTS_DB_PW", "correct-horse-battery-staple-9271"},
+		{"DEV_DB_PASS", "correct-horse-battery-staple-9271"},
+		{"DB_PWD", "correct-horse-battery-staple-9271"},
+		{"GPG_PASSPHRASE", "correct-horse-battery-staple-9271"},
 		{"CLIENT_SECRET", "AbCdEfGhIjKlMnOpQrStUvWxYz012345"},
 		{"MY_SESSION_TOKEN", "9f8e7d6c5b4a39281706fedcba098765"},
 
@@ -57,6 +62,9 @@ func TestDetectNonSecrets(t *testing.T) {
 	}{
 		// Ordinary settings.
 		{"EDITOR", "vim"},
+		// PASS and PW only count as whole words of the name.
+		{"BYPASS_PROXY_HOSTS", "localhost,127.0.0.1,internal"},
+		{"PASSENGER_LIMIT", "approximately-forty-two"},
 		{"VISUAL", "code --wait"},
 		{"PAGER", "less"},
 		{"LANG", "en_US.UTF-8"},

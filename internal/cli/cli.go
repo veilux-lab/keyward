@@ -454,7 +454,7 @@ func (c *CLI) migrate(args []string) int {
 	}))
 
 	if *dryRun {
-		fmt.Fprintf(c.Stdout, "\n%s\n", c.out(cyan, "Dry run: nothing was changed."))
+		fmt.Fprintf(c.Stdout, "\n%s\n%s", c.out(cyan, "Dry run: nothing was changed."), runReminder)
 		return exitOK
 	}
 
@@ -477,9 +477,15 @@ func (c *CLI) migrate(args []string) int {
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Plaintext backup of the original: %s\n", applied.BackupPath)
 	fmt.Fprintf(c.Stdout, "  It holds the old values. Remove it once the new file works: keyward backups rm %s\n", plan.Path)
-	fmt.Fprintf(c.Stdout, "\nRun commands that need these values through keyward, for example:\n  keyward run -- your-command\n")
+	fmt.Fprint(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward:\n"+
+		"  keyward run -- npm test\n  keyward run -- code .    # an editor, and the tools it starts\n"+
+		"Started any other way, a program sees the cap:// reference instead of the value.\n")
 	return exitOK
 }
+
+// runReminder says what changes for programs once the values are references.
+const runReminder = "After migrating, programs that read these variables must start through\n" +
+	"keyward run, for example `keyward run -- npm test`; otherwise they see cap:// references.\n"
 
 // confirmWord is the only accepted answer. Compared exactly, so a hurried "y" or a
 // capitalised "Yes" does not rewrite a shell config.
@@ -493,6 +499,7 @@ const confirmWord = "yes"
 func (c *CLI) confirm(count int, path string) (bool, error) {
 	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into the Keychain?\n", count, path)
 	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is first copied to a private backup.\n")
+	fmt.Fprintf(c.Stderr, "  Afterwards, start commands that use these values as: keyward run -- <command>\n")
 	fmt.Fprintf(c.Stderr, "  %s\n\n  Enter a value: ", c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord)))
 	return c.readConfirmation()
 }

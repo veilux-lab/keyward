@@ -71,6 +71,10 @@ var nameHints = []string{
 	"SESSION_KEY", "CLIENT_SECRET", "AUTH", "WEBHOOK", "_KEY", "KEY_",
 }
 
+// nameWords are password abbreviations, matched only as whole words between
+// underscores so BYPASS_PROXY_HOSTS and PASSENGER_LIMIT do not match.
+var nameWords = map[string]bool{"PW": true, "PWD": true, "PASS": true, "PASSPHRASE": true}
+
 // safeNames are variables that must never be migrated, whatever they contain.
 //
 // Several would otherwise be caught by the name heuristic. SSH_AUTH_SOCK is the
@@ -185,6 +189,11 @@ func hasNameHint(name string) bool {
 	upper := strings.ToUpper(name)
 	for _, h := range nameHints {
 		if strings.Contains(upper, h) {
+			return true
+		}
+	}
+	for _, word := range strings.Split(upper, "_") {
+		if nameWords[word] {
 			return true
 		}
 	}

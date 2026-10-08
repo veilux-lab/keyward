@@ -1125,3 +1125,23 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// After migration, programs see cap:// references unless keyward run starts them.
+func TestMigrateExplainsKeywardRunAtEveryStep(t *testing.T) {
+	path := writeFixture(t, rcFixture)
+	h := newHarness(t, "", nil, nil)
+	h.cli.Run([]string{"migrate", "--dry-run", path})
+	if !strings.Contains(h.out(), "keyward run --") {
+		t.Errorf("dry run does not explain keyward run:\n%s", h.out())
+	}
+
+	h = newHarness(t, "yes\n", nil, nil)
+	h.cli.Run([]string{"migrate", path})
+	prompt := h.err()[:strings.Index(h.err(), "Enter a value")]
+	if !strings.Contains(prompt, "keyward run --") {
+		t.Errorf("the confirmation does not explain keyward run:\n%s", h.err())
+	}
+	if !strings.Contains(h.out(), "keyward run -- code .") {
+		t.Errorf("the result does not show launching an editor:\n%s", h.out())
+	}
+}

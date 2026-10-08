@@ -163,6 +163,13 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-08 (password names, keyward run guidance)** — Names with the whole words
+`PW`, `PWD`, `PASS`, or `PASSPHRASE` now count as credentials; `BYPASS_…` and
+`PASSENGER_…` do not. A real `~/.zshrc` dry run had left `ACCOUNTS_DB_PW` and
+`DEV_DB_PASS` alone. The dry run, confirmation, and result now say that programs
+need `keyward run --` after migration, including editors. A blank line seen in
+that dry run was not in Keyward's output.
+
 **2026-10-08 (restart after upgrade)** — `brew upgrade` left the old daemon
 running; with its files replaced, a Keychain read failed with OSStatus 100002.
 The daemon now reports its version on ping, and the CLI checks it once before its
