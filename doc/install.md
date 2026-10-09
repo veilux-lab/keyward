@@ -74,7 +74,8 @@ preserves the file mode. The original is first saved to an encrypted backup (mod
 tools read; its key is in the Keychain. `keyward backups` lists backups,
 `keyward backups recover <file>` writes the latest one beside the file in plaintext
 after asking, and `keyward backups rm <file>...` or `--all` removes backups and
-their keys. Remove them once the migrated file works.
+their keys. Remove them once the migrated file works. `keyward doctor` reminds you
+while any remain, including plaintext backups from earlier releases.
 
 Setting keyward up writes `~/.agents/keyward.md`, telling AI agents to run
 commands that need credentials through `keyward run` and never to print a value.
@@ -86,9 +87,10 @@ edits those files itself. `keyward agents` writes the file and prints the lines 
 demand, for example with a daemon run by hand, and `keyward doctor` reminds you
 while an installed agent does not read it. `keyward uninstall` removes the file
 and names the agent files that still point at it. A `~/.agents/keyward.md` that
-keyward did not write is never replaced or removed. `keyward doctor` reminds you
-while any remain, including plaintext backups from earlier releases. Open a new terminal
-after migration so exported variables contain references rather than the old values.
+keyward did not write is never replaced or removed.
+
+Open a new terminal after migration so exported variables contain references
+rather than the old values.
 
 Options may come before or after a command's arguments, so
 `keyward migrate ~/.zshrc --dry-run` works; `--` ends options.

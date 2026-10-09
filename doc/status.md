@@ -5,7 +5,8 @@ Last updated: 2026-10-09
 ## Where things stand
 
 The tool works end to end on the real Keychain. `add`, `ls`, `rm`, `run`,
-`migrate`, `restore`, `doctor`, `daemon`, and `service` are implemented. The daemon is the only
+`migrate`, `restore`, `backups`, `agents`, `doctor`, `daemon`, `service`,
+`uninstall`, and `version` are implemented. The daemon is the only
 process that touches the Keychain, so CLI rebuilds never prompt. `make install`
 builds and signs the CLI with a per-user login agent. The project no longer builds
 a companion app. Use `keyward service status`, `install`, and `uninstall` for
@@ -30,9 +31,9 @@ were backed up under ignored `bin/retired-homebrew-tap`. Existing old installati
 can switch using their local tap checkout.
 
 Public release
-[`v0.1.4`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.4) is the
-current formula; it matches `v0.1.3` apart from documentation and the release
-workflow. `v0.1.3` added first-use daemon startup, the optional
+[`v0.1.11`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.11), published
+2026-10-08, is the current formula, with a prebuilt Apple Silicon bottle.
+`v0.1.3` added first-use daemon startup, the optional
 `brew keyward-install --start-daemon` installer, and CLI-only local installation.
 Checks and commands without vault calls leave the daemon stopped; explicit service
 uninstall disables first-use startup until service install re-enables it. Custom
@@ -47,17 +48,12 @@ and the bot's formula update (`db15932`). Pushes that change only Markdown or
 stay optional behind `KEYWARD_SIGNED_RELEASES=true`; an end-to-end signed CI
 release remains untested.
 
-Prebuilt Apple Silicon Homebrew bottles are prepared locally and await an
-approved push. CI builds the bottle, pours it through the formula, merges it into
-the release formula, and refuses to publish without it. Installing from a bottle
-needs no Go, so `brew install` stops upgrading the user's Go. The bottle embeds
-`/opt/homebrew`, so custom prefixes still build from source. The first CI attempt
-([run 37411212115](https://github.com/veilux-lab/keyward/actions/runs/37411212115))
-published nothing. On ARM, `brew uninstall` dropped the formula's trust before the
-merge; a local probe reproduced that and confirmed that trusting again fixes it.
-On Intel, Homebrew 7 has no Go bottle (Tier 3), so the formula cannot build there.
-Intel is no longer bottled, and Intel Homebrew installation is unsupported until
-Go is built from source.
+Releases include a prebuilt Apple Silicon bottle: CI builds it, pours it through
+the formula, merges it into the release formula, and refuses to publish without it.
+Installing from a bottle needs no Go. The bottle embeds `/opt/homebrew`, so custom
+prefixes still build from source. On Intel, Homebrew 7 has no Go bottle (Tier 3),
+so the formula cannot build there, and Intel Homebrew installation is unsupported
+until Go is built from source.
 
 First install on a second Mac (macOS 27.0, Homebrew 7.0.7, no earlier Keyward)
 is in progress. `brew tap` printed two "not trusted" warnings and skipped the
@@ -94,15 +90,17 @@ handled; see [obstacles.md](obstacles.md) 2a.
 | `vault.Secret` | **Done** | Redacts through every fmt verb and through JSON. Proven by test. |
 | `vault.Store` | **Done** | Interface plus sentinel errors. The seam that keeps everything above it testable. |
 | `vault.Memory` | **Done** | In-process fake, concurrency-safe, passes the contract suite under `-race`. |
-| `vault/vaulttest` | **Done** | Contract suite. The real Keychain store will be held to exactly this. |
+| `vault/vaulttest` | **Done** | Contract suite. The real Keychain store is held to exactly this. |
 | Keychain store | **Done** | cgo against `SecItem*`. Passes the same contract suite as the fake, plus persistence and service-isolation tests. `make test-integration`. |
 | `internal/resolve` | **Done** | Environment scanning, caching, all-or-nothing resolution, aggregate errors. 100% covered. |
 | `internal/activity` | **Done** | Private JSONL metadata, 30 days / 50 MiB defaults, daily / 10 MiB rotation, cross-process locking, legacy log retention, configurable limits. |
 | `internal/audit` | Not started | Tamper-evident history remains separate from activity logging. |
-| `cmd/keyward` | **Done** | `add`, `ls`, `rm`, `run`. Logic in `internal/cli` with store, streams, environ, and exec injected. |
-| `internal/migrate` | **Done** | Scan, detect, `Plan`, `Apply`. Dry run by default, redacted diff, backup, atomic write, idempotent. |
+| `cmd/keyward` | **Done** | Every command. Logic in `internal/cli` with store, streams, environ, and exec injected. |
+| `internal/migrate` | **Done** | Scan, detect, `Plan`, `Apply`. Redacted plan, then an exact `yes`; `--dry-run` previews. Encrypted backup, atomic write, idempotent. |
+| `internal/backup` | **Done** | AES-256-GCM backups with a per-backup key in the vault; `recover` and `rm`, which deletes the key first. |
+| `internal/agents` | **Done** | Writes `~/.agents/keyward.md` at setup; migrate, doctor, and uninstall say how to link or unlink agents. |
 | `internal/restore` | **Done** | Separate explicit command; redacted plan for selected files, mandatory exact `yes`, metadata-only dry run, best-effort atomic private writes, retained Keychain entries. Uninstall warns users to restore first and requires confirmation before stopping startup. |
-| `internal/mcpconfig` | Not started | Needs `run` to exist and work. |
+| `internal/mcpconfig` | Not started | Nothing gates it. |
 | `keyward shell` | Not started | Independent of the above. |
 | `internal/daemon` | **Done** | The only Keychain caller; the CLI is a client over a same-user Unix socket. CLI rebuilds never prompt; shutdown is bounded and availability can be checked without reading items. First-use managed startup shipped in `v0.1.3`; requests are not replayed. |
 | `internal/launchd` | **Done** | Signed CLI installed in `~/.local/bin`; daemon running with login startup configured. The isolated CLI-only lifecycle test passed in 3.54s for signed upgrade, reads and replacement, launchd restart, persistence, and uninstall. First-use startup and persistent explicit disabling shipped in `v0.1.3`. |

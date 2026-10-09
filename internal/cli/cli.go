@@ -72,7 +72,7 @@ type CLI struct {
 	// Injected because it binds a socket and owns the real Keychain.
 	Daemon func() error
 
-	// Backups holds migrate's private plaintext copies of the originals.
+	// Backups holds migrate's encrypted copies of the originals.
 	Backups backup.Dir
 
 	// DataDirs are deleted by uninstall; empty for isolated instances.

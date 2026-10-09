@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/veilux-lab/keyward/internal/activity"
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/vault"
@@ -224,7 +225,7 @@ func TestRunStopsWhenCancelled(t *testing.T) {
 	path := socketPath(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- daemon.Run(ctx, path, vault.NewMemory(), nil) }()
+	go func() { done <- daemon.RunLogged(ctx, path, vault.NewMemory(), nil) }()
 
 	c := &daemon.Client{Path: path}
 	waitFor(t, func() bool { _, err := c.Entries(); return err == nil })
@@ -251,7 +252,7 @@ func TestRunStopsWithBlockedRequest(t *testing.T) {
 	defer close(release)
 	entered := make(chan struct{})
 	done := make(chan error, 1)
-	go func() { done <- daemon.Run(ctx, path, shutdownStore{entered: entered, release: release}, nil) }()
+	go func() { done <- daemon.RunLogged(ctx, path, shutdownStore{entered: entered, release: release}, nil) }()
 	waitFor(t, func() bool { _, err := os.Stat(path); return err == nil })
 
 	clientDone := make(chan error, 1)
@@ -335,11 +336,14 @@ func TestShutdownFinishesRequestsWithinGracePeriod(t *testing.T) {
 // What the daemon writes down
 // ===========================================================================
 
-// The log is for seeing who asked for what. Names, never values.
-func TestLogNamesButNeverValues(t *testing.T) {
+// The activity record is for seeing who asked for what. Names, never values.
+func TestActivityNamesButNeverValues(t *testing.T) {
 	const value = "ghp_neverInTheLog0123456789"
-	var log syncBuffer
-	c := start(t, &daemon.Server{Store: vault.NewMemory(), Log: &log})
+	var events syncBuffer
+	c := start(t, &daemon.Server{Store: vault.NewMemory(), Record: func(e activity.Event) {
+		data, _ := json.Marshal(e)
+		events.Write(append(data, '\n'))
+	}})
 
 	if err := c.Put("github-token", vault.NewSecret([]byte(value)), ""); err != nil {
 		t.Fatalf("Put: %v", err)
@@ -347,12 +351,12 @@ func TestLogNamesButNeverValues(t *testing.T) {
 	if _, err := c.Get("github-token"); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	out := log.String()
+	out := events.String()
 	if !strings.Contains(out, "github-token") {
-		t.Errorf("log does not name the secret:\n%s", out)
+		t.Errorf("activity does not name the secret:\n%s", out)
 	}
 	if strings.Contains(out, value) {
-		t.Errorf("log contains the value:\n%s", out)
+		t.Errorf("activity contains the value:\n%s", out)
 	}
 }
 

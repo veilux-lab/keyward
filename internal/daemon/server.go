@@ -34,9 +34,6 @@ type Server struct {
 	// the same user as the daemon.
 	Authorize func(net.Conn) error
 
-	// Log receives one line per request: operation, name, outcome. Never values.
-	// Nil discards.
-	Log    io.Writer
 	Record func(activity.Event)
 
 	wg          sync.WaitGroup
@@ -44,19 +41,11 @@ type Server struct {
 	connections map[net.Conn]struct{}
 }
 
-// Version is the running build, set by main; Run's server reports it.
+// Version is the running build, set by main; the server reports it on ping.
 var Version = "dev"
 
-// Run serves store on path until ctx is cancelled.
-func Run(ctx context.Context, path string, store vault.Store, log io.Writer) error {
-	return run(ctx, path, store, log, nil)
-}
-
+// RunLogged serves store on path until ctx is cancelled, recording each request.
 func RunLogged(ctx context.Context, path string, store vault.Store, record func(activity.Event)) error {
-	return run(ctx, path, store, nil, record)
-}
-
-func run(ctx context.Context, path string, store vault.Store, log io.Writer, record func(activity.Event)) error {
 	l, err := listen(path)
 	if err != nil {
 		return err
@@ -65,11 +54,9 @@ func run(ctx context.Context, path string, store vault.Store, log io.Writer, rec
 	stop := context.AfterFunc(ctx, l.stopAccepting)
 	defer stop()
 
-	s := &Server{Store: store, Log: log, Record: record, Version: Version}
-	s.logf("listening on %s", path)
+	s := &Server{Store: store, Record: record, Version: Version}
 	s.event("start", "", "ok", 0)
 	err = s.Serve(l)
-	s.logf("stopped")
 	s.event("stop", "", "ok", 0)
 	return err
 }
@@ -114,7 +101,6 @@ func (s *Server) drain() {
 	case <-done:
 		return
 	case <-timer.C:
-		s.logf("shutdown interrupted pending requests; unfinished writes may have taken effect")
 		s.event("shutdown", "", "interrupted", 0)
 	}
 	s.mu.Lock()
@@ -134,7 +120,6 @@ func (s *Server) handle(conn net.Conn) {
 	}
 	if err := authorize(conn); err != nil {
 		s.event("connection", "", "denied", 0)
-		s.logf("refused a connection: %v", err)
 		s.reply(conn, errorResponse(fmt.Errorf("%w: the daemon refused the connection", vault.ErrDenied)))
 		return
 	}
@@ -142,7 +127,6 @@ func (s *Server) handle(conn net.Conn) {
 	var req request
 	if err := json.NewDecoder(io.LimitReader(conn, maxMessage)).Decode(&req); err != nil {
 		s.event("request", "", "invalid", 0)
-		s.logf("unreadable request: %v", err)
 		s.reply(conn, errorResponse(errors.New("the daemon could not read the request")))
 		return
 	}
@@ -151,10 +135,6 @@ func (s *Server) handle(conn net.Conn) {
 	start := time.Now()
 	resp := s.dispatch(req)
 	clear(req.Value)
-	outcome := "ok"
-	if resp.Code != "" {
-		outcome = resp.Code
-	}
 	op := req.Op
 	switch op {
 	case "ping":
@@ -169,7 +149,6 @@ func (s *Server) handle(conn net.Conn) {
 	if invalid != nil || resp.Code != "" {
 		name = ""
 	}
-	s.logf("%s %s: %s", op, name, outcome)
 	s.event(op, name, activity.Outcome(resp.err()), time.Since(start).Milliseconds())
 
 	s.reply(conn, resp)
@@ -215,7 +194,6 @@ func (s *Server) reply(conn net.Conn, resp response) {
 	conn.SetWriteDeadline(time.Now().Add(ioTimeout))
 	if err := json.NewEncoder(conn).Encode(resp); err != nil {
 		s.event("reply", "", "error", 0)
-		s.logf("could not reply: %v", err)
 	}
 }
 
@@ -223,11 +201,4 @@ func (s *Server) event(op, name, outcome string, duration int64) {
 	if s.Record != nil {
 		s.Record(activity.Event{Command: "daemon", Operation: op, Name: name, Outcome: outcome, DurationMS: duration})
 	}
-}
-
-func (s *Server) logf(format string, args ...any) {
-	if s.Log == nil {
-		return
-	}
-	fmt.Fprintf(s.Log, "%s %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
 }

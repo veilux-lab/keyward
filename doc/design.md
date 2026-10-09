@@ -22,12 +22,15 @@ credentials that are not there.
 | `internal/activity` | Private JSONL activity and bounded history | Implemented; 30 days / 50 MiB defaults |
 | `internal/audit` | Tamper-evident audit history | Not started |
 | `internal/migrate` | Detect secrets in a file, rewrite to references | Implemented |
+| `internal/backup` | Encrypted backups of migrated originals, keys in the vault | Implemented |
 | `internal/restore` | Return current referenced values to explicitly selected files | Implemented; exact `yes` required |
 | `internal/mcpconfig` | Rewrite MCP server configs to launch via keyward | Not started |
 | `cmd/keyward` | CLI surface | Implemented |
 | `internal/daemon` | Own Keychain access behind a same-user socket | Implemented |
 | `internal/doctor` | Report on references and stored metadata | Implemented |
 | `internal/launchd` | Signed local installation and per-user startup | Implemented and tested on this Mac |
+| `internal/homebrew` | Formula and release tooling | Implemented |
+| `internal/agents` | `~/.agents/keyward.md`, instructions for AI agents | Implemented |
 
 ## The reference format
 
@@ -139,7 +142,7 @@ Restoration remains an explicit, separate command. `keyward service uninstall`
 warns that references need a running daemon and shows restore/preview examples
 before asking for lowercase `yes` to stop the daemon and remove startup. Refusing
 keeps the service available so the user can restore first. Uninstall neither
-retrieves values nor restores files, and retains the CLI, app, and Keychain items.
+retrieves values nor restores files, and retains the CLI and Keychain items.
 It also disables first-use startup until an explicit `keyward service install`.
 
 ### Secrets you want in an interactive shell
@@ -214,7 +217,8 @@ in order of importance:
 HASP writes its own encrypted vault with `golang.org/x/crypto` because it
 supports Linux. keyward is macOS-only and therefore should not:
 
-- No cryptography to implement, review, or get wrong.
+- No vault cryptography to implement, review, or get wrong. The one use of
+  cryptography, encrypting migrate backups, is standard-library AES-256-GCM.
 - Per-item ACLs come free from the OS.
 - Access-control flags open the door to biometric gating later.
 
@@ -242,7 +246,6 @@ installation bootstraps its existing LaunchAgent; it never installs or signs a
 development build on first use. Custom sockets or Keychain service names keep
 manual startup. A private disabled marker records explicit service uninstall, so
 first use cannot undo the user's choice. Explicit service install re-enables it.
-These changes are prepared for the next source release.
 
 Direct access from a separately built, equally signed command-line process was
 also verified on 2026-10-02: it read, replaced, and deleted daemon-created dummy
@@ -326,8 +329,8 @@ cgo and the real Keychain resist unit testing, so the seam is an interface:
 
 - `vault.Store` is an interface. All logic is tested against an in-memory fake.
 - The cgo implementation stays thin enough to be nearly declarative.
-- One build-tagged integration test exercises the real Keychain and is excluded
-  from `make test`, keeping the default loop fast.
+- Build-tagged integration tests exercise the real Keychain and launchd and are
+  excluded from `make test`, keeping the default loop fast.
 
 ## Open design questions
 

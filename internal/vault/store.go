@@ -45,8 +45,8 @@ type Entry struct {
 	// means nothing recorded it — which is itself information: a secret added by
 	// hand was created deliberately, and should never be mistaken for a leftover.
 	//
-	// Keychain attributes are readable more freely than values, so a note may only
-	// ever hold a path. Never anything sensitive.
+	// Keychain attributes are readable more freely than values, so a note holds
+	// only a path or a short description. Never anything sensitive.
 	Note string
 }
 

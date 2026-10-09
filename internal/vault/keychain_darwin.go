@@ -252,11 +252,6 @@ type Keychain struct {
 	service string
 }
 
-// NewKeychain returns a store using DefaultService.
-func NewKeychain() *Keychain {
-	return &Keychain{service: DefaultService}
-}
-
 // NewKeychainService returns a store scoped to an explicit service name, which is
 // how tests stay isolated from real entries.
 func NewKeychainService(service string) *Keychain {

@@ -121,7 +121,8 @@ What remains:
   ID signing for prompt-free daemon upgrades; Developer ID itself remains untested.
   A free Personal Team certificate cannot be used to distribute the daemon to
   other people; that requires Developer ID and the paid Apple Developer Programme.
-- The daemon must be running. Without it, commands fail at once with a message
+- The daemon must be running. Installed builds start it on first use; with a
+  custom socket or a development build, commands fail at once with a message
   saying how to start it, so they never hang.
 - The ACL no longer separates keyward from other processes the user runs. See
   [design.md](design.md), "One process touches the Keychain".
@@ -348,9 +349,8 @@ different value. `Plan.Check` now demotes that conflict to a skip and names
 `keyward rm` as the fix, so it is visible and recoverable rather than a failure
 after approval.
 
-The proper answer is a reconciliation command — `keyward doctor`, or `ls --orphaned`
-— that compares vault entries against the references found in known config files.
-Not built.
+`keyward doctor` is the reconciliation: it compares vault entries against the
+references in known config files and reports orphans, without deleting anything.
 
 ## 3. Migration friction is the real project risk
 
@@ -372,8 +372,8 @@ The Keychain layer cannot be unit tested meaningfully: it touches real OS state,
 may prompt, and pollutes the developer's own Keychain.
 
 Approach: `vault.Store` as an interface, all logic tested against an in-memory
-fake, the cgo implementation kept thin enough to be nearly declarative, and one
-build-tagged integration test excluded from `make test`.
+fake, the cgo implementation kept thin enough to be nearly declarative, and
+build-tagged integration tests excluded from `make test`.
 
 The discipline part is resisting the urge to put logic in the cgo layer because
 it is convenient. Anything untested there is untested forever.
@@ -384,8 +384,8 @@ it is convenient. Anything untested there is untested forever.
 
 Buffers can be zeroed, but Go's garbage collector copies and moves values, so a
 secret may persist in memory the program no longer references. `keyward` should
-not claim values are unrecoverable from process memory. The README states this
-rather than implying stronger protection than exists.
+not claim values are unrecoverable from process memory. `vault.Secret.Destroy`
+says so (internal/vault/secret.go) rather than implying stronger protection.
 
 Related: never write a value to stderr. AWS documents that SDKs capture and log
 stderr, and the same applies to anything wrapping keyward.

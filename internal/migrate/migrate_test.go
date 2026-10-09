@@ -649,22 +649,18 @@ func TestApplyOnEmptyPlanChangesNothing(t *testing.T) {
 // already in the vault by this point, which is the safe direction: nothing is
 // lost, and re-running once the directory is writable finishes the job.
 func TestApplyStopsWhenTheBackupCannotBeWritten(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".zshrc")
-	if err := os.WriteFile(path, []byte(rcFile), 0o644); err != nil {
-		t.Fatalf("writing the fixture: %v", err)
-	}
-
+	path := writeRC(t, rcFile)
 	p := mustReadPlan(t, path)
 	store := vault.NewMemory()
 
-	// Read and execute, but not write: the backup cannot be created.
-	if err := os.Chmod(dir, 0o500); err != nil {
+	// The backup directory cannot be created inside a read-only parent.
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o500); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	t.Cleanup(func() { os.Chmod(parent, 0o700) })
 
-	_, err := p.Apply(store, backups(t))
+	_, err := p.Apply(store, backup.Dir{Path: filepath.Join(parent, "backups")})
 	if err == nil {
 		t.Fatal("Apply succeeded with an unwritable directory")
 	}

@@ -70,7 +70,7 @@ Source-built Homebrew installations use a separate service: stop that installati
 with keyward service uninstall before installing this signed CLI.
 
 Before uninstalling, use keyward restore for any files where you want plaintext
-values returned, then keyward service uninstall. Keychain items are retained.
+values returned, then keyward uninstall. Keychain items are retained.
 https://github.com/veilux-lab/keyward/blob/main/doc/install.md
 TEXT
 dmg="$signing_dir/keyward-$version-darwin-universal.dmg"

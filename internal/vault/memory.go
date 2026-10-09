@@ -140,7 +140,8 @@ func (s *Memory) Seed(values map[string]string) error {
 //
 // The Keychain listing encodes name and note into one string per entry, so a
 // separator inside a note could split a record and mislabel a different secret.
-// Replacing them is enough: a note is a path, and a path needs none of these.
+// Replacing them is enough: a note is a path or a short description, which needs
+// none of these.
 func SanitizeNote(note string) string {
 	return strings.Map(func(r rune) rune {
 		switch r {
