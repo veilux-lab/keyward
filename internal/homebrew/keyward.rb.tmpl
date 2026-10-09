@@ -28,9 +28,9 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      The Keyward daemon starts on first use, then at every login. After an
-      upgrade, the next keyward command restarts it; macOS may ask once for
-      Keychain access.
+      The Keyward daemon starts on first use, then at every login, and writes
+      ~/.agents/keyward.md, instructions for AI agents. After an upgrade, the
+      next keyward command restarts it; macOS may ask once for Keychain access.
         Start now:          keyward service install
         Pause access:       keyward service stop
         Remove everything:  keyward uninstall

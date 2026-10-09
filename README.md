@@ -25,8 +25,9 @@ brew install veilux-lab/keyward/keyward
 
 Run the `brew tap` line first; without it, `brew install` fails with "Repository
 not found". Homebrew warns that the tap is not trusted, then trusts only this
-formula. Installing changes no files and moves no secrets; the daemon starts on
-first use. Upgrades may ask once for Keychain access.
+formula. Installing changes no files and moves no secrets. On first use the daemon
+starts and keyward writes `~/.agents/keyward.md`, instructions for AI agents.
+Upgrades may ask once for Keychain access.
 
 Intel Macs: build it yourself. Homebrew no longer ships Go for Intel, so the
 formula cannot build there. With [Go](https://go.dev/dl/) and Apple's command line
@@ -48,6 +49,7 @@ keyward migrate ~/.zshrc             # asks for "yes"
 keyward run -- npm test
 pbpaste | keyward add api-token
 keyward ls                           # names only
+keyward agents                       # instructions for AI agents, and how to link them
 keyward doctor
 ```
 

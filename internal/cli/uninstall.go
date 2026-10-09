@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/veilux-lab/keyward/internal/agents"
 )
 
 // uninstall removes Keyward's startup, local data, and package, keeping Keychain items.
@@ -27,6 +29,15 @@ func (c *CLI) uninstall(args []string) int {
 	}
 	if len(found) > 0 {
 		fmt.Fprintf(&plan, "  %d backup(s) from migrate, and their keys\n", len(found))
+	}
+	agentFile := agents.Default(c.Home)
+	ownsAgentFile := false
+	if c.Home != "" {
+		st, _ := agentFile.Status()
+		ownsAgentFile = st == agents.Current || st == agents.Outdated
+	}
+	if ownsAgentFile {
+		fmt.Fprintf(&plan, "  %s, the instructions for AI agents\n", agents.Display)
 	}
 	if c.RemovePackage != nil {
 		plan.WriteString("  the keyward package\n")
@@ -55,6 +66,10 @@ func (c *CLI) uninstall(args []string) int {
 	for _, dir := range c.DataDirs {
 		err = errors.Join(err, os.RemoveAll(dir))
 	}
+	if ownsAgentFile {
+		_, rmErr := agentFile.Remove()
+		err = errors.Join(err, rmErr)
+	}
 	if err != nil {
 		return c.fail("keyward uninstall: removing local data: %v; the package was kept", err)
 	}
@@ -68,6 +83,12 @@ func (c *CLI) uninstall(args []string) int {
 			return c.fail("keyward uninstall: local data was removed, but removing the package failed: %v", err)
 		}
 		lines = append(lines, "  "+removed)
+	}
+	if c.Home != "" {
+		// Their files are the user's to edit; keyward only says where.
+		for _, config := range agents.Linked(c.Home) {
+			lines = append(lines, "  Remove the keyward.md line from "+config)
+		}
 	}
 	fmt.Fprintln(c.Stdout, paintLines(c.ColorOut, strings.Join(lines, "\n"), map[string]string{"✓": green}))
 	return exitOK

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/veilux-lab/keyward/internal/agents"
 )
 
 type removal struct {
@@ -146,5 +148,41 @@ func TestUninstallDeletesBackupKeysBeforeStoppingTheDaemon(t *testing.T) {
 	}
 	if code := r.h.cli.Run([]string{"uninstall"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, r.h.err())
+	}
+}
+
+func TestUninstallRemovesKeywardsAgentFileAndNamesConfigsThatPointAtIt(t *testing.T) {
+	r := uninstallFixture(t, "yes\n")
+	home := homed(t, r.h)
+	if err := agents.Default(home).Write(); err != nil {
+		t.Fatal(err)
+	}
+	claude := filepath.Join(home, ".claude", "CLAUDE.md")
+	os.MkdirAll(filepath.Dir(claude), 0o755)
+	os.WriteFile(claude, []byte("@~/.agents/keyward.md\n"), 0o644)
+	if code := r.h.cli.Run([]string{"uninstall"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, r.h.err())
+	}
+	if _, err := os.Stat(agentFile(home)); !os.IsNotExist(err) {
+		t.Error("the agent instructions survived uninstall")
+	}
+	if !strings.Contains(r.h.err(), agents.Display) {
+		t.Errorf("the plan did not list the agent instructions:\n%s", r.h.err())
+	}
+	if !strings.Contains(r.h.out(), claude) {
+		t.Errorf("uninstall did not name the agent config still pointing at the file:\n%s", r.h.out())
+	}
+}
+
+func TestUninstallKeepsAUsersOwnAgentFile(t *testing.T) {
+	r := uninstallFixture(t, "yes\n")
+	home := homed(t, r.h)
+	os.MkdirAll(filepath.Dir(agentFile(home)), 0o755)
+	os.WriteFile(agentFile(home), []byte("my notes\n"), 0o644)
+	if code := r.h.cli.Run([]string{"uninstall"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, r.h.err())
+	}
+	if _, err := os.Stat(agentFile(home)); err != nil {
+		t.Error("uninstall removed a file keyward did not write")
 	}
 }

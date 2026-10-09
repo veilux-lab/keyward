@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/agents"
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/cli"
 	"github.com/veilux-lab/keyward/internal/daemon"
@@ -87,7 +88,14 @@ func main() {
 			defer stop()
 			return daemon.RunLogged(ctx, socket, vault.NewKeychainService(service), record)
 		},
-		Service: func(action string) (string, error) {
+		Service: func(action string) (out string, err error) {
+			if action == "install" {
+				defer func() {
+					if err == nil {
+						writeAgentFile(home)
+					}
+				}()
+			}
 			if homebrewExecutable != "" {
 				if socket != daemon.DefaultSocket(home) || service != vault.DefaultService {
 					return "", fmt.Errorf("Homebrew startup uses the default socket and Keychain service; run `keyward daemon` directly for an isolated instance")
@@ -123,10 +131,30 @@ func managedClient(home, socket, service, brew string) *daemon.Client {
 	}
 	if brew != "" {
 		h := launchd.Homebrew{Home: home, UID: os.Getuid(), Brew: brew}
-		client.Start, client.Restart = h.Ensure, h.Restart
+		client.Start, client.Restart = withAgentFile(home, h.Ensure), withAgentFile(home, h.Restart)
 	} else {
 		m := launchd.Manager{Home: home, UID: os.Getuid()}
-		client.Start, client.Restart = m.Ensure, m.Restart
+		client.Start, client.Restart = withAgentFile(home, m.Ensure), withAgentFile(home, m.Restart)
 	}
 	return client
+}
+
+// withAgentFile writes the agent instructions when the daemon is first started or
+// restarted after an upgrade. Homebrew's install step cannot: it is sandboxed away
+// from the home directory.
+func withAgentFile(home string, start func() error) func() error {
+	return func() error {
+		err := start()
+		if err == nil {
+			writeAgentFile(home)
+		}
+		return err
+	}
+}
+
+// writeAgentFile is best effort; a file keyward did not write is left alone.
+func writeAgentFile(home string) {
+	if home != "" {
+		_ = agents.Default(home).Write()
+	}
 }

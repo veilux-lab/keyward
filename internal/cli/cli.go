@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/agents"
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/doctor"
@@ -117,6 +118,7 @@ commands:
   backups               list migrate's encrypted backups
   backups rm <file>...  remove backups of files, and their keys (or --all)
   backups recover <f>   write a file's latest backup beside it, in plaintext
+  agents                write ~/.agents/keyward.md, instructions for AI agents
   doctor [file...]      check references against what is stored
   version               print the version
   help                  print this message
@@ -157,7 +159,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "doctor", "daemon", "service", "help", "version":
+	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "doctor", "daemon", "service", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -208,6 +210,8 @@ func (c *CLI) dispatch(args []string) int {
 		return c.restore(args[1:])
 	case "backups":
 		return c.backups(args[1:])
+	case "agents":
+		return c.agents(args[1:])
 	case "doctor":
 		return c.doctor(args[1:])
 	case "daemon":
@@ -484,6 +488,7 @@ func (c *CLI) migrate(args []string) int {
 	fmt.Fprint(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward:\n"+
 		"  keyward run -- npm test\n  keyward run -- code .    # an editor, and the tools it starts\n"+
 		"Started any other way, a program sees the cap:// reference instead of the value.\n")
+	c.agentNextSteps()
 	return exitOK
 }
 
@@ -548,6 +553,9 @@ func (c *CLI) doctor(args []string) int {
 		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check for backups: %v", err)))
 	} else if len(found) > 0 {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
+	}
+	if n := c.unlinkedAgents(); n > 0 {
+		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d installed AI agent(s) do not read %s; run keyward agents", n, agents.Display)))
 	}
 	if report.HasProblems() {
 		return exitFailure

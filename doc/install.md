@@ -74,7 +74,19 @@ preserves the file mode. The original is first saved to an encrypted backup (mod
 tools read; its key is in the Keychain. `keyward backups` lists backups,
 `keyward backups recover <file>` writes the latest one beside the file in plaintext
 after asking, and `keyward backups rm <file>...` or `--all` removes backups and
-their keys. Remove them once the migrated file works. `keyward doctor` reminds you
+their keys. Remove them once the migrated file works.
+
+Setting keyward up writes `~/.agents/keyward.md`, telling AI agents to run
+commands that need credentials through `keyward run` and never to print a value.
+That happens when the daemon first starts, when it restarts after an upgrade, and
+on `keyward service install`; Homebrew's own install step is sandboxed away from
+the home directory. After migrating, keyward prints the line to add to each
+installed agent's global instructions (Claude Code, Codex, Gemini CLI); it never
+edits those files itself. `keyward agents` writes the file and prints the lines on
+demand, for example with a daemon run by hand, and `keyward doctor` reminds you
+while an installed agent does not read it. `keyward uninstall` removes the file
+and names the agent files that still point at it. A `~/.agents/keyward.md` that
+keyward did not write is never replaced or removed. `keyward doctor` reminds you
 while any remain, including plaintext backups from earlier releases. Open a new terminal
 after migration so exported variables contain references rather than the old values.
 

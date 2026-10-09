@@ -163,6 +163,15 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-09 (agent instructions)** — keyward writes `~/.agents/keyward.md` when
+the daemon first starts or restarts after an upgrade, and on `service install`,
+because Homebrew's install step cannot write to the home directory. Migrate then
+prints the line to add to each installed agent's global instructions, since no
+single file is read by every agent. Fixed text, so it never needs a user's variable
+names; agents find references with `grep 'cap://'`. `keyward agents` does both on
+demand, `doctor` reminds while an agent is not pointed at it, and `uninstall`
+removes the file. A file keyward did not write is never replaced or removed.
+
 **2026-10-09 (encrypted backups)** — Migrate backups are encrypted with a per-backup
 AES-256-GCM key held in the vault, because `0600` does not keep out an agent running
 as the same user. `keyward backups rm` deletes the key first, `keyward backups
