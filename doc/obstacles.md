@@ -115,7 +115,10 @@ What remains:
 
 - Rebuilding the **daemon** hits the original problem. Measured: restarting the same
   daemon binary reads its items with no prompt. A rebuilt daemon lists names without
-  a prompt, but each read blocks on a dialog, once per item. A self-signed
+  a prompt, but each read blocks on a dialog, once per item: 33 dialogs after a real
+  Homebrew upgrade on 2026-10-09. The encrypted vault (2026-10-09, see
+  [design.md](design.md)) leaves one Keychain item, its key, so an upgrade now asks
+  once. A self-signed
   certificate does not avoid it on macOS 27 (below). Apple Development signing
   with the same certificate does (tested below), which supports trying Developer
   ID signing for prompt-free daemon upgrades; Developer ID itself remains untested.

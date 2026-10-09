@@ -2,7 +2,7 @@
 # Secrets and tokens (keyward)
 
 Credentials in this user's shell files are `cap://name` references. The values are
-in the macOS Keychain, managed by keyward. A variable holding `cap://…` is a
+in keyward's encrypted vault, with its key in the macOS Keychain. A variable holding `cap://…` is a
 reference, not a broken value.
 
 - Find a variable's reference with `grep -n 'cap://' ~/.zshrc`, or in the file it

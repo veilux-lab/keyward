@@ -161,6 +161,17 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-09 (encrypted vault)** — Secrets move from one Keychain item each into
+`~/Library/Application Support/keyward-vault/keyward.vault`, every value sealed
+separately with AES-256-GCM under one key kept in the Keychain. A real Homebrew
+upgrade asked 33 times, once per secret, because each upgrade is a new program to
+the Keychain; it now asks once. The daemon reads the key on its first request and
+holds it in memory; listing and deleting need no key. Existing Keychain items move
+in on first use and are then deleted from the Keychain; a denied one stays listed
+and moves later. Uninstall keeps the vault. Passes the Store contract suite, a
+real-Keychain integration test, and an end-to-end daemon run under a throwaway
+service.
+
 **2026-10-09 (agent instructions)** — keyward writes `~/.agents/keyward.md` when
 the daemon first starts or restarts after an upgrade, and on `service install`,
 because Homebrew's install step cannot write to the home directory. Migrate then

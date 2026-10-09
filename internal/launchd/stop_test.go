@@ -91,7 +91,7 @@ func TestUninstallMessageNamesWhatIsKeptAndHowToReturn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		for _, want := range []string{"Kept:", "Keychain items", "keyward service install"} {
+		for _, want := range []string{"Kept:", "stored secrets", "keyward service install"} {
 			if !strings.Contains(message, want) {
 				t.Errorf("%s uninstall message lacks %q:\n%s", name, want, message)
 			}

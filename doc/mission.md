@@ -16,8 +16,9 @@ helpful tool.
 
 ## What keyward is
 
-A local secrets broker for a macOS developer machine. Secret values live in the
-Keychain. The files that used to hold them hold references instead:
+A local secrets broker for a macOS developer machine. Secret values live in an
+encrypted vault whose key the macOS Keychain holds. The files that used to hold
+them hold references instead:
 
 ```sh
 export SPLUNK_MCP_TOKEN='cap://splunk-mcp-token'

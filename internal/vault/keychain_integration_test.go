@@ -11,6 +11,7 @@ package vault_test
 import (
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/veilux-lab/keyward/internal/vault"
@@ -135,6 +136,34 @@ func TestKeychainDeletesItemsAnotherProgramCreated(t *testing.T) {
 	for _, e := range entries {
 		if e.Name == name {
 			t.Error("item still present after Delete")
+		}
+	}
+}
+
+// The vault with its key in the real Keychain, moving a legacy item in. Every item
+// here is created by this test binary, so nothing prompts.
+func TestEncryptedVaultWithTheRealKeychain(t *testing.T) {
+	keys := vault.NewKeychainService(testService + "-vault-key")
+	legacy := vault.NewKeychainService(testService)
+	t.Cleanup(func() {
+		_ = keys.Delete("master")
+		_ = legacy.Delete("kwtest-vault-legacy")
+	})
+	if err := legacy.Put("kwtest-vault-legacy", vault.NewSecret([]byte("legacy-value")), ""); err != nil {
+		t.Fatalf("seeding the legacy item: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "test.vault")
+	s := &vault.Encrypted{Path: path, Keys: keys, Legacy: legacy}
+	if err := s.Put("kwtest-vault-new", vault.NewSecret([]byte("new-value")), ""); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if left, _ := legacy.Entries(); len(left) != 0 {
+		t.Errorf("legacy items remain in the Keychain: %v", left)
+	}
+	restarted := &vault.Encrypted{Path: path, Keys: keys}
+	for name, want := range map[string]string{"kwtest-vault-new": "new-value", "kwtest-vault-legacy": "legacy-value"} {
+		if got, err := restarted.Get(name); err != nil || string(got.Bytes()) != want {
+			t.Errorf("Get %s after restart: %v", name, err)
 		}
 	}
 }

@@ -180,8 +180,7 @@ func TestForFileIncludesBackupsBesideTheOriginal(t *testing.T) {
 	}
 }
 
-// Deleting the key makes any copy of the file that survives elsewhere, such as a
-// Time Machine snapshot, unreadable.
+// Deleting the key makes the backup unreadable with the current vault.
 func TestRemoveDeletesTheBackupItsMetadataAndItsKey(t *testing.T) {
 	dir, store, path := fixture(t)
 	if _, err := dir.Save(store, path, []byte(original), time.Now()); err != nil {

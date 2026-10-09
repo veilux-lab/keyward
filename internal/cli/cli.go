@@ -106,7 +106,7 @@ commands:
   service status        check whether the daemon is running
   service uninstall     warn about restoration, then ask to remove startup
   uninstall             remove startup, local data, backups, and the package
-                        (asks first; Keychain items are kept)
+                        (asks first; stored secrets are kept)
   add [-force] <name>   store a secret read from stdin
   ls                    list stored secret names
   rm <name>             remove a secret
@@ -241,7 +241,7 @@ func (c *CLI) service(args []string) int {
 			"  keyward restore --dry-run ~/.zshrc .env\n"+
 			"  keyward restore ~/.zshrc .env\n"+
 			"Restored files contain plaintext secrets again; check any skipped items.\n\n"+
-			"Uninstall keeps the keyward command and your Keychain items. It does not restore files.\n\n"+
+			"Uninstall keeps the keyward command and your stored secrets. It does not restore files.\n\n"+
 			c.errs(bold, `Type "yes" to stop the daemon and remove it from login startup:`)+" "); err != nil {
 			return exitFailure
 		}

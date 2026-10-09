@@ -74,8 +74,9 @@ brew upgrade veilux-lab/keyward/keyward
 Homebrew leaves the old daemon running, and it can lose Keychain access once its
 files are replaced. From `v0.1.10`, the next `keyward` command notices the version
 difference and restarts the daemon before sending anything; earlier releases need
-`keyward service install`. The new daemon may prompt once for macOS approval to
-read previously stored Keychain items. The Homebrew daemon uses the default
+`keyward service install`. The new daemon asks once for macOS approval to read
+the vault key. The first daemon with the vault also moves secrets stored as
+separate Keychain items into it, which can ask once per item that one time. The Homebrew daemon uses the default
 [logging limits](install.md#activity-logs); environment overrides on an individual
 CLI do not configure that service.
 
@@ -96,7 +97,7 @@ keyward service status
 
 Run the first command with the old CLI, before removing it. Confirm its service
 shutdown warning with `yes`. Keep the existing `cap://` references; the stored
-items stay in your Keychain and can be used by the new daemon. This change needs
+secrets stay where they are and can be used by the new daemon. This change needs
 no restoration or second migration. The new build may prompt for Keychain access.
 Keep the old local tap until its service is stopped and formula removed. Removing
 it before adding the new tap also avoids updates against the deleted repository.
@@ -123,7 +124,7 @@ skips before removal. `keyward uninstall` stops the daemon, deletes
 `~/Library/Application Support/keyward` (including private backups), older
 backups beside the files doctor reads, and `~/Library/Logs/keyward`, then runs
 `brew uninstall` and `brew untap`. Formulas have no uninstall hook, so a plain
-`brew uninstall` leaves that data and the tap behind. Keychain items remain.
+`brew uninstall` leaves that data and the tap behind. Stored secrets remain.
 
 Homebrew always adds `brew services` lines to the caveats of a formula with a
 service. Use `keyward service install`, `stop`, and `start` instead: they keep

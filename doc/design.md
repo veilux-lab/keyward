@@ -4,7 +4,7 @@
 
 | Layer | Provides | Needs the agent to cooperate? |
 | --- | --- | --- |
-| **Migration** — values move to the Keychain, files hold references | Security | No |
+| **Migration** — values move to an encrypted vault, files hold references | Security | No |
 | **Cooperation** — MCP tools, generated agent instructions, useful errors | Productivity | Yes |
 
 Keeping these separate is the central idea. If migration is done, the security
@@ -17,7 +17,7 @@ credentials that are not there.
 | Package | Responsibility | State |
 | --- | --- | --- |
 | `internal/handle` | Parse, validate, and format `cap://` references | Implemented |
-| `internal/vault` | Keychain storage via cgo and Security.framework | Implemented |
+| `internal/vault` | Encrypted vault, with its key in the Keychain via cgo | Implemented |
 | `internal/resolve` | Scan an environment, resolve references to values | Implemented |
 | `internal/activity` | Private JSONL activity and bounded history | Implemented; 30 days / 50 MiB defaults |
 | `internal/audit` | Tamper-evident audit history | Not started |
@@ -115,8 +115,9 @@ undone exactly; `restore` rebuilds values but not the original quoting. Backups
 live in a private directory rather than beside the file, and are encrypted. File
 permissions cannot keep out an agent running as the same user, so a plaintext copy
 would be exactly what an agent reading the home directory finds. Each backup has
-its own AES-256-GCM key in the vault; `keyward backups rm` deletes the key first,
-which also makes copies elsewhere, such as Time Machine snapshots, unreadable.
+its own AES-256-GCM key in the vault; `keyward backups rm` deletes the key first.
+A copy elsewhere, such as in a Time Machine snapshot, can still be opened together
+with a vault copy from the same time and the vault key.
 
 ### Restoring before uninstall
 
@@ -142,7 +143,7 @@ Restoration remains an explicit, separate command. `keyward service uninstall`
 warns that references need a running daemon and shows restore/preview examples
 before asking for lowercase `yes` to stop the daemon and remove startup. Refusing
 keeps the service available so the user can restore first. Uninstall neither
-retrieves values nor restores files, and retains the CLI and Keychain items.
+retrieves values nor restores files, and retains the CLI and stored secrets.
 It also disables first-use startup until an explicit `keyward service install`.
 
 ### Secrets you want in an interactive shell
@@ -212,15 +213,29 @@ in order of importance:
 - **Plan-time approval** — agents already plan before acting, so approve the
   declared set of credentialed steps once.
 
-## Storage: Keychain, not a custom vault
+## Storage: an encrypted vault keyed by the Keychain
 
-HASP writes its own encrypted vault with `golang.org/x/crypto` because it
-supports Linux. keyward is macOS-only and therefore should not:
+Secrets live in `~/Library/Application Support/keyward-vault/keyward.vault`, each
+value sealed separately with standard-library AES-256-GCM and bound to its name.
+The only Keychain item is the vault's 256-bit key, under the service
+`keyward-vault-key`.
 
-- No vault cryptography to implement, review, or get wrong. The one use of
-  cryptography, encrypting migrate backups, is standard-library AES-256-GCM.
-- Per-item ACLs come free from the OS.
-- Access-control flags open the door to biometric gating later.
+The first design stored each secret as its own Keychain item. Keychain access is
+tied to the program that created an item, and an unsigned or Homebrew-built binary
+is a new program after every upgrade, so each upgrade asked once per secret: 33
+dialogs on a real migration. With one key there, an upgrade asks once. A
+Developer ID would also fix it, but needs the paid programme.
+
+- The daemon reads the key on its first request, not at startup, so a dialog never
+  appears at login. It then holds the key in memory and decrypts only the value a
+  request needs. Listing and deleting need no key, so they never ask.
+- Names and notes stay readable in the file, as Keychain attributes were.
+- Secrets stored as Keychain items before the vault move in on first use, and each
+  is deleted from the Keychain once the vault is saved. One the user denies stays,
+  still listed, and moves on a later request.
+- Cost: one access rule now covers every secret, the key sits in the daemon's
+  memory while it runs, and keyward owns the file format. Biometric gating would
+  now gate the one key.
 
 Do not shell out to `/usr/bin/security`. `security add-generic-password -w
 <value>` places the secret in `argv`, where `ps` can read it — self-defeating for
@@ -230,10 +245,10 @@ a secrets tool. Use cgo against `SecItemAdd` and `SecItemCopyMatching`.
 
 Keychain items trust the binary that created them, and an unsigned binary changes on
 every build ([obstacles.md](obstacles.md) 2a). So `keyward daemon` is the only
-process that calls the Keychain. Every other command asks it over a Unix socket that
-only the same user can open. The CLI can be rebuilt freely. Unsigned daemon
-rebuilds need per-item approval; rebuilding with the same Apple Development
-certificate preserves access on the tested Mac.
+process that reads the vault and its key. Every other command asks it over a Unix
+socket that only the same user can open. The CLI can be rebuilt freely. An unsigned
+daemon rebuild asks once, for the vault key; rebuilding with the same Apple
+Development certificate preserves access on the tested Mac.
 
 The managed client starts the installed daemon only when a vault operation finds
 the socket absent or refused. It then connects again before sending the request;
@@ -274,7 +289,8 @@ publisher identity.
 
 The cost: any process running as the user can ask the daemon for any secret by
 name, with no prompt. The Keychain ACL used to stop `/usr/bin/security` from
-reading a keyward value, and now a request over the socket gets it. That fits the
+reading a keyward value; it now protects the vault key the same way, but a request
+over the socket gets any value. That fits the
 cooperational model: the threat is an agent reading a file, not an agent working
 against the tool deliberately (obstacle 1). The daemon logs every request by name,
 so access can be seen, though nothing stops it.

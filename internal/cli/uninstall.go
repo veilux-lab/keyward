@@ -9,7 +9,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/agents"
 )
 
-// uninstall removes Keyward's startup, local data, and package, keeping Keychain items.
+// uninstall removes Keyward's startup, local data, and package, keeping stored secrets.
 func (c *CLI) uninstall(args []string) int {
 	if len(args) != 0 {
 		fmt.Fprintln(c.Stderr, "usage: keyward uninstall")
@@ -42,7 +42,7 @@ func (c *CLI) uninstall(args []string) int {
 	if c.RemovePackage != nil {
 		plan.WriteString("  the keyward package\n")
 	}
-	plan.WriteString("Kept: your Keychain items. Remove them first with keyward rm <name> if you want them gone.\n\n" +
+	plan.WriteString("Kept: your stored secrets, in the encrypted vault and its Keychain key. Remove them first with keyward rm <name> if you want them gone.\n\n" +
 		"To put secrets back into your files, cancel and run: keyward restore <file>...\n\n")
 	if _, err := fmt.Fprint(c.Stderr, plan.String()+c.errs(bold, `Type "yes" to remove Keyward:`)+" "); err != nil {
 		return exitFailure
@@ -74,7 +74,7 @@ func (c *CLI) uninstall(args []string) int {
 		return c.fail("keyward uninstall: removing local data: %v; the package was kept", err)
 	}
 	var lines []string
-	lines = append(lines, "✓ Keyward removed. Keychain items were kept.")
+	lines = append(lines, "✓ Keyward removed. Stored secrets were kept.")
 	if c.RemovePackage == nil {
 		lines = append(lines, "  This is a development build: delete this keyward binary yourself.")
 	} else {

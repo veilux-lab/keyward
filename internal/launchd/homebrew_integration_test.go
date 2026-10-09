@@ -53,12 +53,12 @@ func TestHomebrewBinaryRestartPersistence(t *testing.T) {
 		if err := stop(); err != nil {
 			t.Errorf("cleanup: %v", err)
 		}
-		_ = exec.Command("/usr/bin/security", "delete-generic-password", "-s", service, "-a", name).Run()
+		_ = exec.Command("/usr/bin/security", "delete-generic-password", "-s", service+"-vault-key", "-a", "master").Run()
 		os.RemoveAll(dir)
 	})
 	start := func() {
 		cmd = exec.Command(binary, "daemon")
-		cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin", "KEYWARD_SERVICE=" + service, "KEYWARD_SOCKET=" + socket, "KEYWARD_LOG_DIR=" + filepath.Join(dir, "logs")}
+		cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin", "KEYWARD_SERVICE=" + service, "KEYWARD_SOCKET=" + socket, "KEYWARD_VAULT=" + filepath.Join(dir, "test.vault"), "KEYWARD_LOG_DIR=" + filepath.Join(dir, "logs")}
 		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)

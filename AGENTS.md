@@ -1,7 +1,8 @@
 # Agent instructions
 
 keyward keeps secrets out of what AI coding agents read. It replaces values in rc
-files with `cap://name` references and stores the values in the macOS Keychain. Go
+files with `cap://name` references and stores the values in an encrypted vault
+whose key is in the macOS Keychain. Go
 and cgo, macOS only, MIT, a personal project.
 
 ## Start here
@@ -15,8 +16,9 @@ and cgo, macOS only, MIT, a personal project.
 ## How work is done
 
 - **Test first.** Write the test, watch it fail, then implement. Logic is tested
-  against `vault.Memory`. Only `internal/vault/keychain_darwin.go` touches the
-  Keychain, and it is held to the same contract suite (`vault/vaulttest`).
+  against `vault.Memory`. `vault.Encrypted` (the vault) and
+  `internal/vault/keychain_darwin.go` (which holds its key) are held to the same
+  contract suite (`vault/vaulttest`).
 - `make verify` must pass before every commit. Run `make test-integration` when
   the Keychain layer changes.
 - Keep comments short: say why, not what. Match the surrounding code. No dead code;
@@ -28,9 +30,10 @@ and cgo, macOS only, MIT, a personal project.
 - Never print, log, or put a secret value in argv; compare by hash. Errors must not
   quote values.
 - Never run `keyward migrate` against the owner's real files, or read their real
-  Keychain items, unless asked. Use `KEYWARD_SERVICE` (on the daemon) and
-  `KEYWARD_SOCKET` (on every command) to work under a throwaway service name, with
-  one or two dummy items, and delete them afterwards.
+  secrets, unless asked. Use `KEYWARD_SERVICE` and `KEYWARD_VAULT` (on the daemon)
+  and `KEYWARD_SOCKET` (on every command) to work under a throwaway service and
+  vault, with one or two dummy items. Afterwards delete the vault file and the
+  `<service>-vault-key` Keychain item.
 - Reading an item another build created puts up a dialog. Before any such test, tell
   the owner to click **Deny**, and time the read. "It finished" does not prove there
   was no dialog: only a read that succeeds in well under two seconds does.
@@ -50,8 +53,8 @@ codesign --force --sign "Apple Development: …" --identifier com.nwokolo24.keyw
 ```
 
 It is for local use only. Prebuilt Developer ID-signed and notarized distribution
-needs paid Apple membership. Source-built Homebrew distribution does not; daemon
-upgrades may require approval to read older Keychain items. See doc/homebrew.md.
+needs paid Apple membership. Source-built Homebrew distribution does not; each
+daemon upgrade asks once to read the vault key. See doc/homebrew.md.
 
 ## Git
 

@@ -203,7 +203,7 @@ const (
 	stoppedStatus      = "Keyward daemon is stopped. Start it with: keyward service start"
 	startedMessage     = "✓ Keyward daemon started."
 	stoppedMessage     = "✓ Keyward daemon stopped.\n  cap:// references won't resolve until you run: keyward service start\n  It also starts again at your next login."
-	uninstalledMessage = "✓ Keyward daemon stopped and removed from login startup.\n  Kept: the keyward command and your Keychain items.\n  Start it again with: keyward service install"
+	uninstalledMessage = "✓ Keyward daemon stopped and removed from login startup.\n  Kept: the keyward command and your stored secrets.\n  Start it again with: keyward service install"
 )
 
 func (m Manager) waitReady() error {

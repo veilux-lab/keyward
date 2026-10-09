@@ -92,7 +92,7 @@ func (h Homebrew) Run(action string) (string, error) {
 		if err := errors.Join(state.unmark(disabledMarker), state.unmark(stoppedMarker)); err != nil {
 			return "", err
 		}
-		return runningMessage + "\n  After an upgrade, macOS may ask once to let it read your Keychain items.", nil
+		return runningMessage + "\n  After an upgrade, macOS asks once to let it read the vault key.", nil
 	default:
 		return "", errors.New("usage: keyward service install|start|stop|status|uninstall")
 	}

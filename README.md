@@ -3,8 +3,8 @@
 **Your dotfiles are safe from the internet, not from your AI agents.**
 
 `~/.zshrc`, `~/.bashrc`, `~/.profile` and `.env` files hold tokens that every
-agent working on your machine can read. Keyward moves those secrets into the
-macOS Keychain.
+agent working on your machine can read. Keyward moves those secrets into an
+encrypted vault whose key is held in the macOS Keychain.
 
 Each value is replaced by a reference:
 
@@ -68,7 +68,7 @@ keyward restore ~/.zshrc .env   # writes plaintext back; asks for "yes"
 keyward uninstall               # removes startup, data, backups, and the package
 ```
 
-Keychain items are kept; remove them first with `keyward rm <name>` if you want
+Stored secrets are kept; remove them first with `keyward rm <name>` if you want
 them gone.
 
 ## What it protects

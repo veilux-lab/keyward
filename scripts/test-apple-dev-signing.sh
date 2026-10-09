@@ -1,5 +1,5 @@
 #!/bin/bash
-# Does a rebuilt daemon, signed with the same identity, read an item the previous
+# Does a rebuilt daemon, signed with the same identity, read the vault key the previous
 # build stored without a dialog? See doc/handoff-apple-development-signing.md.
 #
 # Usage: scripts/test-apple-dev-signing.sh "Apple Development: you@example.com (TEAMID)"
@@ -9,7 +9,7 @@ IDENTITY=${1:?usage: $0 "<codesigning identity from: security find-identity -v -
 cd "$(dirname "$0")/.." || exit 1
 
 T=$(mktemp -d /tmp/kwsig.XXXX) && chmod 700 "$T" || exit 1
-export KEYWARD_SOCKET="$T/d.sock" KEYWARD_SERVICE=keyward-signing-test
+export KEYWARD_SOCKET="$T/d.sock" KEYWARD_SERVICE=keyward-signing-test KEYWARD_VAULT="$T/test.vault"
 export KEYWARD_LOG_DIR="$T/logs"
 ITEM=signing-probe
 VALUE="not-a-real-secret-$RANDOM$RANDOM"
@@ -38,7 +38,7 @@ stopd() {
 # Deleting needs no authorisation, so cleanup never puts up a dialog.
 cleanup() {
 	stopd
-	/usr/bin/security delete-generic-password -s "$KEYWARD_SERVICE" -a "$ITEM" >/dev/null 2>&1
+	/usr/bin/security delete-generic-password -s "$KEYWARD_SERVICE-vault-key" -a master >/dev/null 2>&1
 	rm -rf "$T"
 }
 trap cleanup EXIT
@@ -84,7 +84,7 @@ if [ -z "$a" ] || [ "$a" = "$(cdhash kwd-b)" ]; then
 fi
 
 echo "== store one dummy item with kwd-a"
-/usr/bin/security delete-generic-password -s "$KEYWARD_SERVICE" -a "$ITEM" >/dev/null 2>&1
+/usr/bin/security delete-generic-password -s "$KEYWARD_SERVICE-vault-key" -a master >/dev/null 2>&1
 startd kwd-a || exit 1
 printf '%s' "$VALUE" | "$T/kw" add "$ITEM" || exit 1
 stopd

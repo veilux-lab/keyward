@@ -28,9 +28,9 @@ var homebrewExecutable string
 
 func main() {
 	daemon.Version = cli.Version
-	// KEYWARD_SERVICE scopes the daemon's Keychain items to a different service
-	// name, and KEYWARD_SOCKET moves the socket, so the tool can be tried out
-	// without touching real entries.
+	// KEYWARD_SERVICE scopes the daemon's vault and Keychain key to a different
+	// service name, KEYWARD_SOCKET moves the socket, and KEYWARD_VAULT the vault
+	// file, so the tool can be tried out without touching real entries.
 	service := os.Getenv("KEYWARD_SERVICE")
 	if service == "" {
 		service = vault.DefaultService
@@ -86,7 +86,14 @@ func main() {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return daemon.RunLogged(ctx, socket, vault.NewKeychainService(service), record)
+			path := os.Getenv("KEYWARD_VAULT")
+			if path == "" {
+				path = vault.DefaultPath(home, service)
+			}
+			// Only the vault key lives in the Keychain; Legacy is where secrets were
+			// kept before the vault, and they move in on first use.
+			store := &vault.Encrypted{Path: path, Keys: vault.NewKeychainService(service + "-vault-key"), Legacy: vault.NewKeychainService(service)}
+			return daemon.RunLogged(ctx, socket, store, record)
 		},
 		Service: func(action string) (out string, err error) {
 			if action == "install" {

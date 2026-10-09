@@ -2,8 +2,8 @@
 // directories other tools read.
 //
 // Each backup has its own key, held in the vault. A tool that reads the file gets
-// ciphertext, and deleting the key makes every copy unreadable, including ones in
-// Time Machine.
+// ciphertext, and deleting the key makes the backup unreadable. A copy elsewhere,
+// such as in Time Machine, can still be opened with a vault copy from that time.
 package backup
 
 import (

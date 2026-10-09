@@ -53,7 +53,8 @@ func TestSignedDirectAccessToDaemonItems(t *testing.T) {
 	socket := filepath.Join(dir, "d.sock")
 	cmd := exec.Command(binary, "daemon")
 	home, _ := os.UserHomeDir()
-	cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin", "KEYWARD_SERVICE=" + service, "KEYWARD_SOCKET=" + socket, "KEYWARD_LOG_DIR=" + filepath.Join(dir, "logs")}
+	vaultPath := filepath.Join(dir, "test.vault")
+	cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin", "KEYWARD_SERVICE=" + service, "KEYWARD_SOCKET=" + socket, "KEYWARD_VAULT=" + vaultPath, "KEYWARD_LOG_DIR=" + filepath.Join(dir, "logs")}
 	cmd.Stdout, cmd.Stderr = log, log
 	const first, second = "direct-probe", "delete-probe"
 	var done chan error
@@ -77,9 +78,7 @@ func TestSignedDirectAccessToDaemonItems(t *testing.T) {
 		if err := stop(); err != nil {
 			t.Errorf("cleanup daemon: %v", err)
 		}
-		for _, name := range []string{first, second} {
-			_ = exec.Command("/usr/bin/security", "delete-generic-password", "-s", service, "-a", name).Run()
-		}
+		_ = exec.Command("/usr/bin/security", "delete-generic-password", "-s", service+"-vault-key", "-a", "master").Run()
 		log.Close()
 		os.RemoveAll(dir)
 	})
@@ -110,7 +109,9 @@ func TestSignedDirectAccessToDaemonItems(t *testing.T) {
 	}
 	t.Log("creator daemon exited and its socket is gone before direct access")
 
-	store := vault.NewKeychainService(service)
+	// The daemon's items are in its vault; reading them directly needs only the
+	// vault key the daemon created in the Keychain.
+	store := &vault.Encrypted{Path: vaultPath, Keys: vault.NewKeychainService(service + "-vault-key")}
 	readDirectDummy(t, store, first, original)
 	replacement := vault.NewSecret([]byte("not-a-real-secret-direct-replacement"))
 	defer replacement.Destroy()

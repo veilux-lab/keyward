@@ -96,7 +96,7 @@ Options may come before or after a command's arguments, so
 `keyward migrate ~/.zshrc --dry-run` works; `--` ends options.
 
 Re-running migration skips existing references. Removing a line does not delete
-its Keychain item. If a variable returns with a different value, migration asks
+its stored secret. If a variable returns with a different value, migration asks
 you to remove the stale item with `keyward rm` first.
 
 ## Restore selected files
@@ -107,7 +107,7 @@ keyward restore ~/.zshrc .env
 ```
 
 Restoration uses the references in the selected files and the values currently
-stored in the Keychain, including manually added items. It does not recover old
+stored by keyward, including manually added items. It does not recover old
 values or overwrite files using migration history.
 
 The preview lists locations, variables, and names without retrieving values.
@@ -123,14 +123,14 @@ depends on the dotenv parser. Any skip gives a nonzero exit status, even if othe
 items were restored.
 
 Writes are atomic and private to your user: mode `600`, or `700` when preserving
-your execute permission. Unrelated lines are unchanged. Keychain items remain,
+your execute permission. Unrelated lines are unchanged. Stored secrets remain,
 and restoration does not create another backup containing the restored values.
 A file restored without skips has its migrate backups removed, since it holds the
 values again; files with skips keep theirs.
 
 Restore before stopping the daemon if you want plaintext values back. Check all
 reported skips before removing Keyward. `keyward service uninstall` warns and
-requires `yes` before stopping startup; it keeps the CLI and Keychain items.
+requires `yes` before stopping startup; it keeps the CLI and stored secrets.
 It does not restore files. First-use startup stays disabled until you explicitly
 enable it again with `keyward service install`.
 

@@ -47,7 +47,7 @@ func uninstallFixture(t *testing.T, answer string) *removal {
 	return r
 }
 
-func TestUninstallRemovesEverythingButKeychainItemsAfterYes(t *testing.T) {
+func TestUninstallRemovesEverythingButStoredSecretsAfterYes(t *testing.T) {
 	r := uninstallFixture(t, "yes\n")
 	if code := r.h.cli.Run([]string{"uninstall"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, r.h.err())
@@ -60,12 +60,12 @@ func TestUninstallRemovesEverythingButKeychainItemsAfterYes(t *testing.T) {
 			t.Errorf("%s remains", dir)
 		}
 	}
-	for _, want := range []string{"restore", "Keychain items"} {
+	for _, want := range []string{"restore", "stored secrets"} {
 		if !strings.Contains(r.h.err(), want) {
 			t.Errorf("the warning lacks %q:\n%s", want, r.h.err())
 		}
 	}
-	if !strings.Contains(r.h.out(), "Keychain items were kept") {
+	if !strings.Contains(r.h.out(), "Stored secrets were kept") {
 		t.Errorf("summary lacks what was kept:\n%s", r.h.out())
 	}
 }

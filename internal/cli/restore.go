@@ -38,7 +38,7 @@ func (c *CLI) restore(args []string) int {
 		}
 		return exitOK
 	}
-	if _, err := fmt.Fprintf(c.Stderr, "\nRestore %d value(s) into the files listed above?\n  These files will contain plaintext secrets again and will be private to your user.\n  Keychain entries will be kept. %s\n\n  Enter a value: ", len(p.Items), c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord))); err != nil {
+	if _, err := fmt.Fprintf(c.Stderr, "\nRestore %d value(s) into the files listed above?\n  These files will contain plaintext secrets again and will be private to your user.\n  Stored secrets will be kept. %s\n\n  Enter a value: ", len(p.Items), c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord))); err != nil {
 		return exitFailure
 	}
 	ok, err := c.readConfirmation()
@@ -55,7 +55,7 @@ func (c *CLI) restore(args []string) int {
 	for _, issue := range r.Skipped {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("  skipped %s  %s", issue.Location(), issue.Reason)))
 	}
-	fmt.Fprintf(c.Stdout, "\nRestored %d value(s); %d item(s) skipped. Keychain entries were kept.\n", len(r.Restored), len(r.Skipped))
+	fmt.Fprintf(c.Stdout, "\nRestored %d value(s); %d item(s) skipped. Stored secrets were kept.\n", len(r.Restored), len(r.Skipped))
 	var restored, skipped []string
 	for _, item := range r.Restored {
 		restored = append(restored, item.File)
