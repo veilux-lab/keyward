@@ -111,7 +111,7 @@ commands:
   ls                    list stored secret names
   rm <name>             remove a secret
   run [--] <cmd>...     resolve cap:// references and run a command
-  migrate <file>        move a file's secrets into the Keychain (asks first)
+  migrate <file>        move a file's secrets into the encrypted vault (asks first)
   migrate --dry-run <f> describe what would move, and stop
   restore <file>...     return referenced secrets to files (requires "yes")
   restore --dry-run <f> preview restoration without reading secret values
@@ -484,7 +484,7 @@ func (c *CLI) migrate(args []string) int {
 
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)
-	fmt.Fprintf(c.Stdout, "  Its key is in the Keychain. Remove both once the new file works: keyward backups rm %s\n", plan.Path)
+	fmt.Fprintf(c.Stdout, "  Its key is in keyward's vault. Remove both once the new file works: keyward backups rm %s\n", plan.Path)
 	fmt.Fprint(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward:\n"+
 		"  keyward run -- npm test\n  keyward run -- code .    # an editor, and the tools it starts\n"+
 		"Started any other way, a program sees the cap:// reference instead of the value.\n")
@@ -506,7 +506,7 @@ const confirmWord = "yes"
 // answer — a pipeline, or an agent with no terminal — and applying there would be
 // the worst possible default for a command that rewrites a file.
 func (c *CLI) confirm(count int, path string) (bool, error) {
-	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into the Keychain?\n", count, path)
+	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into keyward's encrypted vault?\n", count, path)
 	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is first saved to an encrypted backup.\n")
 	fmt.Fprintf(c.Stderr, "  Afterwards, start commands that use these values as: keyward run -- <command>\n")
 	fmt.Fprintf(c.Stderr, "  %s\n\n  Enter a value: ", c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord)))

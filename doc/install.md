@@ -71,7 +71,7 @@ nothing. Scripts can use `-auto-approve`; it cannot be combined with `--dry-run`
 Secrets are stored before the file is rewritten. The rewrite is atomic and
 preserves the file mode. The original is first saved to an encrypted backup (mode
 `600`) in `~/Library/Application Support/keyward/backups`, away from the files
-tools read; its key is in the Keychain. `keyward backups` lists backups,
+tools read; its key is in keyward's vault. `keyward backups` lists backups,
 `keyward backups recover <file>` writes the latest one beside the file in plaintext
 after asking, and `keyward backups rm <file>...` or `--all` removes backups and
 their keys. Remove them once the migrated file works. `keyward doctor` reminds you
