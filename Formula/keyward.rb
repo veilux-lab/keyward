@@ -1,14 +1,14 @@
 class Keyward < Formula
-  desc "Keep shell secrets in macOS Keychain and resolve them through a local broker"
+  desc "Move shell secrets into a Keychain-keyed vault, resolved by a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.11/keyward-0.1.11.tar.gz"
-  version "0.1.11"
-  sha256 "814468ff0835c1b72d55643df9b09b40f13a3c413e5a85f694a7774ac12ef3d0"
+  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.12/keyward-0.1.12.tar.gz"
+  version "0.1.12"
+  sha256 "a87c4592e7265fd7bf16a7388129419604896fbecae6d4dacb36ad3e1a1ba3c1"
   license "MIT"
 
   bottle do
-    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.11"
-    sha256 arm64_sequoia: "e442f7d3d44a807fb5794e7976274dba7feec5a2b534eb4f921d28f43507ba2e"
+    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.12"
+    sha256 arm64_sequoia: "921ba06cc3c823799096c6bbad06d6077c2935e395f32a8dc054c47a15fd2de3"
   end
 
   depends_on "go" => :build
@@ -33,9 +33,9 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      The Keyward daemon starts on first use, then at every login. After an
-      upgrade, the next keyward command restarts it; macOS may ask once for
-      Keychain access.
+      The Keyward daemon starts on first use, then at every login, and writes
+      ~/.agents/keyward.md, instructions for AI agents. After an upgrade, the
+      next keyward command restarts it; macOS may ask once for Keychain access.
         Start now:          keyward service install
         Pause access:       keyward service stop
         Remove everything:  keyward uninstall
