@@ -299,7 +299,7 @@ func (p *Plan) Apply(store vault.Store, backups backup.Dir) (*Applied, error) {
 	}
 	sort.Strings(stored)
 
-	saved, err := backups.Save(p.Path, p.original, time.Now())
+	saved, err := backups.Save(store, p.Path, p.original, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("writing the backup: %w", err)
 	}

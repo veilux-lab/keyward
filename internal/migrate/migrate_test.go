@@ -445,24 +445,38 @@ func TestApplyRecordsProvenance(t *testing.T) {
 	}
 }
 
-func TestApplyWritesABackupOfTheOriginal(t *testing.T) {
+func TestApplyWritesAnEncryptedBackupOfTheOriginal(t *testing.T) {
 	path := writeRC(t, rcFile)
 	p, _ := migrate.Read(path)
+	store := vault.NewMemory()
+	dir := backups(t)
 
-	applied, err := p.Apply(vault.NewMemory(), backups(t))
+	applied, err := p.Apply(store, dir)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	backup, err := os.ReadFile(applied.BackupPath)
+	raw, err := os.ReadFile(applied.BackupPath)
 	if err != nil {
 		t.Fatalf("reading the backup: %v", err)
 	}
-	if string(backup) != rcFile {
-		t.Error("the backup does not match the original file")
+	if strings.Contains(string(raw), "eyJ") || strings.Contains(string(raw), "ghp_") {
+		t.Error("the backup holds secrets in plaintext")
+	}
+	found, _ := dir.ForFile(path)
+	if len(found) != 1 {
+		t.Fatalf("backups = %+v", found)
+	}
+	if got, err := backup.Open(store, found[0]); err != nil || string(got.Bytes()) != rcFile {
+		t.Errorf("the backup does not decrypt to the original file: %v", err)
+	}
+	for _, name := range applied.Stored {
+		if backup.IsKey(name) {
+			t.Errorf("the backup key %s is reported as a migrated secret", name)
+		}
 	}
 	if filepath.Dir(applied.BackupPath) == filepath.Dir(path) {
-		t.Error("the plaintext backup was written beside the original, where other tools read")
+		t.Error("the backup was written beside the original, where other tools read")
 	}
 	if info, err := os.Stat(applied.BackupPath); err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("the backup is not private to its owner: %v", err)

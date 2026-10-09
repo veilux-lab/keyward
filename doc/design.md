@@ -109,8 +109,11 @@ decides these, with `keyward add` printed alongside.
 
 Migration keeps a byte-for-byte backup of the original so a bad rewrite can be
 undone exactly; `restore` rebuilds values but not the original quoting. Backups
-live in a private directory rather than beside the file: a plaintext copy next to
-`~/.zshrc` is exactly what an agent reading the home directory would find.
+live in a private directory rather than beside the file, and are encrypted. File
+permissions cannot keep out an agent running as the same user, so a plaintext copy
+would be exactly what an agent reading the home directory finds. Each backup has
+its own AES-256-GCM key in the vault; `keyward backups rm` deletes the key first,
+which also makes copies elsewhere, such as Time Machine snapshots, unreadable.
 
 ### Restoring before uninstall
 

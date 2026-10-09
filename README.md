@@ -53,8 +53,8 @@ keyward doctor
 
 After migrating, start anything that needs those values through `keyward run --`,
 including editors (`keyward run -- code .`); started any other way, a program sees
-the `cap://` reference. Migration keeps a private plaintext backup of the original;
-remove it with `keyward backups rm ~/.zshrc` once the new file works, then open a
+the `cap://` reference. Migration keeps an encrypted backup of the original, with its key in the Keychain;
+remove both with `keyward backups rm ~/.zshrc` once the new file works, then open a
 new terminal.
 See [the usage guide](doc/install.md) for supported files and more commands.
 

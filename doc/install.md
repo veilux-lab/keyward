@@ -69,11 +69,13 @@ exact lowercase `yes`; `y`, `Yes`, and end of input cancel. `--dry-run` changes
 nothing. Scripts can use `-auto-approve`; it cannot be combined with `--dry-run`.
 
 Secrets are stored before the file is rewritten. The rewrite is atomic and
-preserves the file mode. The original is first copied to a private backup (mode
+preserves the file mode. The original is first saved to an encrypted backup (mode
 `600`) in `~/Library/Application Support/keyward/backups`, away from the files
-tools read. It still contains plaintext secrets: `keyward backups` lists them and
-`keyward backups rm <file>...` or `--all` removes them. `keyward doctor` reminds you
-while any remain, including older backups beside the original. Open a new terminal
+tools read; its key is in the Keychain. `keyward backups` lists backups,
+`keyward backups recover <file>` writes the latest one beside the file in plaintext
+after asking, and `keyward backups rm <file>...` or `--all` removes backups and
+their keys. Remove them once the migrated file works. `keyward doctor` reminds you
+while any remain, including plaintext backups from earlier releases. Open a new terminal
 after migration so exported variables contain references rather than the old values.
 
 Options may come before or after a command's arguments, so

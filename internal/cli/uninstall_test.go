@@ -132,3 +132,19 @@ func TestUninstallIsUnavailableForIsolatedInstances(t *testing.T) {
 		t.Fatalf("exit %d, calls %v", code, r.calls)
 	}
 }
+
+// The keys must go while the daemon still runs; afterwards nothing can delete them.
+func TestUninstallDeletesBackupKeysBeforeStoppingTheDaemon(t *testing.T) {
+	r := uninstallFixture(t, "")
+	migrated(t, r.h)
+	r.h.cli.Stdin = strings.NewReader("yes\n")
+	r.h.cli.Service = func(string) (string, error) {
+		if keys := backupKeys(t, r.h.store); len(keys) != 0 {
+			t.Errorf("backup keys remained when the daemon stopped: %v", keys)
+		}
+		return "✓ stopped", nil
+	}
+	if code := r.h.cli.Run([]string{"uninstall"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, r.h.err())
+	}
+}

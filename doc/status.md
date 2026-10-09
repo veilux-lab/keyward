@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-05
+Last updated: 2026-10-09
 
 ## Where things stand
 
@@ -162,6 +162,13 @@ runs as soon as `migrate` lands and needs no further machinery. If it fails, the
 correct response is to stop building, not to push through.
 
 ## Changelog
+
+**2026-10-09 (encrypted backups)** — Migrate backups are encrypted with a per-backup
+AES-256-GCM key held in the vault, because `0600` does not keep out an agent running
+as the same user. `keyward backups rm` deletes the key first, `keyward backups
+recover <file>` writes the original beside the file after a "yes", and `ls` and
+`doctor` leave the keys out. Plaintext backups from earlier releases are still
+listed, marked as plaintext. Verified on the real Keychain under a throwaway service.
 
 **2026-10-08 (password names, keyward run guidance)** — Names with the whole words
 `PW`, `PWD`, `PASS`, or `PASSPHRASE` now count as credentials; `BYPASS_…` and

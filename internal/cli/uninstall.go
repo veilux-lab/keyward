@@ -26,7 +26,7 @@ func (c *CLI) uninstall(args []string) int {
 		fmt.Fprintf(&plan, "  %s\n", dir)
 	}
 	if len(found) > 0 {
-		fmt.Fprintf(&plan, "  %d plaintext backup(s) from migrate\n", len(found))
+		fmt.Fprintf(&plan, "  %d backup(s) from migrate, and their keys\n", len(found))
 	}
 	if c.RemovePackage != nil {
 		plan.WriteString("  the keyward package\n")
@@ -44,11 +44,14 @@ func (c *CLI) uninstall(args []string) int {
 		return c.cancel("Uninstall cancelled. Nothing was removed.")
 	}
 
-	// Stop first: a running daemon would recreate what is deleted below.
+	// Backup keys go while the daemon can still delete them.
+	if _, err := removeBackups(c.Store, found); err != nil {
+		return c.fail("keyward uninstall: removing backups: %v; nothing else was removed", err)
+	}
+	// Stop before deleting data: a running daemon would recreate it.
 	if _, err := c.Service("uninstall"); err != nil {
 		return c.fail("keyward uninstall: %v; nothing else was removed", err)
 	}
-	_, err = removeBackups(found)
 	for _, dir := range c.DataDirs {
 		err = errors.Join(err, os.RemoveAll(dir))
 	}

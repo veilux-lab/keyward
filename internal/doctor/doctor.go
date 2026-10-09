@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
@@ -118,6 +119,10 @@ func Run(store vault.Store, paths []string) (*Report, error) {
 	sortReferences(r.Malformed)
 
 	for _, e := range entries {
+		// Backup keys are referenced by backups, not files.
+		if backup.IsKey(e.Name) {
+			continue
+		}
 		if len(refs[e.Name]) > 0 {
 			// Referenced anywhere at all is enough. Provenance pointing elsewhere just
 			// means the value moved.

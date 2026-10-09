@@ -114,8 +114,9 @@ commands:
   migrate --dry-run <f> describe what would move, and stop
   restore <file>...     return referenced secrets to files (requires "yes")
   restore --dry-run <f> preview restoration without reading secret values
-  backups               list migrate's private plaintext backups
-  backups rm <file>...  remove backups of files (or --all)
+  backups               list migrate's encrypted backups
+  backups rm <file>...  remove backups of files, and their keys (or --all)
+  backups recover <f>   write a file's latest backup beside it, in plaintext
   doctor [file...]      check references against what is stored
   version               print the version
   help                  print this message
@@ -324,7 +325,10 @@ func (c *CLI) list() int {
 		return c.fail("keyward ls: %v", err)
 	}
 	for _, e := range entries {
-		fmt.Fprintln(c.Stdout, e.Name)
+		// Backup keys are keyward's own; `keyward backups` accounts for them.
+		if !backup.IsKey(e.Name) {
+			fmt.Fprintln(c.Stdout, e.Name)
+		}
 	}
 	return exitOK
 }
@@ -475,8 +479,8 @@ func (c *CLI) migrate(args []string) int {
 	}
 
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
-	fmt.Fprintf(c.Stdout, "Plaintext backup of the original: %s\n", applied.BackupPath)
-	fmt.Fprintf(c.Stdout, "  It holds the old values. Remove it once the new file works: keyward backups rm %s\n", plan.Path)
+	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)
+	fmt.Fprintf(c.Stdout, "  Its key is in the Keychain. Remove both once the new file works: keyward backups rm %s\n", plan.Path)
 	fmt.Fprint(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward:\n"+
 		"  keyward run -- npm test\n  keyward run -- code .    # an editor, and the tools it starts\n"+
 		"Started any other way, a program sees the cap:// reference instead of the value.\n")
@@ -498,7 +502,7 @@ const confirmWord = "yes"
 // the worst possible default for a command that rewrites a file.
 func (c *CLI) confirm(count int, path string) (bool, error) {
 	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into the Keychain?\n", count, path)
-	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is first copied to a private backup.\n")
+	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is first saved to an encrypted backup.\n")
 	fmt.Fprintf(c.Stderr, "  Afterwards, start commands that use these values as: keyward run -- <command>\n")
 	fmt.Fprintf(c.Stderr, "  %s\n\n  Enter a value: ", c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord)))
 	return c.readConfirmation()
@@ -541,9 +545,9 @@ func (c *CLI) doctor(args []string) int {
 
 	fmt.Fprint(c.Stdout, report.String())
 	if found, err := c.knownBackups(); err != nil {
-		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check for plaintext backups: %v", err)))
+		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check for backups: %v", err)))
 	} else if len(found) > 0 {
-		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d plaintext backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
+		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
 	}
 	if report.HasProblems() {
 		return exitFailure
