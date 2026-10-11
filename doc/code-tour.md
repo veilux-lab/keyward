@@ -25,15 +25,33 @@ too. See [mission.md](mission.md) for why that line is drawn there.
 ## The picture
 
 ```text
- ~/.zshrc, .env                keyward CLI                    keyward daemon
- ┌───────────────────┐   ┌──────────────────────┐   socket   ┌──────────────────────┐
- │ TOKEN='cap://tok' │──▶│ run: resolve refs,   │──────────▶│ same-user check      │
- └───────────────────┘   │      exec the child  │  JSON req  │ vault.Encrypted      │
-                         │ migrate, add, rm, ls │◀──────────│   │                   │
-                         └──────────────────────┘            │   ▼                   │
-                                                             │ keyward.vault  (file) │
-                                                             │ vault key (Keychain)  │
-                                                             └──────────────────────┘
+  ~/.zshrc, .env
+  +-------------------------------------+
+  | export TOKEN='cap://token'          |   only references; safe to read
+  +-------------------------------------+
+                     |
+                     |  keyward run -- <command>
+                     v
+  +-------------------------------------+
+  | keyward CLI                         |   never touches the Keychain
+  |   resolve every cap:// reference,   |
+  |   then exec the command with the    |
+  |   real values in its environment    |
+  +-------------------------------------+
+                     |
+                     |  JSON over a same-user Unix socket
+                     v
+  +-------------------------------------+
+  | keyward daemon                      |   one per user, long-lived
+  |   check the caller is you,          |
+  |   read the value from the vault     |
+  +-------------------------------------+
+             |                 |
+             v                 v
+  +-----------------+   +-----------------+
+  | keyward.vault   |   | vault key       |
+  | encrypted file  |   | macOS Keychain  |
+  +-----------------+   +-----------------+
 ```
 
 Three pieces:
