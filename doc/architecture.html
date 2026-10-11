@@ -317,7 +317,7 @@ h2 .accent{color:var(--stamp)}
   <!-- ===== 01 COVER ===== -->
   <section class="slide active visible" id="cover">
     <div class="holes"><span></span><span></span><span></span></div>
-    <div class="filehead"><span>File&nbsp;&nbsp;/&nbsp;&nbsp;Local secrets broker&nbsp;&nbsp;/&nbsp;&nbsp;macOS</span><span>nwokolo24 &middot; 2026</span></div>
+    <div class="filehead"><span>File&nbsp;&nbsp;/&nbsp;&nbsp;Local secrets broker&nbsp;&nbsp;/&nbsp;&nbsp;macOS</span><span>veilux-lab &middot; 2026</span></div>
     <div class="stamp tr">On&nbsp;file</div>
     <div class="slide-content tight">
       <h1 class="cover reveal">Keyward</h1>
@@ -367,7 +367,7 @@ h2 .accent{color:var(--stamp)}
         <tr><td class="mono-k">Not an agent firewall</td><td>Network egress control is solved and crowded. Complementary, not competitive.</td></tr>
         <tr><td class="mono-k">Not enforcement</td><td>No sandbox, no wrapper, no interception of file reads.</td></tr>
         <tr><td class="mono-k">Not proof against intent</td><td>An agent that can run commands can run a resolver. The accidental case closes; the deliberate one does not.</td></tr>
-        <tr><td class="mono-k">Not cross-platform</td><td>macOS only, so the Keychain replaces hand-rolled cryptography.</td></tr>
+        <tr><td class="mono-k">Not cross-platform</td><td>macOS only, so the Keychain guards the vault key and the OS decides which program may read it.</td></tr>
         <tr><td class="mono-k">Not a team product</td><td>One machine, one person. Usefulness to others is a later question.</td></tr>
       </table>
     </div>
@@ -393,7 +393,7 @@ h2 .accent{color:var(--stamp)}
     <div class="slide-content">
       <h2 class="tight reveal">Separate the<br>two concerns</h2>
       <div class="cards two stagger" style="margin-top:8px">
-        <div class="card"><span class="tab">Layer one</span><h3>Migration</h3><p><strong>Provides security.</strong> Values move to the Keychain; files hold references.</p><p>Needs no cooperation. Holds whether the agent behaves or not, because there is nothing on disk to find.</p></div>
+        <div class="card"><span class="tab">Layer one</span><h3>Migration</h3><p><strong>Provides security.</strong> Values move to an encrypted vault keyed by the Keychain; files hold references.</p><p>Needs no cooperation. Holds whether the agent behaves or not, because there is nothing on disk to find.</p></div>
         <div class="card"><span class="tab">Layer two</span><h3>Cooperation</h3><p><strong>Provides productivity.</strong> MCP tools, generated instructions, errors that name the next action.</p><p>Needs cooperation. Decides only whether the agent works smoothly or wastes turns hunting.</p></div>
       </div>
       <p class="lede reveal" style="margin-top:34px;margin-bottom:0">Keeping these apart is the central idea. Conflating them is how a tool ends up requiring a wrapper around every agent &mdash; and then going uninstalled.</p>
@@ -411,7 +411,7 @@ h2 .accent{color:var(--stamp)}
       <table class="ledger stagger">
         <tr><th style="width:400px">Rule</th><th>Reason</th></tr>
         <tr><td class="mono-k">Prefix is case-sensitive</td><td>Detection stays unambiguous and needs no allocation.</td></tr>
-        <tr><td class="mono-k">Names lowercased on parse</td><td>Prevents two Keychain items differing only by case.</td></tr>
+        <tr><td class="mono-k">Names lowercased on parse</td><td>Prevents two stored secrets differing only by case.</td></tr>
         <tr><td class="mono-k">a&ndash;z, 0&ndash;9, and - _ .</td><td>Safe in every config format that will carry it.</td></tr>
         <tr><td class="mono-k">Begins and ends alphanumeric</td><td>No ambiguity at token boundaries.</td></tr>
         <tr><td class="mono-k">Slashes rejected</td><td>Leaves namespacing open without committing to a scheme.</td></tr>
@@ -446,11 +446,11 @@ h2 .accent{color:var(--stamp)}
         <div class="pipe-row">
           <div class="box hot"><div class="nm">internal/handle</div><div class="ds">Recognise and validate each reference</div></div>
           <div class="box"><div class="nm">internal/resolve</div><div class="ds">Scan the environment, resolve each name</div></div>
-          <div class="box side"><div class="nm">internal/daemon &rarr; vault</div><div class="ds">The CLI starts its installed daemon on first vault use, then asks over a same-user socket. Explicit disabling is respected.</div></div>
+          <div class="box side"><div class="nm">internal/daemon &rarr; vault</div><div class="ds">Started on first use, asked over a same-user socket. Only it reads the vault.</div></div>
         </div>
         <div class="arrow">&darr;</div>
         <div class="pipe-row"><div class="box"><div class="nm">cmd/keyward run</div><div class="ds">syscall.Exec replaces the process image, so no parent lingers holding secrets</div></div>
-        <div class="box side"><div class="nm">internal/audit</div><div class="ds">Append-only JSONL, one record per resolution</div></div></div>
+        <div class="box side"><div class="nm">internal/activity</div><div class="ds">Metadata-only JSONL. Never values.</div></div></div>
         <div class="arrow">&darr;</div>
         <div class="pipe-row"><div class="box"><div class="nm">child process</div><div class="ds">Real values, in this environment only, for the lifetime of this command</div></div></div>
       </div>
@@ -466,8 +466,8 @@ h2 .accent{color:var(--stamp)}
       <h2 class="tight reveal">The tools that<br>write the files</h2>
       <p class="lede reveal">Migration runs once per file. Everything after that is resolution.</p>
       <div class="cards two stagger">
-        <div class="card"><span class="tab">internal/migrate</span><h3>Take the values out</h3><p>Detect secrets by known prefixes and names &mdash; <strong>ghp_</strong>, <strong>sk-</strong>, <strong>eyJ</strong>, <strong>Bearer</strong>. Store each in the Keychain, rewrite the line to a reference. Values that only look random are flagged, never moved.</p><p>Dry-run by default. Shows a diff. Keeps a backup. This is the adoption-critical component: if it is not trustworthy, nothing downstream gets used.</p></div>
-        <div class="card"><span class="tab">internal/mcpconfig</span><h3>Rewire the servers</h3><p>Rewrite each MCP server to launch through keyward, with references in its env block.</p><p>Also fixes a standing bug: servers currently fail with a connect timeout when the editor launches from Finder, because the variable is empty outside a login shell. Resolving from the Keychain makes launch method irrelevant.</p></div>
+        <div class="card"><span class="tab">internal/migrate</span><h3>Take the values out</h3><p>Detect secrets by known prefixes and names &mdash; <strong>ghp_</strong>, <strong>sk-</strong>, <strong>eyJ</strong>, <strong>Bearer</strong>. Store each in the vault, rewrite the line to a reference. Values that only look random are flagged, never moved.</p><p>Shows a redacted plan, then asks for an exact <strong>yes</strong>. Keeps an encrypted backup. This is the adoption-critical component: if it is not trustworthy, nothing downstream gets used.</p></div>
+        <div class="card"><span class="tab">internal/mcpconfig</span><h3>Rewire the servers</h3><p>Rewrite each MCP server to launch through keyward, with references in its env block.</p><p>Not built yet. It would also fix a standing bug: servers fail with a connect timeout when the editor launches from Finder, because the variable is empty outside a login shell. Resolving through keyward makes launch method irrelevant.</p></div>
       </div>
     </div>
     <div class="folio">10</div>
@@ -510,12 +510,12 @@ h2 .accent{color:var(--stamp)}
     <div class="holes"><span></span><span></span><span></span></div>
     <div class="filehead"><span>Architecture / storage</span><span>keyward</span></div>
     <div class="slide-content">
-      <h2 class="tight reveal">Keychain, not a<br>custom vault</h2>
-      <p class="lede reveal">The nearest comparable tool writes its own encrypted vault because it supports Linux. Being macOS-only is the advantage here, not the limitation.</p>
+      <h2 class="tight reveal">One Keychain key,<br>not one per secret</h2>
+      <p class="lede reveal">Keychain access is tied to the exact program, so each unsigned upgrade asked once per secret. Now only the vault&rsquo;s key is in the Keychain.</p>
       <div class="cards three stagger">
-        <div class="card"><span class="tab">Gain</span><h3>No crypto</h3><p>Nothing to implement, review, or get wrong.</p></div>
-        <div class="card"><span class="tab">Gain</span><h3>Free ACLs</h3><p>Per-item access control comes from the OS.</p></div>
-        <div class="card"><span class="tab">Gain</span><h3>A door left open</h3><p>Access-control flags make biometric gating conceivable later.</p></div>
+        <div class="card"><span class="tab">Gain</span><h3>One prompt</h3><p>An upgrade asks once, on first use, never at login.</p></div>
+        <div class="card"><span class="tab">Kept</span><h3>OS-guarded key</h3><p>The Keychain still decides which program may read the key.</p></div>
+        <div class="card"><span class="tab">Cost</span><h3>Own format</h3><p>AES-256-GCM, each value bound to its name. One rule covers every secret.</p></div>
       </div>
       <div class="caution reveal" style="margin-top:34px">
         <div class="hd">Do not shell out to security(1)</div>
@@ -566,8 +566,8 @@ h2 .accent{color:var(--stamp)}
         <tr><td><span class="pill risk">High</span></td><td class="mono-k">Migration friction</td><td>The real project risk. Everything reading those variables breaks until it goes through keyward. Measured early; a negative answer is accepted, not pushed through.</td></tr>
         <tr><td><span class="pill risk">High</span></td><td class="mono-k">Hooks are resolvers</td><td>Closed the accidental case only. Scope narrowed rather than the claim widened.</td></tr>
         <tr><td><span class="pill open">Med</span></td><td class="mono-k">Biometric gating unproven</td><td>No Go binding exists, Apple's docs unreachable, behaviour from a CLI unverified. Research, not a planned feature.</td></tr>
-        <tr><td><span class="pill open">Med</span></td><td class="mono-k">MCP config rewriting</td><td>Owning another tool's format. Needs backups, idempotence, and a doctor command.</td></tr>
-        <tr><td><span class="pill open">Low</span></td><td class="mono-k">cgo resists TDD</td><td>Interface seam, in-memory fake, thin cgo layer, one build-tagged integration test.</td></tr>
+        <tr><td><span class="pill open">Med</span></td><td class="mono-k">MCP config rewriting</td><td>Owning another tool's format. Needs backups and idempotence; doctor already reports dangling references.</td></tr>
+        <tr><td><span class="pill open">Low</span></td><td class="mono-k">cgo resists TDD</td><td>Interface seam, in-memory fake, thin cgo layer, build-tagged integration tests.</td></tr>
         <tr><td><span class="pill open">Low</span></td><td class="mono-k">Go cannot zero memory</td><td>The GC copies and moves. Documented rather than overclaimed.</td></tr>
       </table>
     </div>
@@ -599,14 +599,14 @@ h2 .accent{color:var(--stamp)}
     <div class="slide-content tight">
       <h2 class="tight reveal">Where things stand</h2>
       <table class="ledger stagger">
-        <tr><th style="width:190px">State</th><th style="width:400px">Component</th><th>Gated on</th></tr>
-        <tr><td><span class="pill done">Done</span></td><td class="mono-k">internal/handle</td><td>&mdash; &nbsp;7 test functions, 29 subtests, vet and gofmt clean</td></tr>
-        <tr><td><span class="pill open">Next</span></td><td class="mono-k">internal/vault</td><td>Nothing. Store interface, in-memory fake, then cgo behind it.</td></tr>
-        <tr><td><span class="pill open">Open</span></td><td class="mono-k">internal/audit</td><td>Nothing. Independent of everything else.</td></tr>
-        <tr><td><span class="pill open">Open</span></td><td class="mono-k">internal/resolve &middot; cmd run</td><td>vault.Store existing</td></tr>
-        <tr><td><span class="pill open">Open</span></td><td class="mono-k">migrate &middot; mcpconfig</td><td>keyward run working end to end</td></tr>
+        <tr><th style="width:190px">State</th><th style="width:400px">Component</th><th>Notes</th></tr>
+        <tr><td><span class="pill done">Done</span></td><td class="mono-k">handle &middot; vault &middot; resolve</td><td>Encrypted vault with its key in the Keychain; one contract suite for every store</td></tr>
+        <tr><td><span class="pill done">Done</span></td><td class="mono-k">daemon &middot; launchd &middot; Homebrew</td><td>First-use startup; released with an Apple Silicon bottle</td></tr>
+        <tr><td><span class="pill done">Done</span></td><td class="mono-k">migrate &middot; restore &middot; backups &middot; doctor</td><td>Exact <strong>yes</strong>; encrypted backups; doctor reports, never deletes</td></tr>
+        <tr><td><span class="pill done">Done</span></td><td class="mono-k">activity &middot; agents</td><td>Metadata-only log; ~/.agents/keyward.md written at setup</td></tr>
+        <tr><td><span class="pill open">Open</span></td><td class="mono-k">mcpconfig &middot; audit</td><td>Nothing gates them</td></tr>
         <tr><td><span class="pill open">Open</span></td><td class="mono-k">shell &middot; grants &middot; MCP surface</td><td>The migration being lived with</td></tr>
-        <tr><td><span class="pill risk">Spike</span></td><td class="mono-k">Biometric gating</td><td>A solid cgo vault. Attempted last, not first.</td></tr>
+        <tr><td><span class="pill risk">Spike</span></td><td class="mono-k">Biometric gating</td><td>Would now gate one vault key. Attempted last, not first.</td></tr>
       </table>
     </div>
     <div class="folio">18</div>
