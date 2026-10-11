@@ -12,7 +12,6 @@
 | [obstacles.md](obstacles.md) | Known problems and complexities, including one that already invalidated a design |
 | [landscape.md](landscape.md) | Prior art, what it does better, and where keyward actually stands |
 | [code-tour.md](code-tour.md) | How keyward works, package by package, for engineers new to it |
-| [handoff-apple-development-signing.md](handoff-apple-development-signing.md) | Instructions for an agent testing free Apple Development signing on a personal Mac |
 
 ## Visual walkthrough
 

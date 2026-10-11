@@ -1,8 +1,5 @@
 # Code tour
 
-How keyward works, for engineers who want to understand it, review it, or explain
-it to someone else. Read top to bottom; each section names the code to open next.
-
 ## The one-paragraph version
 
 AI coding agents read shell startup files and `.env` files for ordinary reasons,
