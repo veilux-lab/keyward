@@ -72,8 +72,9 @@ handled; see [obstacles.md](obstacles.md) 2a.
 
 ### Known issues
 
-- `Replace` succeeds across builds signed with the same Apple Development
-  certificate. Replacement across unsigned builds remains untested (2a-bis).
+- Each unsigned or Homebrew daemon upgrade asks once for the vault key. The first
+  vault release also reads each older Keychain item once to move it in. A
+  Developer ID would remove both.
 - Login startup is configured; an actual logout/login has not been tested.
 - This Mac's Background App Activity entry shows the personal
   signing-certificate name. Fresh-machine notifications remain untested, and

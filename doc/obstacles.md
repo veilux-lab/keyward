@@ -40,8 +40,10 @@ broker must implement caching or be invoked on every single API call.
 **Severity: medium. Blocks the only real differentiator.**
 
 macOS Keychain items can in principle be gated on user presence, which would put
-Touch ID in front of every resolution — a hardware-backed human in the loop that
-a shell-capable agent physically cannot satisfy. That would close obstacle 1
+Touch ID in front of unlocking the vault — a hardware-backed human in the loop that
+a shell-capable agent physically cannot satisfy. Since the vault, the only Keychain
+item is its key, which the daemon reads once and keeps, so gating would cover the
+first request after each daemon start rather than every resolution. That would close obstacle 1
 without any wrapper, and nothing in the landscape does it.
 
 Unconfirmed:
@@ -100,8 +102,8 @@ implied, and another reason to leave it until last.
 
 ## 2a. An unsigned binary loses Keychain access when rebuilt — worked around
 
-**Severity: was blocking. Worked around by the daemon (option 3 below); signing
-would still be the proper fix.**
+**Severity: was blocking. Worked around by the daemon and the encrypted vault
+(options 3 and 2 below); Developer ID signing would remove the last prompt.**
 
 ### Resolution
 
@@ -116,14 +118,16 @@ What remains:
 - Rebuilding the **daemon** hits the original problem. Measured: restarting the same
   daemon binary reads its items with no prompt. A rebuilt daemon lists names without
   a prompt, but each read blocks on a dialog, once per item: 33 dialogs after a real
-  Homebrew upgrade on 2026-10-09. The encrypted vault (2026-10-09, see
-  [design.md](design.md)) leaves one Keychain item, its key, so an upgrade now asks
-  once. A self-signed
-  certificate does not avoid it on macOS 27 (below). Apple Development signing
-  with the same certificate does (tested below), which supports trying Developer
-  ID signing for prompt-free daemon upgrades; Developer ID itself remains untested.
-  A free Personal Team certificate cannot be used to distribute the daemon to
-  other people; that requires Developer ID and the paid Apple Developer Programme.
+  Homebrew upgrade on 2026-10-09.
+- The encrypted vault (2026-10-09, see [design.md](design.md)) leaves one Keychain
+  item, its key, so an upgrade now asks once. The first vault release still reads
+  each older Keychain item once to move it in.
+- A self-signed certificate does not avoid the prompt on macOS 27 (below). Apple
+  Development signing with the same certificate does (tested below), which supports
+  trying Developer ID signing for prompt-free daemon upgrades; Developer ID itself
+  remains untested. A free Personal Team certificate cannot be used to distribute
+  the daemon to other people; that requires Developer ID and the paid Apple
+  Developer Programme.
 - The daemon must be running. Installed builds start it on first use; with a
   custom socket or a development build, commands fail at once with a message
   saying how to start it, so they never hang.
@@ -277,24 +281,21 @@ system-domain trust needs `sudo` and was not attempted.
 
 ### What this means for the storage decision
 
-These earlier failures weakened the case for using the Keychain, which
-[design.md](design.md) justified because it avoids writing cryptography. The Apple
-Development test now demonstrates a same-certificate rebuild fix; Developer ID
-distribution signing remains to be tested.
+These failures weakened the case for one Keychain item per secret, which
+[design.md](design.md) had justified because it avoids writing cryptography. HASP
+writes its own encrypted vault, which was attributed here to Linux portability;
+this problem is an equally good reason.
 
-HASP writes its own encrypted vault, which was attributed here to Linux
-portability. This is an equally good reason, and quite possibly the real one.
+Three ways forward were listed. Two are now done:
 
-Three ways forward, in the order worth trying:
-
-1. **Check for an Apple Developer ID** through an employer account. Cheapest if it
-   exists, and it is the only attempt with a clear mechanism behind it.
-2. **Move storage to an encrypted file**, as HASP does. Removes the entire problem
-   class. Costs the "no cryptography to get wrong" advantage.
+1. **An Apple Developer ID.** Not done: it needs the paid programme. The Apple
+   Development test shows the mechanism works, so it would remove the last prompt.
+2. **Move storage to an encrypted file**, as HASP does. **Done 2026-10-09**, with
+   the file's key kept in the Keychain, so an upgrade asks once instead of once per
+   secret. Costs the "no cryptography to get wrong" advantage.
 3. **A long-lived local daemon** holding the only Keychain access, with `keyward run`
-   as a thin client over a Unix socket. One approval at login rather than one per
-   command, so a rebuild never blocks a non-interactive run. The most work, and
-   probably what a mature version looks like.
+   as a thin client over a Unix socket. **Done**: a CLI rebuild never prompts, and a
+   non-interactive run never blocks on one.
 
 ### Corrections to an earlier version of this entry
 
@@ -342,7 +343,7 @@ replacement remains untested.
 
 **Severity: low. Hygiene, not exposure.**
 
-Deleting a migrated line from an rc file leaves its secret in the Keychain,
+Deleting a migrated line from an rc file leaves its secret in the vault,
 referenced by nothing. `keyward migrate` has no view of what the vault contains
 beyond the file in front of it, so it cannot notice.
 
@@ -422,8 +423,8 @@ rather than reimplementing one.
 
 **Severity: low, but decide deliberately.**
 
-Once references are committed to config files and written into Keychain item
-names, changing the format means migrating every file and item. `cap://` is
+Once references are committed to config files and written into vault entry
+names, changing the format means migrating every file and entry. `cap://` is
 chosen for parser-safety, but it is a prefix that will be hard to revise later.
 
 Deliberately deferred: namespacing (`cap://project/name`). The parser currently

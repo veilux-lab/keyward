@@ -40,9 +40,10 @@ Seven agent profiles ship with it, including Claude Code, Codex CLI, and Cursor.
   `golang.org/x/crypto`, `golang.org/x/sys` — a hand-rolled encrypted vault for
   Linux portability, with no Keychain or Secure Enclave involvement.
 
-That last point is the whole reason keyward can be macOS-only and better for it:
-no custom cryptography, OS-provided per-item ACLs, and access-control flags
-available.
+keyward started from the opposite choice, one Keychain item per secret, for no
+custom cryptography and OS-provided per-item access rules. Unsigned upgrades then
+asked once per secret, so keyward now also keeps an encrypted vault; what the
+Keychain adds is an OS-guarded key, and access-control flags still available for it.
 
 ## Agent firewalls — a different problem, already taken
 

@@ -102,7 +102,7 @@ sequenceDiagram
 | Install | `brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git` then `brew install veilux-lab/keyward/keyward` |
 | Upgrade | `brew upgrade veilux-lab/keyward/keyward` (the next command restarts the daemon) |
 | Pause access | `keyward service stop` (resume with `keyward service start`) |
-| Remove everything | `keyward uninstall` (Keychain items are kept) |
+| Remove everything | `keyward uninstall` (stored secrets are kept) |
 
 Use `keyward service …` rather than the `brew services` lines Homebrew adds to
 every service formula; Keyward's commands also keep first-use startup in step.
