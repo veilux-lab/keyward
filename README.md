@@ -59,7 +59,9 @@ keyward doctor
 
 After migrating, start anything that needs those values through `keyward run --`;
 started any other way, a program sees the `cap://` reference. Do not start your
-editor that way: every agent and terminal inside it would get the real values. Migration keeps an encrypted backup of the original, with its key in the vault;
+editor that way: every agent and terminal inside it would get the real values.
+
+Migration keeps an encrypted backup of the original, with its key in the vault;
 remove both with `keyward backups rm ~/.zshrc` once the new file works, then open a
 new terminal.
 
@@ -102,5 +104,7 @@ and makes no network connections. Any process running as you can ask the daemon
 for a value, and a command given a secret can leak it, so it does not stop a
 deliberate attempt. Activity, names and outcomes but never values, is logged to
 `~/Library/Logs/keyward/activity.jsonl`.
+
+Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 
 MIT licensed. See [LICENSE](LICENSE).
