@@ -17,7 +17,7 @@ func TestInstallerStartsOnlyAfterSuccessfulOptInInstall(t *testing.T) {
 		calls      string
 	}{
 		{"default", nil, false, 0, "brew:install veilux-lab/keyward/keyward\n"},
-		{"start", []string{"--start-daemon"}, false, 0, "brew:install veilux-lab/keyward/keyward\nbrew:--prefix veilux-lab/keyward/keyward\nkeyward:service install\n"},
+		{"start", []string{"--start-daemon"}, false, 0, "brew:install veilux-lab/keyward/keyward\nbrew:--prefix veilux-lab/keyward/keyward\nkeyward:start\n"},
 		{"help", []string{"--help"}, false, 0, ""},
 		{"unknown", []string{"--unknown"}, false, 2, ""},
 		{"extra", []string{"--start-daemon", "extra"}, false, 2, ""},

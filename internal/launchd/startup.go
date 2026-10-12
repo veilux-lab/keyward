@@ -163,7 +163,7 @@ func resume(home string, timeout time.Duration) error {
 	}
 	defer state.close()
 	if disabled, err := state.marked(disabledMarker); err != nil || disabled {
-		return cmp.Or(err, errors.New("automatic startup was removed by `keyward service uninstall`; turn it back on with `keyward service install`"))
+		return cmp.Or(err, errors.New("automatic startup was removed by `keyward service uninstall`; turn it back on with `keyward start`"))
 	}
 	return state.unmark(stoppedMarker)
 }
@@ -193,17 +193,17 @@ func (s *startupState) close() {
 }
 
 var (
-	errStartupDisabled = errors.New("automatic startup is disabled; enable it with `keyward service install`")
-	errStartupStopped  = errors.New("the daemon was stopped with `keyward service stop`; start it with `keyward service start`")
+	errStartupDisabled = errors.New("automatic startup is disabled; enable it with `keyward start`")
+	errStartupStopped  = errors.New("the daemon was stopped with `keyward stop`; start it with `keyward start`")
 )
 
 const (
 	runningMessage     = "✓ Keyward daemon is running and starts at login."
-	notRunningMessage  = "Keyward daemon is not running. Start it with: keyward service install"
-	stoppedStatus      = "Keyward daemon is stopped. Start it with: keyward service start"
+	notRunningMessage  = "Keyward daemon is not running. Start it with: keyward start"
+	stoppedStatus      = "Keyward daemon is stopped. Start it with: keyward start"
 	startedMessage     = "✓ Keyward daemon started."
-	stoppedMessage     = "✓ Keyward daemon stopped.\n  cap:// references won't resolve until you run: keyward service start\n  It also starts again at your next login."
-	uninstalledMessage = "✓ Keyward daemon stopped and removed from login startup.\n  Kept: the keyward command and your stored secrets.\n  Start it again with: keyward service install"
+	stoppedMessage     = "✓ Keyward daemon stopped.\n  cap:// references won't resolve until you run: keyward start\n  It also starts again at your next login."
+	uninstalledMessage = "✓ Keyward daemon stopped and removed from login startup.\n  Kept: the keyward command and your stored secrets.\n  Start it again with: keyward start"
 )
 
 func (m Manager) waitReady() error {

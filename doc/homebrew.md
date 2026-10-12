@@ -12,7 +12,7 @@ membership is required. A separate
 
 Release [`v0.1.3`](https://github.com/veilux-lab/keyward/releases/tag/v0.1.3) adds
 first-use startup, the optional installer below, and CLI-only local installation.
-`v0.1.1` requires explicit `keyward service install`. `v0.1.2` was never published.
+`v0.1.1` requires explicit `keyward start`. `v0.1.2` was never published.
 
 ## Install
 
@@ -26,12 +26,12 @@ The explicit URL lets Homebrew use this repository as a tap without a separate
 formula-specific trust on Homebrew versions that require it. Homebrew 7 still
 warns that the tap is not trusted before it trusts the formula; the warnings are
 expected. Homebrew's own caveat suggests `brew services start`; prefer
-`keyward service install`, which also re-enables startup after service uninstall.
+`keyward start`, which also re-enables startup after service uninstall.
 
 Run commands as your normal user, without `sudo`. Installing the formula does
 not migrate secrets or change your shell config. From `v0.1.3`, the daemon starts through `brew services` when a command first needs the Keychain;
 subsequent logins start it automatically. Help, version, status, and `run` without references
-leave it stopped. You can start it sooner with `keyward service install`.
+leave it stopped. You can start it sooner with `keyward start`.
 
 ### Start during installation
 
@@ -54,7 +54,7 @@ after `brew install` finishes, outside the formula's post-install sandbox.
 The formula is [Formula/keyward.rb](../Formula/keyward.rb). It injects the release
 version and Homebrew executable path, then runs `opt_bin/keyward daemon` under the
 stable service label `com.veilux-lab.keyward.homebrew`.
-`keyward service install` delegates to `brew services restart
+`keyward start` delegates to `brew services restart
 veilux-lab/keyward/keyward`. It refuses to start over another daemon or the signed
 local login agent. `service status` checks launchd registration and the socket.
 First-use startup uses `brew services start` for an unloaded service and respects
@@ -74,7 +74,7 @@ brew upgrade veilux-lab/keyward/keyward
 Homebrew leaves the old daemon running, and it can lose Keychain access once its
 files are replaced. From `v0.1.10`, the next `keyward` command notices the version
 difference and restarts the daemon before sending anything; earlier releases need
-`keyward service install`. The new daemon asks once for macOS approval to read
+`keyward start`. The new daemon asks once for macOS approval to read
 the vault key. The first daemon with the vault also moves secrets stored as
 separate Keychain items into it, which can ask once per item that one time. The Homebrew daemon uses the default
 [logging limits](install.md#activity-logs); environment overrides on an individual
@@ -91,8 +91,8 @@ brew uninstall veilux-lab/tap/keyward
 brew untap veilux-lab/tap
 brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git
 brew install veilux-lab/keyward/keyward
-keyward service install
-keyward service status
+keyward start
+keyward status
 ```
 
 Run the first command with the old CLI, before removing it. Confirm its service
@@ -127,7 +127,7 @@ backups beside the files doctor reads, and `~/Library/Logs/keyward`, then runs
 `brew uninstall` leaves that data and the tap behind. Stored secrets remain.
 
 Homebrew always adds `brew services` lines to the caveats of a formula with a
-service. Use `keyward service install`, `stop`, and `start` instead: they keep
+service. Use `keyward start`, `stop`, and `start` instead: they keep
 first-use startup in step.
 
 ## Prepare a release

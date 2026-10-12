@@ -9,7 +9,7 @@ sign: build
 	codesign --force --sign "$(SIGN_IDENTITY)" --identifier com.nwokolo24.keyward bin/keyward
 
 install: sign
-	bin/keyward service install
+	bin/keyward start
 
 test:
 	go test ./...

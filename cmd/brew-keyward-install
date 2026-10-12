@@ -22,5 +22,5 @@ brew_executable="${HOMEBREW_BREW_FILE:-brew}"
 "$brew_executable" install veilux-lab/keyward/keyward
 if [ "$start_daemon" = true ]; then
   keyward_prefix=$("$brew_executable" --prefix veilux-lab/keyward/keyward)
-  "$keyward_prefix/bin/keyward" service install
+  "$keyward_prefix/bin/keyward" start
 fi

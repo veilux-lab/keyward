@@ -162,6 +162,14 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-12 (simpler help)** — `keyward help` is now commands, options, and three
+examples. `keyward start`, `stop`, and `status` replace `service install`, `start`,
+`stop`, and `status` for users; `start` installs startup if needed. `uninstall`
+is the one way to remove keyward. The `service` forms and `daemon` still work, for
+launchd, Homebrew, and scripts, but are not listed. Error hints name the new
+commands. A Homebrew startup test that gave eight racing callers 40ms each now
+waits up to two seconds, after failing under load.
+
 **2026-10-12 (recovery code)** — Losing the vault key would lose every value at
 once, and migrate backups would go with it, since their keys are in the vault.
 `keyward recovery show` prints the key as a `KWR1-` code with a 24-bit checksum,

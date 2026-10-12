@@ -75,7 +75,7 @@ func TestUnversionedDaemonCountsAsOutdated(t *testing.T) {
 	serveOn(t, path, &daemon.Server{Store: untouched{vault.NewMemory(), t}})
 	c := &daemon.Client{Path: path, Version: "0.1.9"}
 	_, err := c.Get("api-token")
-	if !errors.Is(err, daemon.ErrOutdated) || !strings.Contains(err.Error(), "keyward service install") {
+	if !errors.Is(err, daemon.ErrOutdated) || !strings.Contains(err.Error(), "keyward start") {
 		t.Fatalf("Get = %v, want ErrOutdated with the fix", err)
 	}
 }

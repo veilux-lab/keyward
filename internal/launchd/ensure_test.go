@@ -66,6 +66,8 @@ func startupDir(home string) string { return filepath.Dir(daemon.DefaultSocket(h
 
 func TestHomebrewEnsureStartsOnceWithoutRestarting(t *testing.T) {
 	h := brewSetup(t)
+	// Eight callers queue for one lock; 40ms each is too tight under -race and load.
+	h.m.StartupTimeout = 2 * time.Second
 	var wg sync.WaitGroup
 	for range 8 {
 		m := h.m
@@ -134,7 +136,7 @@ func TestHomebrewEnsureDoesNotRestartLoadedOrSignedJobs(t *testing.T) {
 	for _, signed := range []bool{false, true} {
 		h := brewSetup(t)
 		h.loaded, h.signed = !signed, signed
-		if err := h.m.Ensure(); err == nil || !strings.Contains(err.Error(), "service install") {
+		if err := h.m.Ensure(); err == nil || !strings.Contains(err.Error(), "keyward start") {
 			t.Fatalf("loaded but unhealthy job: %v", err)
 		}
 		if strings.Contains(strings.Join(h.calls, "\n"), "brew services") {
@@ -407,7 +409,7 @@ func TestSignedEnsureDoesNotRestartALoadedUnhealthyJob(t *testing.T) {
 	h.loaded = true
 	h.m.StartupTimeout = 40 * time.Millisecond
 	h.m.Ready = func(string) error { return errors.New("not responding") }
-	if err := h.m.Ensure(); err == nil || !strings.Contains(err.Error(), "service install") {
+	if err := h.m.Ensure(); err == nil || !strings.Contains(err.Error(), "keyward start") {
 		t.Fatalf("loaded unhealthy signed job: %v", err)
 	}
 	for _, call := range h.calls {

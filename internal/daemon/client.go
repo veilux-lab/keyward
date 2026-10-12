@@ -129,14 +129,14 @@ func (c *Client) current() error {
 			running = "an older version"
 		}
 		if c.Restart == nil {
-			return fmt.Errorf("%w: it runs %s and this keyward is %s; restart it with `keyward service install`", ErrOutdated, running, c.Version)
+			return fmt.Errorf("%w: it runs %s and this keyward is %s; restart it with `keyward start`", ErrOutdated, running, c.Version)
 		}
 		if err := c.Restart(); err != nil {
-			return fmt.Errorf("restarting the outdated keyward daemon (%s): %w; run `keyward service install`", running, err)
+			return fmt.Errorf("restarting the outdated keyward daemon (%s): %w; run `keyward start`", running, err)
 		}
 		// Another installation may own the socket; restarting again would not help.
 		if resp, err := c.send(request{Op: "ping"}); err != nil || resp.Version != c.Version {
-			return fmt.Errorf("%w: it still runs %s after a restart; check `keyward service status`", ErrOutdated, running)
+			return fmt.Errorf("%w: it still runs %s after a restart; check `keyward status`", ErrOutdated, running)
 		}
 	}
 	c.checked = true
@@ -147,7 +147,7 @@ func (c *Client) send(req request) (response, error) {
 	conn, err := net.DialTimeout("unix", c.Path, 2*time.Second)
 	if err != nil && req.Op != "ping" && c.Start != nil && notRunning(err) {
 		if err := c.Start(); err != nil {
-			return response{}, fmt.Errorf("starting the keyward daemon: %w; run `keyward service install` to recover", err)
+			return response{}, fmt.Errorf("starting the keyward daemon: %w; run `keyward start` to recover", err)
 		}
 		// No request was sent, so connecting once more cannot replay a write.
 		conn, err = net.DialTimeout("unix", c.Path, 2*time.Second)
@@ -155,7 +155,7 @@ func (c *Client) send(req request) (response, error) {
 	if err != nil {
 		// No socket, or a socket left by a daemon that is gone.
 		if notRunning(err) {
-			hint := "run `keyward service install`"
+			hint := "run `keyward start`"
 			if c.Start == nil {
 				hint += "; for development or isolated use, run `keyward daemon`"
 			}

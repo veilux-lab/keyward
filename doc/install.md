@@ -2,7 +2,7 @@
 
 For Homebrew setup, upgrades, and removal, see [homebrew.md](homebrew.md).
 First-use startup and CLI-only installation are available from `v0.1.3`. With
-Homebrew `v0.1.1`, start the daemon with `keyward service install` first.
+Homebrew `v0.1.1`, start the daemon with `keyward start` first.
 With a development build, run `bin/keyward daemon` in a terminal.
 
 ## Daemon startup
@@ -19,12 +19,10 @@ daemon at login and keeps it running. This does not install or sign a developmen
 build. Permission errors and an unresponsive daemon are reported without starting
 a second process or replaying a request.
 
-`keyward service stop` stops the daemon and keeps first-use startup from bringing
-it back; `keyward service start` resumes it, and so does the next login. Use it to
-cut off access for a while. `keyward service uninstall` disables first-use startup
-as well as login startup. Both choices are saved in private local markers. Use
-`keyward service install` to enable startup again after uninstall. The signed `make install` continues to start the daemon
-immediately.
+`keyward stop` stops the daemon and keeps first-use startup from bringing
+it back; `keyward start` resumes it, and so does the next login. Use it to
+cut off access for a while. The choice is saved in a private local marker. The
+signed `make install` starts the daemon immediately.
 
 Custom `KEYWARD_SOCKET` or `KEYWARD_SERVICE` values use manual startup, so isolated
 experiments never start your normal daemon. Set the service on the daemon and
@@ -80,7 +78,7 @@ while any remain, including plaintext backups from earlier releases.
 Setting keyward up writes `~/.agents/keyward.md`, telling AI agents to run
 commands that need credentials through `keyward run` and never to print a value.
 That happens when the daemon first starts, when it restarts after an upgrade, and
-on `keyward service install`; Homebrew's own install step is sandboxed away from
+on `keyward start`; Homebrew's own install step is sandboxed away from
 the home directory. After migrating, keyward prints the line to add to each
 installed agent's global instructions (Claude Code, Codex, Gemini CLI); it never
 edits those files itself. `keyward agents` writes the file and prints the lines on
@@ -148,11 +146,8 @@ and restoration does not create another backup containing the restored values.
 A file restored without skips has its migrate backups removed, since it holds the
 values again; files with skips keep theirs.
 
-Restore before stopping the daemon if you want plaintext values back. Check all
-reported skips before removing Keyward. `keyward service uninstall` warns and
-requires `yes` before stopping startup; it keeps the CLI and stored secrets.
-It does not restore files. First-use startup stays disabled until you explicitly
-enable it again with `keyward service install`.
+Restore before uninstalling if you want plaintext values back, and check all
+reported skips first. `keyward uninstall` does not restore files.
 
 ## Signed local installation
 
@@ -164,13 +159,13 @@ Find its exact identity, then build, sign, and install:
 ```sh
 security find-identity -v -p codesigning
 make install SIGN_IDENTITY='Apple Development: you@example.com (CERTIFICATE_ID)'
-~/.local/bin/keyward service status
+~/.local/bin/keyward status
 ```
 
 Allow codesign's signing-key prompt if it appears. Installation puts the CLI in
 `~/.local/bin` and starts the daemon now and at login through a per-user
-LaunchAgent. Use `keyward service status` to check it, `keyward service install`
-to enable or restart it, and `keyward service uninstall` to disable startup.
+LaunchAgent. Use `keyward status` to check it, `keyward start` to start or restart
+it, and `keyward stop` to pause it.
 Activity is recorded in `~/Library/Logs/keyward/activity.jsonl`.
 If the CLI directory is not on your PATH, use `~/.local/bin/keyward` directly.
 Installation does not edit shell files or migrate secrets.
@@ -215,7 +210,7 @@ export KEYWARD_LOG_ROTATE_MB=5
 ```
 
 CLI settings apply immediately. For the signed installation, rerun
-`keyward service install` to persist them for the daemon. Homebrew's daemon uses
+`keyward start` to persist them for the daemon. Homebrew's daemon uses
 the defaults. `KEYWARD_LOG_DIR` selects a different log directory for isolated
 tests.
 

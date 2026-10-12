@@ -144,7 +144,7 @@ warns that references need a running daemon and shows restore/preview examples
 before asking for lowercase `yes` to stop the daemon and remove startup. Refusing
 keeps the service available so the user can restore first. Uninstall neither
 retrieves values nor restores files, and retains the CLI and stored secrets.
-It also disables first-use startup until an explicit `keyward service install`.
+It also disables first-use startup until an explicit `keyward start`.
 
 ### Secrets you want in an interactive shell
 
@@ -275,7 +275,7 @@ CLI that owns its Keychain calls on this Mac. That is not the current production
 path; removing the required daemon would need a cross-process lock and continued
 activity logging. See [obstacles.md](obstacles.md) 2a for the repeatable test.
 
-`keyward service install` copies a signed build into `~/.local/bin` and registers a
+`keyward start` copies a signed build into `~/.local/bin` and registers a
 per-user LaunchAgent. launchd starts it at login and restarts it if it exits. Updates
 replace the executable atomically, restart the agent, and check its socket without
 reading a Keychain item. A failed startup restores the prior installation. Removing
@@ -288,7 +288,7 @@ sandbox restrictions.
 
 The signed installation contains the CLI and a per-user LaunchAgent. The daemon
 keeps `com.nwokolo24.keyward` so existing Keychain access requirements still match.
-`keyward service status` checks availability without reading secrets; `service
+`keyward status` checks availability without reading secrets; `service
 install` and `service uninstall` control startup. Activity is available in
 `~/Library/Logs/keyward/activity.jsonl`. Signing still carries the certificate's
 publisher identity.

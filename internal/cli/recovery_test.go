@@ -117,7 +117,7 @@ func TestActivityLogAcceptsEveryRecordedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "doctor", "daemon", "service", "help", "version"} {
+	for _, command := range []string{"add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "doctor", "daemon", "service", "start", "stop", "status", "uninstall", "help", "version"} {
 		h := newHarness(t, "", nil, nil)
 		homed(t, h)
 		h.cli.Record = func(e activity.Event) {

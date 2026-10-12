@@ -35,7 +35,7 @@ func plistDictionary(value plistValue) (map[string]plistValue, bool) {
 }
 
 func (m Manager) installedConfiguration(path, binary string) error {
-	missing := errors.New("the signed Keyward installation is missing; run `make install` or `keyward service install` with an Apple-signed build")
+	missing := errors.New("the signed Keyward installation is missing; run `make install` or `keyward start` with an Apple-signed build")
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return missing
@@ -55,7 +55,7 @@ func (m Manager) installedConfiguration(path, binary string) error {
 	}
 	var value plistValue
 	if xml.Unmarshal(content, &value) != nil || value.XMLName.Local != "plist" || len(value.Values) != 1 {
-		return errors.New("installed daemon configuration is invalid; run `keyward service install`")
+		return errors.New("installed daemon configuration is invalid; run `keyward start`")
 	}
 	dict, valid := plistDictionary(value.Values[0])
 	_, program := dict["Program"]
@@ -70,7 +70,7 @@ func (m Manager) installedConfiguration(path, binary string) error {
 	if !valid || program || bundleProgram || !stringIs(dict["Label"], m.Label) || args.XMLName.Local != "array" || len(args.Values) != 2 ||
 		!stringIs(args.Values[0], binary) || !stringIs(args.Values[1], "daemon") || !envValid ||
 		!stringIs(env["KEYWARD_SOCKET"], m.socket()) || !stringIs(env["KEYWARD_SERVICE"], service) {
-		return errors.New("installed daemon configuration does not match this socket and service; run `keyward service install`")
+		return errors.New("installed daemon configuration does not match this socket and service; run `keyward start`")
 	}
 	info, err = os.Lstat(binary)
 	if os.IsNotExist(err) {

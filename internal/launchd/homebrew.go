@@ -94,7 +94,7 @@ func (h Homebrew) Run(action string) (string, error) {
 		}
 		return runningMessage + "\n  After an upgrade, macOS asks once to let it read the vault key.", nil
 	default:
-		return "", errors.New("usage: keyward service install|start|stop|status|uninstall")
+		return "", errors.New("usage: keyward start|start|stop|status|uninstall")
 	}
 }
 
@@ -152,7 +152,7 @@ func (h Homebrew) Ensure() error {
 	for _, job := range []string{label, homebrewLabel} {
 		if m.command("/bin/launchctl", "print", domain+job) == nil {
 			if err := m.waitReady(); err != nil {
-				return fmt.Errorf("the Keyward login agent is loaded but not responding; use its installation's `keyward service install` and check Library/Logs/keyward/activity.jsonl: %w", err)
+				return fmt.Errorf("the Keyward login agent is loaded but not responding; use its installation's `keyward start` and check Library/Logs/keyward/activity.jsonl: %w", err)
 			}
 			return nil
 		}
@@ -161,7 +161,7 @@ func (h Homebrew) Ensure() error {
 		return err
 	}
 	if err := m.waitReady(); err != nil {
-		return fmt.Errorf("Homebrew daemon did not become ready; run `keyward service install` and check Library/Logs/keyward/activity.jsonl: %w", err)
+		return fmt.Errorf("Homebrew daemon did not become ready; run `keyward start` and check Library/Logs/keyward/activity.jsonl: %w", err)
 	}
 	return nil
 }

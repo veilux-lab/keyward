@@ -60,11 +60,11 @@ cat > "$stage/INSTALL.txt" <<'TEXT'
 Keyward for macOS 15 or later (Apple Silicon and Intel)
 
 In Terminal, run the keyward binary from this disk image:
-  /Volumes/Keyward/keyward service install
+  /Volumes/Keyward/keyward start
 This installs the signed CLI in ~/.local/bin and starts its login daemon.
 Add ~/.local/bin to PATH if needed, then eject the disk image.
 
-Use keyward service status to check the daemon. To upgrade, run service install
+Use keyward status to check the daemon. To upgrade, run service install
 from the new disk image. A change of signing identity may require Keychain approval.
 Source-built Homebrew installations use a separate service: stop that installation
 with keyward service uninstall before installing this signed CLI.

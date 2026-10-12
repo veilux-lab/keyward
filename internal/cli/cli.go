@@ -97,60 +97,35 @@ type CLI struct {
 	cancelled bool
 }
 
-const usage = `usage: keyward <command> [arguments]
+const usage = `usage: keyward <command> [options]
 
-Secrets live in an encrypted vault whose key is in the macOS Keychain. Config
-files hold cap://<name> references instead of values, so an agent reading them
-finds nothing worth having.
-
-Only a background daemon reads the vault; the other commands ask it. An
-installed daemon starts on first use and at login. Start it now, or re-enable it,
-with keyward service install.
+Moves secrets out of your dotfiles into an encrypted vault and leaves cap://
+references behind, so an AI agent reading the files finds nothing to leak.
 
 commands:
-  service install       install or restart daemon startup at login
-  service start         start the daemon after service stop
-  service stop          stop the daemon until service start or next login
-  service status        check whether the daemon is running
-  service uninstall     warn about restoration, then ask to remove startup
-  uninstall             remove startup, local data, backups, and the package
-                        (asks first; stored secrets are kept)
-  add [-force] <name>   store a secret read from stdin
-  ls                    list stored secret names
-  rm <name>             remove a secret
-  run [--] <cmd>...     resolve cap:// references and run a command
-  migrate <file>        move a file's secrets into the encrypted vault (asks first)
-  migrate --dry-run <f> describe what would move, and stop
-  restore <file>...     return referenced secrets to files (requires "yes")
-  restore --dry-run <f> preview restoration without reading secret values
-  backups               list migrate's encrypted backups
-  backups rm <file>...  remove backups of files, and their keys (or --all)
-  backups recover <f>   write a file's latest backup beside it, in plaintext
-  agents                write ~/.agents/keyward.md, instructions for AI agents
-  recovery show         show a code that restores the vault key if it is lost
-  recovery restore      restore the vault key from a code read from stdin
-  doctor [file...]      check references against what is stored
-  version               print the version
-  help                  print this message
+  migrate <file>         move a file's secrets into the vault (asks first)
+  run -- <command>       run a command with the real values
+  add <name>             store a secret read from stdin
+  ls                     list stored names
+  rm <name>              remove a secret
+  doctor [file...]       check references, backups, and setup
+  restore <file>...      put the values back into files (asks first)
+  backups [rm|recover]   list, remove, or recover migrate's backups
+  recovery show|restore  save or restore the vault's recovery code
+  agents                 set up instructions for AI agents
+  status | stop | start  check, pause, or resume the daemon
+  uninstall              remove keyward; your vault is kept (asks first)
+  version
 
-advanced:
-  daemon                run the Keychain daemon in this terminal; installed copies
-                        start it for you, so use this only for development builds
-
-Options may go before or after a command's arguments; -- ends them. Everything
-after run's command belongs to that command.
+options:
+  --dry-run              migrate, restore: show what would change, and stop
+  --force                add: replace an existing secret
+  --all                  backups rm: remove every backup
 
 examples:
-  pbpaste | keyward add splunk-mcp-token
+  keyward migrate ~/.zshrc
+  pbpaste | keyward add github-token
   keyward run -- npm test
-  keyward migrate --dry-run ~/.zshrc   # describe, change nothing
-  keyward migrate ~/.zshrc             # describe, then confirm with "yes"
-  keyward restore ~/.zshrc             # list, then confirm plaintext restoration
-
-logging:
-  ~/Library/Logs/keyward/activity.jsonl (metadata only)
-  30 days, 50 MB total; rotate daily or at 10 MB by default
-  KEYWARD_LOG_RETENTION_DAYS, KEYWARD_LOG_MAX_MB, KEYWARD_LOG_ROTATE_MB
 `
 
 // Run dispatches a command and returns a process exit code.
@@ -169,7 +144,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "doctor", "daemon", "service", "help", "version":
+	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -228,6 +203,11 @@ func (c *CLI) dispatch(args []string) int {
 		return c.doctor(args[1:])
 	case "daemon":
 		return c.daemon(args[1:])
+	case "start":
+		// Start installs startup if needed, so one command covers first use and resuming.
+		return c.runService("start", "install")
+	case "stop", "status":
+		return c.runService(args[0], args[0])
 	case "service":
 		return c.service(args[1:])
 	case "uninstall":
@@ -241,7 +221,7 @@ func (c *CLI) dispatch(args []string) int {
 
 func (c *CLI) service(args []string) int {
 	if len(args) != 1 || !slices.Contains([]string{"install", "start", "stop", "status", "uninstall"}, args[0]) {
-		fmt.Fprintln(c.Stderr, "usage: keyward service install|start|stop|status|uninstall")
+		fmt.Fprintln(c.Stderr, "usage: keyward start|start|stop|status|uninstall")
 		return exitUsage
 	}
 	if c.Service == nil {
@@ -265,9 +245,17 @@ func (c *CLI) service(args []string) int {
 			return c.cancel("Service uninstall cancelled. Automatic startup was kept.")
 		}
 	}
-	message, err := c.Service(args[0])
+	return c.runService("service", args[0])
+}
+
+// runService performs a service action, naming command in any error.
+func (c *CLI) runService(command, action string) int {
+	if c.Service == nil {
+		return c.fail("keyward %s: service manager is unavailable", command)
+	}
+	message, err := c.Service(action)
 	if err != nil {
-		return c.fail("keyward service: %v", err)
+		return c.fail("keyward %s: %v", command, err)
 	}
 	fmt.Fprintln(c.Stdout, paintLines(c.ColorOut, message, map[string]string{"✓": green}))
 	return exitOK
@@ -372,7 +360,7 @@ func (c *CLI) daemon(args []string) int {
 	}
 	if err := c.Daemon(); err != nil {
 		if errors.Is(err, daemon.ErrRunning) {
-			return c.fail("keyward daemon: the daemon is already running, so there is nothing to start.\n  Check it with: keyward service status")
+			return c.fail("keyward daemon: the daemon is already running, so there is nothing to start.\n  Check it with: keyward status")
 		}
 		return c.fail("keyward daemon: %v", err)
 	}

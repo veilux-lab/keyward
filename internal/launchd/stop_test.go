@@ -20,7 +20,7 @@ func TestSignedStopHoldsUntilStartAndKeepsLoginStartup(t *testing.T) {
 		t.Fatal("stop removed the login agent")
 	}
 	h.calls = nil
-	if err := h.m.Ensure(); err == nil || !strings.Contains(err.Error(), "service start") || len(h.calls) != 0 {
+	if err := h.m.Ensure(); err == nil || !strings.Contains(err.Error(), "keyward start") || len(h.calls) != 0 {
 		t.Fatalf("first use after stop: %v, calls %v", err, h.calls)
 	}
 	if status, err := h.m.Run("status"); err != nil || !strings.Contains(status, "stopped") {
@@ -47,7 +47,7 @@ func TestHomebrewStopUnloadsWithoutUnregistering(t *testing.T) {
 	if !strings.Contains(calls, "launchctl bootout gui/") || strings.Contains(calls, "services stop") {
 		t.Fatalf("stop should unload and keep brew's login registration: %s", calls)
 	}
-	if err := h.m.Ensure(); err == nil || !strings.Contains(err.Error(), "service start") {
+	if err := h.m.Ensure(); err == nil || !strings.Contains(err.Error(), "keyward start") {
 		t.Fatalf("first use after stop: %v", err)
 	}
 	if _, err := h.m.Run("start"); err != nil || !h.loaded {
@@ -61,7 +61,7 @@ func TestStartDoesNotUndoUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.calls = nil
-	if _, err := h.m.Run("start"); err == nil || !strings.Contains(err.Error(), "service install") || len(h.calls) != 0 {
+	if _, err := h.m.Run("start"); err == nil || !strings.Contains(err.Error(), "keyward start") || len(h.calls) != 0 {
 		t.Fatalf("start after uninstall: %v, calls %v", err, h.calls)
 	}
 }
@@ -91,7 +91,7 @@ func TestUninstallMessageNamesWhatIsKeptAndHowToReturn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		for _, want := range []string{"Kept:", "stored secrets", "keyward service install"} {
+		for _, want := range []string{"Kept:", "stored secrets", "keyward start"} {
 			if !strings.Contains(message, want) {
 				t.Errorf("%s uninstall message lacks %q:\n%s", name, want, message)
 			}

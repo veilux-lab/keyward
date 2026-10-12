@@ -191,18 +191,46 @@ func TestDaemonAlreadyRunningPointsToServiceStatus(t *testing.T) {
 	if code := h.cli.Run([]string{"daemon"}); code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
-	if !strings.Contains(h.err(), "already running") || !strings.Contains(h.err(), "keyward service status") {
+	if !strings.Contains(h.err(), "already running") || !strings.Contains(h.err(), "keyward status") {
 		t.Errorf("stderr = %q, want a pointer to service status", h.err())
 	}
 }
 
-// Most users never run the daemon themselves, so help lists it last.
-func TestHelpListsDaemonAsAdvanced(t *testing.T) {
+// Help lists what a user runs; the daemon and service plumbing stay out of it.
+func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 	h := newHarness(t, "", nil, nil)
 	h.cli.Run([]string{"help"})
-	advanced := strings.Index(h.out(), "advanced:")
-	if advanced < 0 || strings.Index(h.out(), "\n  daemon ") < advanced {
-		t.Errorf("daemon is not under an advanced section:\n%s", h.out())
+	out := h.out()
+	commands, options, examples := strings.Index(out, "\ncommands:\n"), strings.Index(out, "\noptions:\n"), strings.Index(out, "\nexamples:\n")
+	if commands < 0 || options < commands || examples < options {
+		t.Fatalf("help lacks commands, options, and examples sections in that order:\n%s", out)
+	}
+	for _, want := range []string{"migrate <file>", "run -- <command>", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run -- npm test"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help lacks %q", want)
+		}
+	}
+	for _, unwanted := range []string{"advanced:", "service install", "service uninstall", "\n  daemon", "splunk", "Options may go"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("help still shows %q", unwanted)
+		}
+	}
+	if lines := strings.Count(out, "\n"); lines > 32 {
+		t.Errorf("help is %d lines, want at most 32", lines)
+	}
+}
+
+func TestStartStopAndStatusDriveTheService(t *testing.T) {
+	for command, action := range map[string]string{"start": "install", "stop": "stop", "status": "status"} {
+		h := newHarness(t, "", nil, nil)
+		var got string
+		h.cli.Service = func(a string) (string, error) { got = a; return "✓ done", nil }
+		if code := h.cli.Run([]string{command}); code != 0 {
+			t.Errorf("%s: exit %d: %s", command, code, h.err())
+		}
+		if got != action {
+			t.Errorf("%s ran service action %q, want %q", command, got, action)
+		}
 	}
 }
 
@@ -211,14 +239,6 @@ func TestDaemonTakesNoArguments(t *testing.T) {
 	h.cli.Daemon = func() error { t.Error("Daemon ran despite a usage error"); return nil }
 	if code := h.cli.Run([]string{"daemon", "extra"}); code != 2 {
 		t.Errorf("exit code = %d, want 2", code)
-	}
-}
-
-func TestHelpMentionsDaemon(t *testing.T) {
-	h := newHarness(t, "", nil, nil)
-	h.cli.Run([]string{"help"})
-	if !strings.Contains(h.out(), "daemon") {
-		t.Errorf("help does not mention the daemon:\n%s", h.out())
 	}
 }
 

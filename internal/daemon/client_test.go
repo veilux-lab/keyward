@@ -131,7 +131,7 @@ func TestClientStartupFailurePropagates(t *testing.T) {
 	starts := 0
 	c := &daemon.Client{Path: socketPath(t), Start: func() error { starts++; return want }}
 	err := c.Delete("dummy")
-	if !errors.Is(err, want) || !strings.Contains(err.Error(), "keyward service install") {
+	if !errors.Is(err, want) || !strings.Contains(err.Error(), "keyward start") {
 		t.Fatalf("Delete = %v, want startup cause and recovery guidance", err)
 	}
 	if starts != 1 {
@@ -146,7 +146,7 @@ func TestClientRetriesOnlyOnceAfterStartup(t *testing.T) {
 	if !errors.Is(err, daemon.ErrNotRunning) {
 		t.Fatalf("Entries = %v, want ErrNotRunning after unsuccessful startup", err)
 	}
-	if !strings.Contains(err.Error(), "keyward service install") || strings.Contains(err.Error(), "`keyward daemon`") {
+	if !strings.Contains(err.Error(), "keyward start") || strings.Contains(err.Error(), "`keyward daemon`") {
 		t.Errorf("installed service recovery = %q, want service-only guidance", err)
 	}
 	if starts != 1 {

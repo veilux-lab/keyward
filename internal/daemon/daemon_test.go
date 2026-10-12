@@ -94,7 +94,7 @@ func TestNotRunning(t *testing.T) {
 	if !errors.Is(err, daemon.ErrNotRunning) {
 		t.Fatalf("Get = %v, want ErrNotRunning", err)
 	}
-	if !strings.Contains(err.Error(), "keyward service install") {
+	if !strings.Contains(err.Error(), "keyward start") {
 		t.Errorf("error = %q, want service installation guidance", err)
 	}
 	if !strings.Contains(err.Error(), "for development or isolated use, run `keyward daemon`") {

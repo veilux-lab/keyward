@@ -111,7 +111,7 @@ func (m Manager) Run(action string) (string, error) {
 		}
 		return uninstalledMessage, nil
 	default:
-		return "", errors.New("usage: keyward service install|start|stop|status|uninstall")
+		return "", errors.New("usage: keyward start|start|stop|status|uninstall")
 	}
 }
 
@@ -195,7 +195,7 @@ func (m Manager) Ensure() error {
 	for _, loaded := range targets {
 		if m.command("/bin/launchctl", "print", loaded) == nil {
 			if err := m.waitReady(); err != nil {
-				return fmt.Errorf("the Keyward login agent is loaded but not responding; use its installation's `keyward service install` and check Library/Logs/keyward/activity.jsonl: %w", err)
+				return fmt.Errorf("the Keyward login agent is loaded but not responding; use its installation's `keyward start` and check Library/Logs/keyward/activity.jsonl: %w", err)
 			}
 			return nil
 		}
@@ -205,13 +205,13 @@ func (m Manager) Ensure() error {
 		return err
 	}
 	if err := m.command("/usr/bin/codesign", "--verify", "--strict", "-R", `=anchor apple generic and identifier "com.nwokolo24.keyward"`, binary); err != nil {
-		return fmt.Errorf("the installed daemon must be Apple-signed; run `make install` or `keyward service install` with a signed build: %w", err)
+		return fmt.Errorf("the installed daemon must be Apple-signed; run `make install` or `keyward start` with a signed build: %w", err)
 	}
 	if err := m.command("/bin/launchctl", "bootstrap", domain, plist); err != nil {
 		return err
 	}
 	if err := m.waitReady(); err != nil {
-		return fmt.Errorf("the installed daemon did not become ready; run `keyward service install` and check Library/Logs/keyward/activity.jsonl: %w", err)
+		return fmt.Errorf("the installed daemon did not become ready; run `keyward start` and check Library/Logs/keyward/activity.jsonl: %w", err)
 	}
 	return nil
 }
