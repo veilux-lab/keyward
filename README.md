@@ -57,14 +57,30 @@ keyward recovery show                # a code that restores the vault key if it 
 keyward doctor
 ```
 
-After migrating, start anything that needs those values through `keyward run --`,
-including editors (`keyward run -- code .`); started any other way, a program sees
-the `cap://` reference. Migration keeps an encrypted backup of the original, with its key in the vault;
+After migrating, start anything that needs those values through `keyward run --`;
+started any other way, a program sees the `cap://` reference. Do not start your
+editor that way: every agent and terminal inside it would get the real values. Migration keeps an encrypted backup of the original, with its key in the vault;
 remove both with `keyward backups rm ~/.zshrc` once the new file works, then open a
 new terminal.
 
 `migrate` and `restore` work on shell startup files, shell scripts, and `.env`
 files. Run `keyward help` for every command.
+
+## MCP servers
+
+An MCP server that reads a migrated variable gets the `cap://` reference instead
+of the token, and fails to connect. Run each one through keyward, so only that
+server gets its secret:
+
+```sh
+keyward mcp     # lists affected servers in Claude Code, Codex, and Cursor
+```
+
+It prints the replacement definition for each, in that tool's format, and never
+edits the config itself. A remote server goes through the `mcp-remote` bridge,
+with its header filled in after keyward resolves the token. Servers that read a
+variable from the editor's environment without naming it in their config cannot
+be detected; wrap those by hand the same way.
 
 ## Restore or remove
 

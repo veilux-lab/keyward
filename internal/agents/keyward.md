@@ -16,7 +16,9 @@ reference, not a broken value.
 - Never print a resolved value: no `env`, `printenv`, `echo "$VAR"`, `set -x`, or
   `curl -v` under `keyward run`, and never write one to a file.
 - An authentication failure, or a tool that receives `cap://…`, usually means it
-  was started outside keyward. Say so rather than looking for the value.
+  was started outside keyward. Say so rather than looking for the value. For an
+  MCP server, `keyward mcp` prints the fix; show it to the user before changing
+  any config.
 - If keyward says its daemon is not running, or a Keychain dialog appears, stop and
   tell the user. Do not retry in a loop.
 - Do not run `keyward migrate`, `restore`, `rm`, `add --force`, `backups recover`,

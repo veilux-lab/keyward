@@ -205,7 +205,7 @@ func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 	if commands < 0 || options < commands || examples < options {
 		t.Fatalf("help lacks commands, options, and examples sections in that order:\n%s", out)
 	}
-	for _, want := range []string{"migrate <file>", "run -- <command>", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run -- npm test"} {
+	for _, want := range []string{"migrate <file>", "run -- <command>", "mcp ", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run -- npm test"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q", want)
 		}
@@ -1161,7 +1161,8 @@ func TestMigrateExplainsKeywardRunAtEveryStep(t *testing.T) {
 	if !strings.Contains(prompt, "keyward run --") {
 		t.Errorf("the confirmation does not explain keyward run:\n%s", h.err())
 	}
-	if !strings.Contains(h.out(), "keyward run -- code .") {
-		t.Errorf("the result does not show launching an editor:\n%s", h.out())
+	// Starting an editor through keyward would hand every agent in it the values.
+	if strings.Contains(h.out(), "code .") || !strings.Contains(h.out(), "keyward mcp") {
+		t.Errorf("the result should point MCP servers at keyward mcp, not launch an editor:\n%s", h.out())
 	}
 }

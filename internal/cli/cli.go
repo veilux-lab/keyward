@@ -115,6 +115,7 @@ commands:
   backups [rm|recover]   list, remove, or recover migrate's backups
   recovery show|restore  save or restore the vault's recovery code
   agents                 set up instructions for AI agents
+  mcp                    show how to run MCP servers through keyward
   status | stop | start  check, pause, or resume the daemon
   uninstall              remove keyward; secrets stay in the vault (asks first)
   version
@@ -147,7 +148,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
+	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -202,6 +203,8 @@ func (c *CLI) dispatch(args []string) int {
 		return c.agents(args[1:])
 	case "recovery":
 		return c.recovery(args[1:])
+	case "mcp":
+		return c.mcp(args[1:])
 	case "doctor":
 		return c.doctor(args[1:])
 	case "daemon":
@@ -489,8 +492,9 @@ func (c *CLI) migrate(args []string) int {
 	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)
 	fmt.Fprintf(c.Stdout, "  Its key is in keyward's vault. Remove both once the new file works: keyward backups rm %s\n", plan.Path)
 	fmt.Fprint(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward:\n"+
-		"  keyward run -- npm test\n  keyward run -- code .    # an editor, and the tools it starts\n"+
-		"Started any other way, a program sees the cap:// reference instead of the value.\n")
+		"  keyward run -- npm test\n"+
+		"Started any other way, a program sees the cap:// reference instead of the value.\n"+
+		"MCP servers that use these values must start through keyward too: keyward mcp shows how.\n")
 	c.agentNextSteps()
 	c.remindRecovery()
 	return exitOK
@@ -559,6 +563,9 @@ func (c *CLI) doctor(args []string) int {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
 	}
 	c.remindRecovery()
+	if findings, _ := c.mcpFindings(); len(findings) > 0 {
+		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d MCP server(s) would receive cap:// references; see keyward mcp", len(findings))))
+	}
 	if n := c.unlinkedAgents(); n > 0 {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d installed AI agent(s) do not read %s; run keyward agents", n, agents.Display)))
 	}
