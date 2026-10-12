@@ -81,6 +81,23 @@ func (c *Client) Entries() ([]vault.Entry, error) {
 	return resp.Entries, err
 }
 
+// ExportKey returns the vault key, for a recovery code.
+func (c *Client) ExportKey() (vault.Secret, error) {
+	resp, err := c.do(request{Op: "export-key"})
+	if err != nil {
+		return vault.Secret{}, err
+	}
+	key := vault.NewSecret(resp.Value)
+	clear(resp.Value)
+	return key, nil
+}
+
+// RestoreKey stores key as the vault key if it opens the vault.
+func (c *Client) RestoreKey(key vault.Secret) (bool, error) {
+	resp, err := c.do(request{Op: "restore-key", Value: key.Bytes()})
+	return resp.Changed, err
+}
+
 func (c *Client) do(req request) (response, error) {
 	if req.Op != "ping" {
 		if err := c.current(); err != nil {

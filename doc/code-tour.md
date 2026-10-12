@@ -176,6 +176,10 @@ values). Three implementations are held to the same contract suite in
   deleting need no key, so they never ask.
 - Secrets stored as Keychain items by older releases move into the vault on first
   use and are then deleted from the Keychain.
+- Losing the key would lose every value, so `keyward recovery show` prints it as a
+  recovery code ([recovery.go](../internal/vault/recovery.go)) for a password
+  manager, and `keyward recovery restore` puts it back. Restore accepts only a
+  key that opens the vault.
 
 `Secret` ([secret.go](../internal/vault/secret.go)) wraps every value and redacts
 itself through every `fmt` verb and through JSON, so a value can only leave by an

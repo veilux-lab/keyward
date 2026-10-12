@@ -236,6 +236,12 @@ Developer ID would also fix it, but needs the paid programme.
 - Cost: one access rule now covers every secret, the key sits in the daemon's
   memory while it runs, and keyward owns the file format. Biometric gating would
   now gate the one key.
+- Losing the key loses every value at once. `keyward recovery show` prints it as
+  a recovery code with a checksum, only in a terminal on both ends so a pipe or an
+  agent cannot capture it, and only after `yes`. `keyward recovery restore` reads
+  the code from stdin and accepts only a key that opens the vault, so a wrong code
+  cannot make a lost vault worse. `migrate` and `doctor` remind until a code has
+  been shown.
 
 Do not shell out to `/usr/bin/security`. `security add-generic-password -w
 <value>` places the secret in `argv`, where `ps` can read it — self-defeating for

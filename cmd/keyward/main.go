@@ -65,20 +65,28 @@ func main() {
 		socket = daemon.DefaultSocket(home)
 	}
 
+	vaultPath := os.Getenv("KEYWARD_VAULT")
+	if vaultPath == "" {
+		vaultPath = vault.DefaultPath(home, service)
+	}
+	client := managedClient(home, socket, service, homebrewExecutable)
 	c := &cli.CLI{
-		Store:      managedClient(home, socket, service, homebrewExecutable),
-		Stdin:      os.Stdin,
-		Stdout:     os.Stdout,
-		Stderr:     os.Stderr,
-		ColorOut:   cli.ColorEnabled(term.IsTerminal(int(os.Stdout.Fd())), os.Getenv),
-		ColorErr:   cli.ColorEnabled(term.IsTerminal(int(os.Stderr.Fd())), os.Getenv),
-		Environ:    os.Environ,
-		ReadSecret: cli.StdinSecretReader(os.Stdin, os.Stderr),
-		Exec:       syscall.Exec,
-		Home:       home,
-		Workdir:    workdir,
-		Backups:    backup.Default(home),
-		Record:     record,
+		Store:          client,
+		Recovery:       client,
+		RecoveryMarker: vaultPath + ".recovery-shown",
+		Interactive:    term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())),
+		Stdin:          os.Stdin,
+		Stdout:         os.Stdout,
+		Stderr:         os.Stderr,
+		ColorOut:       cli.ColorEnabled(term.IsTerminal(int(os.Stdout.Fd())), os.Getenv),
+		ColorErr:       cli.ColorEnabled(term.IsTerminal(int(os.Stderr.Fd())), os.Getenv),
+		Environ:        os.Environ,
+		ReadSecret:     cli.StdinSecretReader(os.Stdin, os.Stderr),
+		Exec:           syscall.Exec,
+		Home:           home,
+		Workdir:        workdir,
+		Backups:        backup.Default(home),
+		Record:         record,
 		Daemon: func() error {
 			if socket == daemon.DefaultSocket(home) && service == vault.DefaultService {
 				// Best effort: a stale stop only makes first use ask for `service start`.
@@ -86,13 +94,9 @@ func main() {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			path := os.Getenv("KEYWARD_VAULT")
-			if path == "" {
-				path = vault.DefaultPath(home, service)
-			}
 			// Only the vault key lives in the Keychain; Legacy is where secrets were
 			// kept before the vault, and they move in on first use.
-			store := &vault.Encrypted{Path: path, Keys: vault.NewKeychainService(service + "-vault-key"), Legacy: vault.NewKeychainService(service)}
+			store := &vault.Encrypted{Path: vaultPath, Keys: vault.NewKeychainService(service + "-vault-key"), Legacy: vault.NewKeychainService(service)}
 			return daemon.RunLogged(ctx, socket, store, record)
 		},
 		Service: func(action string) (out string, err error) {

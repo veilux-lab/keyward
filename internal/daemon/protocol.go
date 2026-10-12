@@ -30,6 +30,8 @@ type response struct {
 	Version string        `json:"version,omitempty"`
 	Value   []byte        `json:"value,omitempty"`
 	Entries []vault.Entry `json:"entries,omitempty"`
+	// Changed answers restore-key: whether the stored key was replaced.
+	Changed bool `json:"changed,omitempty"`
 
 	// Code is empty on success. Message carries the error text, which by the
 	// Store contract never contains a value.

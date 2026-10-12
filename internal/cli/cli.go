@@ -83,6 +83,13 @@ type CLI struct {
 	// Service manages the signed installation and login agent.
 	Service func(action string) (string, error)
 
+	// Recovery exports and restores the vault key; nil without a daemon.
+	Recovery vault.KeyRecovery
+	// RecoveryMarker records that a recovery code was shown, ending the reminders.
+	RecoveryMarker string
+	// Interactive is true when stdin and stdout are both terminals.
+	Interactive bool
+
 	// ColorOut and ColorErr enable ANSI colour on each stream; see ColorEnabled.
 	ColorOut, ColorErr bool
 
@@ -92,10 +99,11 @@ type CLI struct {
 
 const usage = `usage: keyward <command> [arguments]
 
-Secrets live in the macOS Keychain. Config files hold cap://<name> references
-instead of values, so an agent reading them finds nothing worth having.
+Secrets live in an encrypted vault whose key is in the macOS Keychain. Config
+files hold cap://<name> references instead of values, so an agent reading them
+finds nothing worth having.
 
-Only a background daemon touches the Keychain; the other commands ask it. An
+Only a background daemon reads the vault; the other commands ask it. An
 installed daemon starts on first use and at login. Start it now, or re-enable it,
 with keyward service install.
 
@@ -119,6 +127,8 @@ commands:
   backups rm <file>...  remove backups of files, and their keys (or --all)
   backups recover <f>   write a file's latest backup beside it, in plaintext
   agents                write ~/.agents/keyward.md, instructions for AI agents
+  recovery show         show a code that restores the vault key if it is lost
+  recovery restore      restore the vault key from a code read from stdin
   doctor [file...]      check references against what is stored
   version               print the version
   help                  print this message
@@ -159,7 +169,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "doctor", "daemon", "service", "help", "version":
+	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "doctor", "daemon", "service", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -212,6 +222,8 @@ func (c *CLI) dispatch(args []string) int {
 		return c.backups(args[1:])
 	case "agents":
 		return c.agents(args[1:])
+	case "recovery":
+		return c.recovery(args[1:])
 	case "doctor":
 		return c.doctor(args[1:])
 	case "daemon":
@@ -489,6 +501,7 @@ func (c *CLI) migrate(args []string) int {
 		"  keyward run -- npm test\n  keyward run -- code .    # an editor, and the tools it starts\n"+
 		"Started any other way, a program sees the cap:// reference instead of the value.\n")
 	c.agentNextSteps()
+	c.remindRecovery()
 	return exitOK
 }
 
@@ -554,6 +567,7 @@ func (c *CLI) doctor(args []string) int {
 	} else if len(found) > 0 {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
 	}
+	c.remindRecovery()
 	if n := c.unlinkedAgents(); n > 0 {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d installed AI agent(s) do not read %s; run keyward agents", n, agents.Display)))
 	}

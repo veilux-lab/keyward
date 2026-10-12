@@ -141,7 +141,7 @@ func (s *Server) handle(conn net.Conn) {
 		op = "status"
 	case "entries":
 		op = "list"
-	case "get", "put", "replace", "delete":
+	case "get", "put", "replace", "delete", "export-key", "restore-key":
 	default:
 		op = "request"
 	}
@@ -180,6 +180,26 @@ func (s *Server) dispatch(req request) response {
 		var entries []vault.Entry
 		if entries, err = s.Store.Entries(); err == nil {
 			return response{Entries: entries}
+		}
+	case "export-key", "restore-key":
+		recovery, ok := s.Store.(vault.KeyRecovery)
+		if !ok {
+			err = errors.New("this daemon's store has no vault key")
+			break
+		}
+		if req.Op == "export-key" {
+			var key vault.Secret
+			if key, err = recovery.ExportKey(); err == nil {
+				return response{Value: key.Bytes()}
+			}
+			break
+		}
+		key := vault.NewSecret(req.Value)
+		var changed bool
+		changed, err = recovery.RestoreKey(key)
+		key.Destroy()
+		if err == nil {
+			return response{Changed: changed}
 		}
 	default:
 		err = fmt.Errorf("unknown operation %q", req.Op)

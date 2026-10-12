@@ -20,4 +20,5 @@ reference, not a broken value.
 - If keyward says its daemon is not running, or a Keychain dialog appears, stop and
   tell the user. Do not retry in a loop.
 - Do not run `keyward migrate`, `restore`, `rm`, `add --force`, `backups recover`,
-  `backups rm`, or `uninstall`, or read keyward's backups, unless the user asks.
+  `backups rm`, `recovery`, or `uninstall`, or read keyward's backups or vault,
+  unless the user asks.

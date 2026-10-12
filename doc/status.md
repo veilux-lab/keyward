@@ -162,6 +162,16 @@ correct response is to stop building, not to push through.
 
 ## Changelog
 
+**2026-10-12 (recovery code)** — Losing the vault key would lose every value at
+once, and migrate backups would go with it, since their keys are in the vault.
+`keyward recovery show` prints the key as a `KWR1-` code with a 24-bit checksum,
+only when stdin and stdout are terminals and after `yes`. `keyward recovery
+restore` reads it from stdin and stores it only if it opens the vault, replacing a
+missing or corrupted key. `migrate` and `doctor` remind until a code is shown. The
+activity log now accepts `agents` and `recovery`; before, `keyward agents` printed
+a logging warning. Verified end to end on the real Keychain under a throwaway
+service: the key deleted, reads failing, then restored from the code.
+
 **2026-10-09 (encrypted vault)** — Secrets move from one Keychain item each into
 `~/Library/Application Support/keyward-vault/keyward.vault`, every value sealed
 separately with AES-256-GCM under one key kept in the Keychain. A real Homebrew

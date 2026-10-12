@@ -50,6 +50,7 @@ keyward run -- npm test
 pbpaste | keyward add api-token
 keyward ls                           # names only
 keyward agents                       # instructions for AI agents, and how to link them
+keyward recovery show                # a code that restores the vault key if it is lost
 keyward doctor
 ```
 

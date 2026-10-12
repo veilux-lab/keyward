@@ -92,6 +92,26 @@ keyward did not write is never replaced or removed.
 Open a new terminal after migration so exported variables contain references
 rather than the old values.
 
+### Recovery code
+
+Every value in the vault depends on one key in your Keychain. Resetting the login
+keychain, or deleting that item, would lose them all. Save a recovery code once:
+
+```sh
+keyward recovery show      # in a terminal; asks for "yes", then prints KWR1-…
+```
+
+Store the code in a password manager. If the key is ever lost, paste it back:
+
+```sh
+keyward recovery restore   # reads the code from stdin, never from arguments
+```
+
+Restore refuses a code that does not open your vault, and a checksum catches a
+mistyped character. Anyone with the code and a copy of your vault file can read
+your secrets, so keep it out of files and chats. `migrate` and `doctor` remind you
+until a code has been shown.
+
 Options may come before or after a command's arguments, so
 `keyward migrate ~/.zshrc --dry-run` works; `--` ends options.
 
