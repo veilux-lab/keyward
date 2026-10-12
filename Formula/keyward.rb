@@ -1,14 +1,14 @@
 class Keyward < Formula
   desc "Move shell secrets into a Keychain-keyed vault, resolved by a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.16/keyward-0.1.16.tar.gz"
-  version "0.1.16"
-  sha256 "79c55f53fcb56fe196918623c2cab0f86dd24f8985fd8913c2e0a10cb63fa963"
+  url "https://github.com/veilux-lab/keyward/releases/download/v0.1.17/keyward-0.1.17.tar.gz"
+  version "0.1.17"
+  sha256 "427d79739074019aade1aa86480ac92f40db06340d064aada8d8c041518fe2f0"
   license "MIT"
 
   bottle do
-    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.16"
-    sha256 arm64_sequoia: "b7d02f5ed748edffb71feea75bb0ba4b7380e7c54784865728674576b63c978b"
+    root_url "https://github.com/veilux-lab/keyward/releases/download/v0.1.17"
+    sha256 arm64_sequoia: "ba4553bb87ef3fef15c2a966771a5378e2d4ebc70744a936c443266c8a7e6f26"
   end
 
   depends_on "go" => :build
@@ -33,13 +33,10 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      The Keyward daemon starts on first use, then at every login, and writes
-      ~/.agents/keyward.md, instructions for AI agents. After an upgrade, the
-      next keyward command restarts it; macOS may ask once for Keychain access.
-        Start now:          keyward service install
-        Pause access:       keyward service stop
-        Remove everything:  keyward uninstall
-      Use these rather than the brew services lines below.
+      Get started:   keyward migrate ~/.zshrc
+      Then use:      keyward run -- <command>
+      More:          keyward help
+      Ignore the brew services lines below; keyward starts its own daemon.
     EOS
   end
 
