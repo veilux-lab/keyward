@@ -65,8 +65,13 @@ daemon upgrade asks once to read the vault key.
 - Commit locally as:
   `git -c user.name="Bueze Nwokolo" -c user.email="55523993+nwokolo24@users.noreply.github.com" commit`
 - Do not add Claude or other AI tools as authors or co-authors of commits or PRs.
-- **Never push**, or create, change, or delete a remote branch or pull request,
-  without the owner's explicit approval given just before that action. Say the repo,
-  the branch, and the action when asking. An earlier approval does not cover the
-  next push.
-- Remote: `git@github.com:veilux-lab/keyward.git`, branch `main`.
+- Changes reach `main` only through a pull request: branch from the latest
+  `origin/main`, push the branch, and open a PR. A ruleset blocks direct pushes, and
+  the CI `verify` check must pass before merging. Merging publishes a release unless
+  the PR changes only Markdown.
+- **Never push**, or create, change, merge, or delete a remote branch or pull
+  request, without the owner's explicit approval given just before that action. Say
+  the repo, the branch, and the action when asking. An earlier approval does not
+  cover the next one.
+- Remote: `git@github.com:veilux-lab/keyward.git`, default branch `main`. Merged
+  branches are deleted automatically.
