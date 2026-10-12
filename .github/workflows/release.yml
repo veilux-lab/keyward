@@ -190,11 +190,17 @@ jobs:
         run: |
           gh auth setup-git --hostname github.com
           bash scripts/publish-release.sh "$RELEASE_VERSION" bin/release "$RELEASE_TYPE"
+      # The main ruleset blocks direct pushes except from this deploy key.
       - name: Update Homebrew
         env:
-          GH_TOKEN: ${{ github.token }}
+          HOMEBREW_DEPLOY_KEY: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
         run: |
-          gh auth setup-git --hostname github.com
+          key="$RUNNER_TEMP/deploy-key" hosts="$RUNNER_TEMP/known_hosts"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$HOMEBREW_DEPLOY_KEY" > "$key")
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$hosts"
+          git remote set-url --push origin git@github.com:veilux-lab/keyward.git
           bash scripts/update-homebrew.sh bin/release/Formula/keyward.rb
       - name: Mark the current version latest
         env:
