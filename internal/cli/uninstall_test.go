@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -184,5 +185,69 @@ func TestUninstallKeepsAUsersOwnAgentFile(t *testing.T) {
 	}
 	if _, err := os.Stat(agentFile(home)); err != nil {
 		t.Error("uninstall removed a file keyward did not write")
+	}
+}
+
+// Uninstall names each file that would break, with the command that fixes it.
+func TestUninstallNamesFilesThatStillUseReferences(t *testing.T) {
+	r := uninstallFixture(t, "")
+	homed(t, r.h)
+	path := migrated(t, r.h)
+	r.h.cli.Stdin = strings.NewReader("no\n")
+	r.h.cli.Run([]string{"uninstall"})
+	if !strings.Contains(r.h.err(), path) || !strings.Contains(r.h.err(), "keyward restore "+path) {
+		t.Errorf("the plan does not name the migrated file and its restore command:\n%s", r.h.err())
+	}
+}
+
+func TestUninstallWithoutPurgeKeepsTheVault(t *testing.T) {
+	r := uninstallFixture(t, "yes\n")
+	r.h.cli.PurgeVault = func() error { t.Error("the vault was purged without --purge"); return nil }
+	if code := r.h.cli.Run([]string{"uninstall"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, r.h.err())
+	}
+}
+
+// Purging while files still hold references would strand them for good.
+func TestPurgeRefusesWhileFilesStillUseReferences(t *testing.T) {
+	r := uninstallFixture(t, "")
+	homed(t, r.h)
+	path := migrated(t, r.h)
+	r.h.cli.Stdin = strings.NewReader("yes\n")
+	r.h.cli.PurgeVault = func() error { t.Error("purged while a file still used the vault"); return nil }
+	if code := r.h.cli.Run([]string{"uninstall", "--purge"}); code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	if len(r.calls) != 0 {
+		t.Errorf("something was removed: %v", r.calls)
+	}
+	if !strings.Contains(r.h.err(), "keyward restore "+path) {
+		t.Errorf("the refusal does not say how to restore:\n%s", r.h.err())
+	}
+}
+
+func TestPurgeDeletesTheVaultOnceFilesAreRestored(t *testing.T) {
+	r := uninstallFixture(t, "")
+	homed(t, r.h)
+	path := migrated(t, r.h)
+	r.h.cli.Stdin = strings.NewReader("yes\n")
+	if code := r.h.cli.Run([]string{"restore", path}); code != 0 {
+		t.Fatalf("restore: %d %s", code, r.h.err())
+	}
+	purged := false
+	r.h.cli.PurgeVault = func() error {
+		if !slices.Contains(r.calls, "service uninstall") {
+			t.Error("the vault was purged while the daemon still ran")
+		}
+		purged = true
+		return nil
+	}
+	r.h.cli.Stdin = strings.NewReader("yes\n")
+	r.h.stderr.Reset()
+	if code := r.h.cli.Run([]string{"uninstall", "--purge"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, r.h.err())
+	}
+	if !purged || !strings.Contains(r.h.err(), "permanently") {
+		t.Errorf("purged=%v; the plan must say the secrets go permanently:\n%s", purged, r.h.err())
 	}
 }

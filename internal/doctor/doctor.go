@@ -200,6 +200,46 @@ func scanReferences(path string, content []byte) (valid, malformed []Reference) 
 	return valid, malformed
 }
 
+// InUse counts, per file, the references to secrets that are stored. It reads
+// paths plus every file a stored secret was migrated from, so a file outside the
+// defaults is still found. Missing and unreadable files are skipped.
+func InUse(store vault.Store, paths []string) (map[string]int, error) {
+	entries, err := store.Entries()
+	if err != nil {
+		return nil, err
+	}
+	stored := map[string]bool{}
+	files := append([]string(nil), paths...)
+	for _, e := range entries {
+		if backup.IsKey(e.Name) {
+			continue
+		}
+		stored[e.Name] = true
+		if e.Note != "" {
+			files = append(files, sourceFile(e.Note))
+		}
+	}
+	counts := map[string]int{}
+	seen := map[string]bool{}
+	for _, path := range files {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		refs, _ := scanReferences(path, content)
+		for _, ref := range refs {
+			if name, err := handle.Normalize(ref.Name); err == nil && stored[name] {
+				counts[path]++
+			}
+		}
+	}
+	return counts, nil
+}
+
 // nameLength measures the leading run of characters a reference name may contain.
 func nameLength(s string) int {
 	i := 0

@@ -170,6 +170,13 @@ launchd, Homebrew, and scripts, but are not listed. Error hints name the new
 commands. A Homebrew startup test that gave eight racing callers 40ms each now
 waits up to two seconds, after failing under load.
 
+**2026-10-12 (uninstall --purge)** — Uninstall now lists each file still using
+stored secrets, found from the default paths and migration provenance, with the
+`keyward restore` command for it. `--purge` also deletes the vault, its key, its
+recovery marker, and any secret still kept as a separate Keychain item, and refuses
+while a listed file still uses them: purging then would strand those files for
+good. Verified against the real Keychain under a throwaway service.
+
 **2026-10-12 (recovery code)** — Losing the vault key would lose every value at
 once, and migrate backups would go with it, since their keys are in the vault.
 `keyward recovery show` prints the key as a `KWR1-` code with a 24-bit checksum,

@@ -6,7 +6,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -126,6 +128,7 @@ func main() {
 	}
 	if socket == daemon.DefaultSocket(home) && service == vault.DefaultService {
 		c.DataDirs = []string{filepath.Dir(socket), activity.DefaultConfig(home).Dir}
+		c.PurgeVault = func() error { return purgeVault(vaultPath, service) }
 		if homebrewExecutable != "" {
 			c.RemovePackage = (launchd.Homebrew{Home: home, UID: os.Getuid(), Brew: homebrewExecutable}).Remove
 		} else if executable, err := os.Executable(); err == nil && executable == filepath.Join(home, ".local", "bin", "keyward") {
@@ -168,4 +171,25 @@ func writeAgentFile(home string) {
 	if home != "" {
 		_ = agents.Default(home).Write()
 	}
+}
+
+// purgeVault deletes the vault, its recovery marker, its key, and any secrets still
+// stored as separate Keychain items. Deleting needs no Keychain approval.
+func purgeVault(path, service string) error {
+	var errs []error
+	for _, file := range []string{path, path + ".recovery-shown"} {
+		if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	if err := vault.NewKeychainService(service + "-vault-key").Delete("master"); err != nil && !errors.Is(err, vault.ErrNotFound) {
+		errs = append(errs, err)
+	}
+	legacy := vault.NewKeychainService(service)
+	entries, err := legacy.Entries()
+	errs = append(errs, err)
+	for _, e := range entries {
+		errs = append(errs, legacy.Delete(e.Name))
+	}
+	return errors.Join(errs...)
 }

@@ -77,6 +77,8 @@ type CLI struct {
 
 	// DataDirs are deleted by uninstall; empty for isolated instances.
 	DataDirs []string
+	// PurgeVault deletes the vault and its Keychain key, for uninstall --purge.
+	PurgeVault func() error
 	// RemovePackage deletes the installed program after its data; nil for development builds.
 	RemovePackage func() (string, error)
 
@@ -114,13 +116,14 @@ commands:
   recovery show|restore  save or restore the vault's recovery code
   agents                 set up instructions for AI agents
   status | stop | start  check, pause, or resume the daemon
-  uninstall              remove keyward; your vault is kept (asks first)
+  uninstall              remove keyward; secrets stay in the vault (asks first)
   version
 
 options:
   --dry-run              migrate, restore: show what would change, and stop
   --force                add: replace an existing secret
   --all                  backups rm: remove every backup
+  --purge                uninstall: also delete the vault, once files are restored
 
 examples:
   keyward migrate ~/.zshrc

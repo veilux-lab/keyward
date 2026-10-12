@@ -66,11 +66,13 @@ See [the usage guide](doc/install.md) for supported files and more commands.
 ```sh
 keyward restore --dry-run ~/.zshrc .env
 keyward restore ~/.zshrc .env   # writes plaintext back; asks for "yes"
-keyward uninstall               # removes startup, data, backups, and the package
+keyward uninstall               # removes keyward; secrets stay in the vault
+keyward uninstall --purge       # also deletes the vault and its key
 ```
 
-Stored secrets are kept; remove them first with `keyward rm <name>` if you want
-them gone.
+Restore first: uninstall lists every file that still uses `cap://` references,
+with the command that restores it. `--purge` refuses until no file does, because
+a purged vault cannot be recovered.
 
 ## What it protects
 

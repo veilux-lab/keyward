@@ -439,3 +439,26 @@ func TestDanglingReportedPerOccurrence(t *testing.T) {
 		t.Errorf("Dangling = %+v, want one per occurrence", r.Dangling)
 	}
 }
+
+// Uninstall uses this to name every file that would break, including ones
+// outside the default paths that provenance points to.
+func TestInUseCountsStoredReferencesPerFile(t *testing.T) {
+	dir := t.TempDir()
+	rc := filepath.Join(dir, ".zshrc")
+	project := filepath.Join(t.TempDir(), ".env")
+	os.WriteFile(rc, []byte("export A='cap://a'\nexport B='cap://b'\nexport GONE='cap://gone'\n"), 0o644)
+	os.WriteFile(project, []byte("C=cap://c\n"), 0o644)
+	store := vault.NewMemory()
+	for name, note := range map[string]string{"a": rc + ":1", "b": "", "c": project + ":1"} {
+		if err := store.Put(name, vault.NewSecret([]byte("v")), note); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := doctor.InUse(store, []string{rc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[rc] != 2 || got[project] != 1 {
+		t.Errorf("InUse = %v, want %s: 2 and %s: 1", got, rc, project)
+	}
+}

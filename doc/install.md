@@ -147,7 +147,11 @@ A file restored without skips has its migrate backups removed, since it holds th
 values again; files with skips keep theirs.
 
 Restore before uninstalling if you want plaintext values back, and check all
-reported skips first. `keyward uninstall` does not restore files.
+reported skips first. `keyward uninstall` does not restore files; it lists each
+file that still uses stored secrets, with the `keyward restore` command for it.
+It keeps the vault and its key, so reinstalling brings everything back.
+`keyward uninstall --purge` deletes them as well, and refuses while any listed
+file still uses them.
 
 ## Signed local installation
 

@@ -2,28 +2,50 @@ package cli
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/veilux-lab/keyward/internal/agents"
+	"github.com/veilux-lab/keyward/internal/doctor"
 )
 
-// uninstall removes Keyward's startup, local data, and package, keeping stored secrets.
+// uninstall removes Keyward's startup, local data, and package. Stored secrets are
+// kept unless --purge is given, so reinstalling brings everything back.
 func (c *CLI) uninstall(args []string) int {
-	if len(args) != 0 {
-		fmt.Fprintln(c.Stderr, "usage: keyward uninstall")
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	fs.SetOutput(c.Stderr)
+	purge := fs.Bool("purge", false, "also delete the vault and its key")
+	if rest, err := parse(fs, args); err != nil || len(rest) != 0 {
+		fmt.Fprintln(c.Stderr, "usage: keyward uninstall [--purge]")
 		return exitUsage
 	}
-	if len(c.DataDirs) == 0 || c.Service == nil {
+	if len(c.DataDirs) == 0 || c.Service == nil || (*purge && c.PurgeVault == nil) {
 		return c.fail("keyward uninstall: unavailable for isolated instances; stop that daemon yourself")
+	}
+	inUse, err := doctor.InUse(c.Store, doctor.DefaultPaths(c.Home, c.Workdir))
+	if err != nil && *purge {
+		return c.fail("keyward uninstall: cannot check which files still use keyward, so nothing was purged: %v", err)
+	}
+	using := restoreList(inUse)
+	// Purging now would leave these files pointing at secrets that no longer exist.
+	if *purge && using != "" {
+		return c.fail("keyward uninstall --purge: these files still use stored secrets. Restore them first, then run it again:\n%s", using)
 	}
 	found, err := c.knownBackups()
 	if err != nil {
 		return c.fail("keyward uninstall: %v", err)
 	}
 	var plan strings.Builder
-	fmt.Fprintf(&plan, "%s\n\nThis removes:\n  the daemon and its login startup\n", c.errs(yellow, "Warning: after uninstall, cap:// references in your files stop resolving."))
+	fmt.Fprintf(&plan, "%s\n\n", c.errs(yellow, "Warning: after uninstall, cap:// references in your files stop resolving."))
+	if using != "" {
+		fmt.Fprintf(&plan, "These files still use keyward. Cancel and restore them first to put the values back:\n%s\n", using)
+	} else {
+		plan.WriteString("No file keyward knows of uses it. Restore any other file with cap:// references first: keyward restore <file>\n\n")
+	}
+	plan.WriteString("This removes:\n  the daemon and its login startup\n")
 	for _, dir := range c.DataDirs {
 		fmt.Fprintf(&plan, "  %s\n", dir)
 	}
@@ -42,8 +64,11 @@ func (c *CLI) uninstall(args []string) int {
 	if c.RemovePackage != nil {
 		plan.WriteString("  the keyward package\n")
 	}
-	plan.WriteString("Kept: your stored secrets, in the encrypted vault and its Keychain key. Remove them first with keyward rm <name> if you want them gone.\n\n" +
-		"To put secrets back into your files, cancel and run: keyward restore <file>...\n\n")
+	if *purge {
+		plan.WriteString("  your stored secrets: the vault and its Keychain key, permanently\n\n")
+	} else {
+		plan.WriteString("Kept: your stored secrets, in the encrypted vault and its Keychain key. To delete them too, use keyward uninstall --purge.\n\n")
+	}
 	if _, err := fmt.Fprint(c.Stderr, plan.String()+c.errs(bold, `Type "yes" to remove Keyward:`)+" "); err != nil {
 		return exitFailure
 	}
@@ -70,6 +95,9 @@ func (c *CLI) uninstall(args []string) int {
 		_, rmErr := agentFile.Remove()
 		err = errors.Join(err, rmErr)
 	}
+	if *purge {
+		err = errors.Join(err, c.PurgeVault())
+	}
 	if err != nil {
 		return c.fail("keyward uninstall: removing local data: %v; the package was kept", err)
 	}
@@ -92,4 +120,18 @@ func (c *CLI) uninstall(args []string) int {
 	}
 	fmt.Fprintln(c.Stdout, paintLines(c.ColorOut, strings.Join(lines, "\n"), map[string]string{"✓": green}))
 	return exitOK
+}
+
+// restoreList renders each file still using keyward with the command that restores it.
+func restoreList(inUse map[string]int) string {
+	files := make([]string, 0, len(inUse))
+	for file := range inUse {
+		files = append(files, file)
+	}
+	slices.Sort(files)
+	var b strings.Builder
+	for _, file := range files {
+		fmt.Fprintf(&b, "  %s (%d reference(s)): keyward restore %s\n", file, inUse[file], file)
+	}
+	return b.String()
 }
