@@ -190,9 +190,17 @@ jobs:
         run: |
           gh auth setup-git --hostname github.com
           bash scripts/publish-release.sh "$RELEASE_VERSION" bin/release "$RELEASE_TYPE"
+      # The main ruleset blocks direct pushes except from this app, owned by veilux-lab.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: release-app
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: keyward
+          permission-contents: write
       - name: Update Homebrew
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
         run: |
           gh auth setup-git --hostname github.com
           bash scripts/update-homebrew.sh bin/release/Formula/keyward.rb
