@@ -28,13 +28,10 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      The Keyward daemon starts on first use, then at every login, and writes
-      ~/.agents/keyward.md, instructions for AI agents. After an upgrade, the
-      next keyward command restarts it; macOS may ask once for Keychain access.
-        Start now:          keyward service install
-        Pause access:       keyward service stop
-        Remove everything:  keyward uninstall
-      Use these rather than the brew services lines below.
+      Get started:   keyward migrate ~/.zshrc
+      Then use:      keyward run -- <command>
+      More:          keyward help
+      Ignore the brew services lines below; keyward starts its own daemon.
     EOS
   end
 
