@@ -172,9 +172,12 @@ func (c *Client) send(req request) (response, error) {
 	conn.SetDeadline(time.Now().Add(timeout))
 
 	var resp response
-	err = json.NewEncoder(conn).Encode(req)
-	if err == nil {
-		err = json.NewDecoder(io.LimitReader(conn, maxMessage)).Decode(&resp)
+	writeErr := json.NewEncoder(conn).Encode(req)
+	// A daemon that refuses a connection answers and closes without reading, so a
+	// failed write can still have an answer waiting.
+	err = json.NewDecoder(io.LimitReader(conn, maxMessage)).Decode(&resp)
+	if err != nil && writeErr != nil {
+		err = writeErr
 	}
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return response{}, fmt.Errorf("no answer from the keyward daemon within %s; if a Keychain prompt is showing, approve it", timeout)

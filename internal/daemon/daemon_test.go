@@ -460,3 +460,31 @@ func (s *syncBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.b.String()
 }
+
+// A refusing daemon answers and closes without reading, so a client still sending
+// its request must read the answer rather than report a broken pipe.
+func TestARefusalIsReadEvenWhenTheRequestCannotBeSent(t *testing.T) {
+	path := socketPath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		conn.Write([]byte(`{"code":"denied","message":"the daemon refused the connection"}` + "\n"))
+		conn.Close()
+	}()
+	// Large enough that the write cannot finish before the daemon closes.
+	big := vault.NewSecret(bytes.Repeat([]byte("v"), 512<<10))
+	err = (&daemon.Client{Path: path}).Put("token", big, "")
+	if !errors.Is(err, vault.ErrDenied) {
+		t.Errorf("Put = %v, want ErrDenied", err)
+	}
+}
