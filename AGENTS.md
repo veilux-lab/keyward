@@ -7,11 +7,15 @@ and cgo, macOS only, MIT, a personal project.
 
 ## Start here
 
-1. [doc/status.md](doc/status.md): the current state, known issues, and what can be
-   worked on next. Update it when something lands.
-2. [doc/design.md](doc/design.md) for why things are the way they are, and
-   [doc/obstacles.md](doc/obstacles.md) for what was hard or failed. Read the
-   section you need, not the whole file.
+`doc/` holds the owner's development notes and is not in the repository. If it
+exists locally:
+
+1. `doc/status.md`: the current state, known issues, and what can be worked on
+   next. Update it when something lands.
+2. `doc/design.md` for why things are the way they are, and `doc/obstacles.md`
+   for what was hard or failed. Read the section you need, not the whole file.
+
+Without it, start from the README, `keyward help`, and the package comments.
 
 ## How work is done
 
@@ -54,7 +58,7 @@ codesign --force --sign "Apple Development: …" --identifier com.nwokolo24.keyw
 
 It is for local use only. Prebuilt Developer ID-signed and notarized distribution
 needs paid Apple membership. Source-built Homebrew distribution does not; each
-daemon upgrade asks once to read the vault key. See doc/homebrew.md.
+daemon upgrade asks once to read the vault key.
 
 ## Git
 

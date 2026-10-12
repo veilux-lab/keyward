@@ -1,4 +1,6 @@
 bin/
+# Development notes stay local.
+doc/
 coverage.out
 coverage.html
 .DS_Store

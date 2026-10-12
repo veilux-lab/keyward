@@ -1,6 +1,6 @@
 #!/bin/bash
 # Does a rebuilt daemon, signed with the same identity, read the vault key the previous
-# build stored without a dialog? Results are in doc/obstacles.md, section 2a.
+# build stored without a dialog? READ in under two seconds means no dialog.
 #
 # Usage: scripts/test-apple-dev-signing.sh "Apple Development: you@example.com (TEAMID)"
 set -u

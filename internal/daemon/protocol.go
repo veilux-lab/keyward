@@ -3,8 +3,7 @@
 //
 // Keychain items trust the binary that created them, so every rebuild of keyward
 // meant an approval prompt that a non-interactive command cannot answer. With the
-// daemon, only its binary needs approving and the CLI can change freely. See
-// obstacle 2a in doc/obstacles.md.
+// daemon, only its binary needs approving and the CLI can change freely.
 package daemon
 
 import (

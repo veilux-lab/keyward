@@ -39,7 +39,10 @@ go build -o keyward ./cmd/keyward
 ./keyward daemon    # leave running in a terminal
 ```
 
-For startup at login, see [signed local installation](doc/install.md#signed-local-installation).
+For startup at login, sign the build with an Apple Development certificate (a free
+one from Xcode works) and install it with `make install
+SIGN_IDENTITY='Apple Development: you@example.com (ID)'`. Find your identity with
+`security find-identity -v -p codesigning`.
 
 ## Use
 
@@ -59,7 +62,9 @@ including editors (`keyward run -- code .`); started any other way, a program se
 the `cap://` reference. Migration keeps an encrypted backup of the original, with its key in the vault;
 remove both with `keyward backups rm ~/.zshrc` once the new file works, then open a
 new terminal.
-See [the usage guide](doc/install.md) for supported files and more commands.
+
+`migrate` and `restore` work on shell startup files, shell scripts, and `.env`
+files. Run `keyward help` for every command.
 
 ## Restore or remove
 
@@ -79,6 +84,7 @@ a purged vault cannot be recovered.
 Keyward reduces accidental exposure when a tool reads your config or environment,
 and makes no network connections. Any process running as you can ask the daemon
 for a value, and a command given a secret can leak it, so it does not stop a
-deliberate attempt. See [project status](doc/status.md) for known issues.
+deliberate attempt. Activity, names and outcomes but never values, is logged to
+`~/Library/Logs/keyward/activity.jsonl`.
 
 MIT licensed. See [LICENSE](LICENSE).

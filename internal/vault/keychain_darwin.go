@@ -231,9 +231,8 @@ import (
 // single shared resource — two Keychain values in one process address the same
 // store and would otherwise still race.
 //
-// This does not order operations across processes. Two keyward processes mutating
-// and listing at the same moment can still collide; that is rarer, and recorded
-// in doc/obstacles.md rather than papered over here.
+// Across processes nothing is needed: only the daemon calls the Keychain, and a
+// lock file keeps it to one instance.
 var keychainMu sync.Mutex
 
 // Keychain stores secrets as generic passwords in the macOS Keychain.
