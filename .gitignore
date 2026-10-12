@@ -1,0 +1,10 @@
+bin/
+# Development notes stay local.
+doc/
+coverage.out
+coverage.html
+.DS_Store
+
+# frontend-slides working files (previews are throwaway)
+.frontend-slides/
+__pycache__/
