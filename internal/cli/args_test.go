@@ -91,3 +91,54 @@ func TestOptionsBeforeRunAreRejected(t *testing.T) {
 		t.Error("the command ran")
 	}
 }
+
+// --only limits resolution to the named variables, so a command gets only the
+// secrets it needs, and an unrelated broken reference cannot stop it.
+func TestRunOnlyResolvesTheNamedVariables(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin", "A=cap://a", "B=cap://b", "C=cap://missing"}
+	for _, args := range [][]string{
+		{"run", "--only", "A,B", "--", "printenv"},
+		{"run", "--only=A,B", "printenv"},
+		{"run", "--only", "A", "--only", "B", "--", "printenv"},
+	} {
+		h := newHarness(t, "", map[string]string{"a": "value-a", "b": "value-b"}, env)
+		if code := h.cli.Run(args); code != 0 {
+			t.Fatalf("%v: exit code = %d. stderr: %s", args, code, h.err())
+		}
+		if !contains(h.exec.env, "A=value-a") || !contains(h.exec.env, "B=value-b") || !contains(h.exec.env, "C=cap://missing") {
+			t.Errorf("%v: env = %v", args, h.exec.env)
+		}
+		if !slices.Equal(h.exec.argv, []string{"printenv"}) {
+			t.Errorf("%v: argv = %v", args, h.exec.argv)
+		}
+	}
+}
+
+// A typo in --only would otherwise run the command without the secret it needs.
+func TestRunOnlyRejectsAVariableThatIsNotSet(t *testing.T) {
+	for _, args := range [][]string{{"run", "--only", "TYPO", "--", "printenv"}, {"run", "--only"}, {"run", "--only", "", "printenv"}} {
+		h := newHarness(t, "", nil, []string{"PATH=/usr/bin:/bin", "A=cap://a"})
+		if code := h.cli.Run(args); code != 2 {
+			t.Errorf("%v: exit code = %d, want 2", args, code)
+		}
+		if h.exec.calls != 0 {
+			t.Errorf("%v: the command ran", args)
+		}
+	}
+	h := newHarness(t, "", nil, []string{"PATH=/usr/bin:/bin"})
+	h.cli.Run([]string{"run", "--only", "TYPO", "--", "printenv"})
+	if !strings.Contains(h.err(), "TYPO") {
+		t.Errorf("stderr = %q, want it to name the variable", h.err())
+	}
+}
+
+// After the command, --only belongs to the command.
+func TestRunOnlyAfterTheCommandIsTheCommands(t *testing.T) {
+	h := newHarness(t, "", nil, []string{"PATH=/usr/bin:/bin"})
+	if code := h.cli.Run([]string{"run", "echo", "--only", "X"}); code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	if !slices.Equal(h.exec.argv, []string{"echo", "--only", "X"}) {
+		t.Errorf("argv = %v", h.exec.argv)
+	}
+}

@@ -343,3 +343,29 @@ func TestEnvErrorsNeverContainValues(t *testing.T) {
 		t.Errorf("error leaked a resolved value: %v", err)
 	}
 }
+
+// Only the named variables are resolved; every other entry, including a reference
+// that would fail, passes through untouched.
+func TestEnvOnlyResolvesJustTheNamedVariables(t *testing.T) {
+	store := counting(newStore(t, map[string]string{"github-token": token, "jira-token": "jira-value"}))
+	env := []string{"PATH=/bin", "GITHUB_TOKEN=cap://github-token", "JIRA=cap://jira-token", "BROKEN=cap://missing", "GITHUB_TOKEN=cap://github-token"}
+	got, err := resolve.New(store).EnvOnly(env, []string{"GITHUB_TOKEN"})
+	if err != nil {
+		t.Fatalf("EnvOnly: %v", err)
+	}
+	want := []string{"PATH=/bin", "GITHUB_TOKEN=" + token, "JIRA=cap://jira-token", "BROKEN=cap://missing", "GITHUB_TOKEN=" + token}
+	if !reflect.DeepEqual(got.Env, want) {
+		t.Errorf("Env = %q, want %q", got.Env, want)
+	}
+	if !reflect.DeepEqual(got.Resolved, []string{"github-token"}) || store.count("jira-token") != 0 {
+		t.Errorf("Resolved = %v, jira-token fetched %d times", got.Resolved, store.count("jira-token"))
+	}
+}
+
+func TestEnvOnlyStillFailsForANamedReference(t *testing.T) {
+	_, err := resolve.New(newStore(t, nil)).EnvOnly([]string{"T=cap://missing", "U=cap://other"}, []string{"T"})
+	var rerr *resolve.Error
+	if !errors.As(err, &rerr) || len(rerr.Failures) != 1 || rerr.Failures[0].Key != "T" {
+		t.Errorf("err = %v, want one failure for T", err)
+	}
+}

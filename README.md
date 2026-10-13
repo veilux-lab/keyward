@@ -58,7 +58,9 @@ keyward doctor
 ```
 
 After migrating, start anything that needs those values through `keyward run --`;
-started any other way, a program sees the `cap://` reference. Do not start your
+started any other way, a program sees the `cap://` reference. In a shell that has
+loaded your rc file, `keyward run` resolves every reference there; name just the
+ones a command needs with `--only`, as in `keyward run --only GITHUB_TOKEN -- gh pr list`. Do not start your
 editor that way: every agent and terminal inside it would get the real values.
 
 Migration keeps an encrypted backup of the original, with its key in the vault;

@@ -7,6 +7,7 @@ package resolve
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -93,6 +94,17 @@ func (e *Error) Unwrap() []error {
 // exists to remove. On any failure, Env returns a zero Result and an *Error
 // listing every reference that could not be resolved.
 func (r *Resolver) Env(env []string) (Result, error) {
+	return r.env(env, func(string) bool { return true })
+}
+
+// EnvOnly is Env limited to the variables named in keys. Every other entry passes
+// through unchanged, so a reference the command does not need is neither read nor
+// able to fail.
+func (r *Resolver) EnvOnly(env []string, keys []string) (Result, error) {
+	return r.env(env, func(key string) bool { return slices.Contains(keys, key) })
+}
+
+func (r *Resolver) env(env []string, wanted func(key string) bool) (Result, error) {
 	out := make([]string, len(env))
 	// One entry per distinct secret, so two variables referencing the same name
 	// cost one lookup. With the Keychain each lookup is a syscall, and may one day
@@ -102,7 +114,7 @@ func (r *Resolver) Env(env []string) (Result, error) {
 
 	for i, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
-		if !ok || !handle.IsRef(value) {
+		if !ok || !handle.IsRef(value) || !wanted(key) {
 			out[i] = entry
 			continue
 		}

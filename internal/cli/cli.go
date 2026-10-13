@@ -125,6 +125,7 @@ options:
   --force                add: replace an existing secret
   --all                  backups rm: remove every backup
   --purge                uninstall: also delete the vault, once files are restored
+  --only VAR,...         run: resolve only these variables
 
 examples:
   keyward migrate ~/.zshrc
@@ -373,23 +374,59 @@ func (c *CLI) daemon(args []string) int {
 	return exitOK
 }
 
-// run resolves every cap:// reference in the environment and replaces this
-// process with the requested command.
+// run resolves every cap:// reference in the environment, or with --only just the
+// named variables, and replaces this process with the requested command.
 //
 // Resolution happens before anything is executed. If any reference fails, nothing
 // runs — a command started with a literal cap:// value where a credential belongs
 // fails in a way that looks like a bad token rather than a missing one.
 func (c *CLI) run(args []string) int {
+	const runUsage = "usage: keyward run [--only VAR,...] [--] <command> [arguments]\n"
+	// --only is read only before the command; after it, options are the command's.
+	var only []string
+	for len(args) > 0 && (args[0] == "--only" || strings.HasPrefix(args[0], "--only=")) {
+		value, inline := strings.CutPrefix(args[0], "--only=")
+		if !inline {
+			if len(args) < 2 {
+				fmt.Fprint(c.Stderr, runUsage)
+				return exitUsage
+			}
+			value, args = args[1], args[1:]
+		}
+		args = args[1:]
+		for _, key := range strings.Split(value, ",") {
+			if key == "" {
+				fmt.Fprint(c.Stderr, "keyward run: --only needs variable names, such as --only GITHUB_TOKEN\n")
+				return exitUsage
+			}
+			only = append(only, key)
+		}
+	}
 	// A leading -- is conventional and supported, but not required.
 	if len(args) > 0 && args[0] == "--" {
 		args = args[1:]
 	}
 	if len(args) == 0 {
-		fmt.Fprint(c.Stderr, "usage: keyward run [--] <command> [arguments]\n")
+		fmt.Fprint(c.Stderr, runUsage)
 		return exitUsage
 	}
 
-	result, err := resolve.New(c.Store).Env(c.Environ())
+	env := c.Environ()
+	resolver := resolve.New(c.Store)
+	var result resolve.Result
+	var err error
+	if only != nil {
+		// A misspelled name would otherwise run the command without its secret.
+		for _, key := range only {
+			if !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, key+"=") }) {
+				fmt.Fprintf(c.Stderr, "keyward run: --only names %s, which is not set\n", key)
+				return exitUsage
+			}
+		}
+		result, err = resolver.EnvOnly(env, only)
+	} else {
+		result, err = resolver.Env(env)
+	}
 	if err != nil {
 		return c.failResolve(err)
 	}
