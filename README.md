@@ -70,6 +70,20 @@ new terminal.
 `migrate` and `restore` work on shell startup files, shell scripts, and `.env`
 files. Run `keyward help` for every command.
 
+## Save your recovery code
+
+The vault key lives only in your login Keychain. If it is lost, for example by
+resetting the Keychain or moving to a new Mac, every stored secret is unreadable.
+Save a recovery code for it once:
+
+```sh
+keyward recovery show       # in a terminal; asks for "yes", then prints a KWR1-… code
+```
+
+Keep the code in a password manager, not in a file an agent can read. To restore a
+lost key, run `keyward recovery restore` and paste the code when asked. It accepts
+only a code that opens your vault.
+
 ## MCP servers
 
 An MCP server that reads a migrated variable gets the `cap://` reference instead
