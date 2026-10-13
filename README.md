@@ -14,6 +14,8 @@ export API_TOKEN='cap://api-token'
 
 `keyward run` supplies the real value only to the command that needs it.
 
+![How AI agents and MCP servers use keyward](docs/agents-and-mcp.png)
+
 ## Install
 
 Apple Silicon Macs, with Homebrew:

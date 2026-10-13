@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#15803d"/></marker>
+    <filter id="s" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/></filter>
+  </defs>
+  <rect width="1200" height="700" fill="#ffffff"/>
+  <text x="600" y="44" text-anchor="middle" font-size="26" font-weight="700" fill="#0f172a">How AI agents and MCP servers use keyward</text>
+
+  <!-- zones -->
+  <rect x="30" y="72" width="340" height="600" rx="16" fill="#f1f5f9"/>
+  <text x="200" y="100" text-anchor="middle" font-size="15" font-weight="700" fill="#64748b">SEES ONLY cap:// REFERENCES</text>
+  <rect x="400" y="72" width="360" height="600" rx="16" fill="#eef2ff"/>
+  <text x="580" y="100" text-anchor="middle" font-size="15" font-weight="700" fill="#4f46e5">KEYWARD</text>
+  <rect x="790" y="72" width="380" height="600" rx="16" fill="#f0fdf4"/>
+  <text x="980" y="100" text-anchor="middle" font-size="15" font-weight="700" fill="#15803d">GETS THE REAL VALUE</text>
+
+  <!-- left -->
+  <g filter="url(#s)">
+    <rect x="60" y="120" width="280" height="86" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+    <rect x="60" y="260" width="280" height="86" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+    <rect x="60" y="400" width="280" height="86" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+  </g>
+  <text x="200" y="152" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">📄 ~/.zshrc</text>
+  <text x="200" y="182" text-anchor="middle" font-size="13" font-family="Menlo, monospace" fill="#b45309">TOKEN='cap://github-token'</text>
+  <text x="200" y="294" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">🤖 AI agent</text>
+  <text x="200" y="322" text-anchor="middle" font-size="14" fill="#64748b">Claude Code · Codex · Cursor</text>
+  <text x="200" y="434" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">🔌 MCP client</text>
+  <text x="200" y="462" text-anchor="middle" font-size="14" fill="#64748b">starts the MCP servers</text>
+
+  <!-- middle -->
+  <g filter="url(#s)">
+    <rect x="430" y="260" width="300" height="86" rx="12" fill="#4f46e5"/>
+    <rect x="430" y="400" width="300" height="70" rx="12" fill="#fff" stroke="#a5b4fc" stroke-width="1.5"/>
+    <rect x="430" y="530" width="140" height="74" rx="12" fill="#fff" stroke="#a5b4fc" stroke-width="1.5"/>
+    <rect x="590" y="530" width="140" height="74" rx="12" fill="#fff" stroke="#a5b4fc" stroke-width="1.5"/>
+  </g>
+  <text x="580" y="296" text-anchor="middle" font-size="19" font-weight="700" font-family="Menlo, monospace" fill="#fff">keyward run --</text>
+  <text x="580" y="324" text-anchor="middle" font-size="14" fill="#e0e7ff">swaps the reference for the value</text>
+  <text x="580" y="441" text-anchor="middle" font-size="17" font-weight="700" fill="#1e1b4b">⚙️ keyward daemon</text>
+  <text x="500" y="562" text-anchor="middle" font-size="15" font-weight="700" fill="#1e1b4b">🗄️ Vault</text>
+  <text x="500" y="584" text-anchor="middle" font-size="12" fill="#64748b">encrypted</text>
+  <text x="660" y="562" text-anchor="middle" font-size="15" font-weight="700" fill="#1e1b4b">🔑 Keychain</text>
+  <text x="660" y="584" text-anchor="middle" font-size="12" fill="#64748b">holds the vault key</text>
+
+  <!-- right -->
+  <g filter="url(#s)">
+    <rect x="830" y="150" width="300" height="86" rx="12" fill="#fff" stroke="#86efac" stroke-width="1.5"/>
+    <rect x="830" y="330" width="300" height="86" rx="12" fill="#fff" stroke="#86efac" stroke-width="1.5"/>
+    <rect x="830" y="520" width="300" height="86" rx="12" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+  </g>
+  <text x="980" y="184" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">▶️ Command</text>
+  <text x="980" y="212" text-anchor="middle" font-size="14" font-family="Menlo, monospace" fill="#64748b">gh pr list</text>
+  <text x="980" y="364" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">🧩 MCP server</text>
+  <text x="980" y="392" text-anchor="middle" font-size="14" fill="#64748b">local, or the mcp-remote bridge</text>
+  <text x="980" y="554" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">☁️ Service API</text>
+  <text x="980" y="582" text-anchor="middle" font-size="14" fill="#64748b">GitHub · Jira · PagerDuty</text>
+
+  <!-- arrows: references -->
+  <g stroke="#475569" stroke-width="2" fill="none">
+    <path d="M200,206 V256" marker-end="url(#a)"/>
+    <path d="M340,303 H426" marker-end="url(#a)"/>
+    <path d="M340,443 H383 Q395,443 395,431 V342 Q395,330 407,330 H426" marker-end="url(#a)"/>
+    <path d="M560,346 V396" marker-end="url(#a)"/>
+    <path d="M600,396 V350" marker-end="url(#a)"/>
+    <path d="M500,470 V526" marker-end="url(#a)"/>
+    <path d="M660,526 V474" stroke-dasharray="5 4" marker-end="url(#a)"/>
+    <path d="M980,416 V516" marker-end="url(#a)"/>
+    <path d="M1130,193 H1142 Q1154,193 1154,205 V551 Q1154,563 1142,563 H1134" marker-end="url(#a)"/>
+    <path d="M830,395 H775 V650 H200 V490" stroke="#94a3b8" stroke-dasharray="6 5" marker-end="url(#a)"/>
+  </g>
+  <!-- arrows: real value -->
+  <g stroke="#15803d" stroke-width="3" fill="none">
+    <path d="M730,285 H768 Q780,285 780,273 V205 Q780,193 792,193 H826" marker-end="url(#g)"/>
+    <path d="M730,320 H768 Q780,320 780,332 V361 Q780,373 792,373 H826" marker-end="url(#g)"/>
+  </g>
+
+  <!-- labels -->
+  <g font-size="13" fill="#334155">
+    <text x="212" y="236">agent reads it</text>
+    <text x="383" y="278" text-anchor="middle">runs a</text>
+    <text x="383" y="294" text-anchor="middle">command</text>
+    <text x="200" y="378" text-anchor="middle">starts each server through keyward</text>
+    <text x="548" y="376" text-anchor="end">asks</text>
+    <text x="612" y="376">value</text>
+    <text x="680" y="508">unlocks</text>
+    <text x="992" y="472">token</text>
+    <text x="488" y="642" text-anchor="middle" fill="#64748b">tool results only, never the token</text>
+  </g>
+  <g font-size="13" font-weight="700" fill="#15803d">
+    <text x="980" y="276" text-anchor="middle">real value,</text>
+    <text x="980" y="294" text-anchor="middle">this process only</text>
+  </g>
+</svg>
