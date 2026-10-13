@@ -133,7 +133,7 @@ func parseJSON(t *testing.T, f mcpconfig.Finding) suggested {
 
 func TestALocalServerIsWrappedDirectly(t *testing.T) {
 	s := parseJSON(t, finding(t, "Claude Code", "pagerduty"))
-	if s.Command != "keyward" || strings.Join(s.Args, " ") != "run -- uvx pagerduty-mcp" {
+	if s.Command != "keyward" || strings.Join(s.Args, " ") != "run --only PD_KEY -- uvx pagerduty-mcp" {
 		t.Errorf("command = %s %v", s.Command, s.Args)
 	}
 	if s.Env["PD_KEY"] != "cap://pagerduty-key" || s.Env["LEVEL"] != "info" {
@@ -145,10 +145,10 @@ func TestALocalServerIsWrappedDirectly(t *testing.T) {
 // without ${} braces, which Claude Code would expand first.
 func TestARemoteServerGoesThroughABridgeThatExpandsTheHeaderLate(t *testing.T) {
 	s := parseJSON(t, finding(t, "Claude Code", "github"))
-	if s.Command != "keyward" || len(s.Args) != 5 || s.Args[2] != "sh" || s.Args[3] != "-c" {
+	if s.Command != "keyward" || len(s.Args) != 7 || s.Args[2] != "GITHUB_TOKEN" || s.Args[4] != "sh" || s.Args[5] != "-c" {
 		t.Fatalf("args = %v", s.Args)
 	}
-	script := s.Args[4]
+	script := s.Args[6]
 	if strings.Contains(script, "${") || !strings.Contains(script, "mcp-remote") || !strings.Contains(script, "https://api.example.com/mcp/") {
 		t.Errorf("script = %s", script)
 	}
@@ -167,7 +167,7 @@ func TestTheShellCommandExpandsToTheOriginalArguments(t *testing.T) {
 		t.Fatalf("findings = %v", findings)
 	}
 	s := parseJSON(t, findings[0])
-	cmd := exec.Command("sh", "-c", s.Args[4])
+	cmd := exec.Command("sh", "-c", s.Args[len(s.Args)-1])
 	cmd.Env = []string{"GITHUB_TOKEN=resolved-value", "PATH=/usr/bin:/bin"}
 	out, err := cmd.Output()
 	if err != nil {

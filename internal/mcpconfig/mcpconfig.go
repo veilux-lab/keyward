@@ -299,9 +299,19 @@ func suggest(s Server, used map[string]string) (string, string) {
 			}
 		}
 	}
-	args := append([]string{"run", "--"}, inner...)
+	// The server gets only its own secrets, not every reference the client inherited.
+	var only []string
+	for k, v := range env {
+		if strings.HasPrefix(v, handle.Prefix) {
+			only = append(only, k)
+		}
+	}
+	slices.Sort(only)
+	args := []string{"run", "--only", strings.Join(only, ","), "--"}
 	if slices.ContainsFunc(inner, placeholder.MatchString) {
-		args = []string{"run", "--", "sh", "-c", "exec " + shellWords(inner)}
+		args = append(args, "sh", "-c", "exec "+shellWords(inner))
+	} else {
+		args = append(args, inner...)
 	}
 	if s.toml {
 		return tomlServer(s, args, env), tomlNote(s)

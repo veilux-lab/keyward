@@ -32,7 +32,7 @@ func TestWriteCreatesTheInstructions(t *testing.T) {
 
 func TestInstructionsAreMarkedAndMentionKeywardRun(t *testing.T) {
 	text := string(agents.Instructions())
-	if !strings.HasPrefix(text, "<!-- Written by keyward") || !strings.Contains(text, "keyward run --") {
+	if !strings.HasPrefix(text, "<!-- Written by keyward") || !strings.Contains(text, "keyward run --only") {
 		t.Errorf("instructions lack the marker or the run guidance:\n%s", text)
 	}
 }
