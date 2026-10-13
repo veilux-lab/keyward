@@ -12,7 +12,7 @@ export API_TOKEN='cap://api-token'
 Agents reading your files see only the reference. `keyward run` gives the real
 value to the one command that needs it.
 
-![How AI agents and MCP servers use keyward](docs/agents-and-mcp.png)
+![How AI agents and MCP servers use keyward](images/agents-and-mcp.png)
 
 ## Install
 

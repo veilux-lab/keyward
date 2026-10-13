@@ -7,7 +7,7 @@ on:
     # release's own formula commit, pushed with the app token, would start another.
     paths-ignore:
       - "**.md"
-      - "docs/**"
+      - "images/**"
       - "Formula/**"
   workflow_dispatch:
 
