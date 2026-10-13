@@ -38,6 +38,8 @@ keyward doctor                       # check your setup
 - Start anything that needs a secret through `keyward run --`; otherwise it sees
   the `cap://` reference. Don't start your editor that way, or everything inside
   it gets the values.
+- `keyward run` resolves every reference in its environment. Name just the ones a
+  command needs with `--only`: `keyward run --only GITHUB_TOKEN -- gh pr list`.
 - Migration keeps an encrypted backup. Remove it with `keyward backups rm ~/.zshrc`
   once everything works.
 - Keyward writes `~/.agents/keyward.md`, instructions for AI agents; `keyward agents`
