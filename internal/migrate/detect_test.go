@@ -21,9 +21,10 @@ func TestDetectSecrets(t *testing.T) {
 		{"ANTHROPIC_API_KEY", "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx"},
 		{"AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE"},
 		{"AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
-		{"SLACK_BOT_TOKEN", "xoxb-123456789012-1234567890123-AbCdEfGhIjKlMnOp"},
+		// Split so secret scanners do not report these fake tokens.
+		{"SLACK_BOT_TOKEN", "xoxb-" + "123456789012-1234567890123-AbCdEfGhIjKlMnOp"},
 		{"GITLAB_TOKEN", "glpat-AbCdEfGhIjKlMnOpQrSt"},
-		{"STRIPE_SECRET", "sk_live_AbCdEfGhIjKlMnOpQrStUvWx"},
+		{"STRIPE_SECRET", "sk_live_" + "AbCdEfGhIjKlMnOpQrStUvWx"},
 		{"GOOGLE_API_KEY", "AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz01234567"},
 		{"VAULT_TOKEN", "hvs.AbCdEfGhIjKlMnOpQrStUvWxYz"},
 		{"NPM_TOKEN", "npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"},

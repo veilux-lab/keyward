@@ -208,3 +208,12 @@ func TestAnUnreadableConfigIsReportedNotGuessed(t *testing.T) {
 		t.Errorf("errors = %v, want one per unreadable file", errs)
 	}
 }
+
+func TestCodexUnicodeEscapesAreDecoded(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.x]\ncommand = \"caf\\u00e9\"\n")
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	if len(errs) != 0 || len(servers) != 1 || servers[0].Command != "café" {
+		t.Errorf("servers = %+v, errors = %v", servers, errs)
+	}
+}

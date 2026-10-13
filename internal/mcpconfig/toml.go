@@ -220,7 +220,7 @@ func readString(s string) (int, string, error) {
 			if i+4 >= len(s) {
 				return 0, "", errors.New("malformed escape")
 			}
-			r, err := strconv.ParseUint(s[i+1:i+5], 16, 32)
+			r, err := strconv.ParseUint(s[i+1:i+5], 16, 16)
 			if err != nil {
 				return 0, "", errors.New("malformed escape")
 			}
