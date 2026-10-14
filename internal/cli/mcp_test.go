@@ -47,3 +47,27 @@ func TestDoctorPointsAtMCPWhenAServerNeedsKeyward(t *testing.T) {
 		t.Errorf("doctor did not point at keyward mcp:\n%s", h.out())
 	}
 }
+
+const wrappedServer = `{"mcpServers": {"pagerduty": {"command": "/opt/homebrew/bin/keyward", "args": ["run", "--only", "PD_KEY", "--", "uvx", "pagerduty-mcp"], "env": {"PD_KEY": "cap://pagerduty-key"}}}}`
+
+func TestMCPUndoShowsHowToStartEachServerWithoutKeyward(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	home := homed(t, h)
+	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(wrappedServer), 0o600)
+	if code := h.cli.Run([]string{"mcp", "--undo"}); code != 1 {
+		t.Errorf("exit %d, want 1 while a server starts through keyward", code)
+	}
+	for _, want := range []string{"pagerduty", "PD_KEY", `"command": "uvx"`, "${PD_KEY}", "Replace the", "keyward restore"} {
+		if !strings.Contains(h.out(), want) {
+			t.Errorf("output lacks %q:\n%s", want, h.out())
+		}
+	}
+}
+
+func TestMCPUndoSaysWhenNoServerUsesKeyward(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	homed(t, h)
+	if code := h.cli.Run([]string{"mcp", "--undo"}); code != 0 || !strings.Contains(h.out(), "No MCP server starts through keyward") {
+		t.Errorf("exit %d:\n%s", code, h.out())
+	}
+}

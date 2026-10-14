@@ -56,16 +56,21 @@ manager. `keyward recovery restore` brings the key back.
 
 MCP servers that use a migrated token must start through keyward too. `keyward mcp`
 prints the fixed definition for each affected server in Claude Code, Codex and
-Cursor, without editing anything. A server that reads a variable without naming it
-in its config can't be detected; wrap it by hand the same way.
+Cursor, without editing anything; `keyward mcp --undo` prints the way back. A
+server that reads a variable without naming it in its config can't be detected;
+wrap it by hand the same way.
 
 ## Restore or uninstall
 
 ```sh
 keyward restore ~/.zshrc      # put the values back; asks for "yes"
+keyward mcp --undo            # how to start MCP servers without keyward
 keyward uninstall             # remove keyward; secrets stay in the vault
-keyward uninstall --purge     # also delete the vault, once no file uses it
+keyward uninstall --purge     # also delete the vault, once nothing uses it
 ```
+
+Use `keyward uninstall`, not `brew uninstall`: Homebrew removes only the program,
+leaving the daemon's login item and every file that uses keyward behind.
 
 ## What it protects
 

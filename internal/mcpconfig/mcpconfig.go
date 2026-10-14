@@ -314,9 +314,63 @@ func suggest(s Server, used map[string]string) (string, string) {
 		args = append(args, inner...)
 	}
 	if s.toml {
-		return tomlServer(s, args, env), tomlNote(s)
+		return tomlServer(s, "keyward", args, env, nil), tomlNote(s)
 	}
-	return jsonServerText(s.Name, args, env), "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + "."
+	return jsonServerText(s.Name, "keyward", args, env), "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + "."
+}
+
+// Undo returns each server that starts through keyward, with the definition that
+// starts it directly, reading its secrets from the environment the client starts
+// with. Vars names those secrets, which must hold real values again.
+func Undo(servers []Server) []Finding {
+	var findings []Finding
+	for _, s := range servers {
+		if s.disabled || !runsThroughKeyward(s) {
+			continue
+		}
+		inner := s.Args[1:]
+		if len(inner) > 1 && inner[0] == "--only" {
+			inner = inner[2:]
+		} else if len(inner) > 0 && strings.HasPrefix(inner[0], "--only=") {
+			inner = inner[1:]
+		}
+		if len(inner) > 0 && inner[0] == "--" {
+			inner = inner[1:]
+		}
+		if len(inner) == 0 {
+			continue
+		}
+		f := Finding{Server: s}
+		env := map[string]string{}
+		for k, v := range s.Env {
+			if !handle.IsRef(v) {
+				env[k] = v
+				continue
+			}
+			f.Vars = append(f.Vars, k)
+			// Each client has its own syntax for a value taken from its environment.
+			switch {
+			case s.toml:
+			case s.Client == "Cursor":
+				env[k] = "${env:" + k + "}"
+			default:
+				env[k] = "${" + k + "}"
+			}
+		}
+		slices.Sort(f.Vars)
+		if s.toml {
+			f.Suggestion = tomlServer(s, inner[0], inner[1:], env, f.Vars)
+			f.Note = tomlNote(s)
+		} else {
+			f.Suggestion = jsonServerText(s.Name, inner[0], inner[1:], env)
+			f.Note = "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + "."
+		}
+		findings = append(findings, f)
+	}
+	slices.SortFunc(findings, func(a, b Finding) int {
+		return strings.Compare(a.Client+a.Config+a.Name, b.Client+b.Config+b.Name)
+	})
+	return findings
 }
 
 // shellWords quotes arguments for sh so each placeholder expands there, after
@@ -366,7 +420,7 @@ func quoteJSON(s string) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func jsonServerText(name string, args []string, env map[string]string) string {
+func jsonServerText(name, command string, args []string, env map[string]string) string {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
@@ -375,7 +429,7 @@ func jsonServerText(name string, args []string, env map[string]string) string {
 		Command string            `json:"command"`
 		Args    []string          `json:"args"`
 		Env     map[string]string `json:"env,omitempty"`
-	}{"keyward", args, env})
+	}{command, args, env})
 	return quoteJSON(name) + ": " + strings.TrimSuffix(b.String(), "\n")
 }
 
@@ -388,9 +442,9 @@ func tomlKey(k string) string {
 	return quoteJSON(k)
 }
 
-func tomlServer(s Server, args []string, env map[string]string) string {
+func tomlServer(s Server, command string, args []string, env map[string]string, passEnv []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[mcp_servers.%s]\ncommand = \"keyward\"\nargs = [\n", tomlKey(s.Name))
+	fmt.Fprintf(&b, "[mcp_servers.%s]\ncommand = %s\nargs = [\n", tomlKey(s.Name), quoteJSON(command))
 	for _, a := range args {
 		fmt.Fprintf(&b, "  %s,\n", quoteJSON(a))
 	}
@@ -405,6 +459,13 @@ func tomlServer(s Server, args []string, env map[string]string) string {
 		pairs[i] = tomlKey(k) + " = " + quoteJSON(env[k])
 	}
 	fmt.Fprintf(&b, "env = { %s }\n", strings.Join(pairs, ", "))
+	if len(passEnv) > 0 {
+		quoted := make([]string, len(passEnv))
+		for i, v := range passEnv {
+			quoted[i] = quoteJSON(v)
+		}
+		fmt.Fprintf(&b, "env_vars = [%s]\n", strings.Join(quoted, ", "))
+	}
 	if s.timeout != "" {
 		fmt.Fprintf(&b, "startup_timeout_sec = %s\n", s.timeout)
 	}

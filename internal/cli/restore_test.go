@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -128,5 +129,20 @@ func TestUninstallWarnsBeforeStoppingAndDoesNotRestore(t *testing.T) {
 				t.Fatal("uninstall warning omitted the preview or reference consequences")
 			}
 		})
+	}
+}
+
+// Restoring a file leaves MCP servers on keyward; say so, and how to leave fully.
+func TestRestoreNotesMCPServersThatStillStartThroughKeyward(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	home := homed(t, h)
+	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers": {"pagerduty": {"command": "keyward", "args": ["run", "--", "uvx", "pagerduty-mcp"], "env": {"PD_KEY": "cap://pagerduty-key"}}}}`), 0o600)
+	path := migrated(t, h)
+	h.cli.Stdin = strings.NewReader("yes\n")
+	if code := h.cli.Run([]string{"restore", path}); code != 0 {
+		t.Fatalf("restore: %d %s", code, h.err())
+	}
+	if !strings.Contains(h.out(), "1 MCP server(s) still start through keyward") || !strings.Contains(h.out(), "keyward mcp --undo") {
+		t.Errorf("restore does not mention the MCP server:\n%s", h.out())
 	}
 }

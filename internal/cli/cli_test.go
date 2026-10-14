@@ -205,7 +205,7 @@ func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 	if commands < 0 || options < commands || examples < options {
 		t.Fatalf("help lacks commands, options, and examples sections in that order:\n%s", out)
 	}
-	for _, want := range []string{"migrate <file>", "run -- <command>", "mcp ", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run -- npm test", "--only VAR"} {
+	for _, want := range []string{"migrate <file>", "run -- <command>", "mcp [--undo]", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run -- npm test", "--only VAR"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q", want)
 		}

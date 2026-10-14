@@ -115,7 +115,7 @@ commands:
   backups [rm|recover]   list, remove, or recover migrate's backups
   recovery show|restore  save or restore the vault's recovery code
   agents                 set up instructions for AI agents
-  mcp                    show how to run MCP servers through keyward
+  mcp [--undo]           run MCP servers through keyward, or change them back
   status | stop | start  check, pause, or resume the daemon
   uninstall              remove keyward; secrets stay in the vault (asks first)
   version

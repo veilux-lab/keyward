@@ -10,6 +10,7 @@ import (
 
 	"github.com/veilux-lab/keyward/internal/agents"
 	"github.com/veilux-lab/keyward/internal/doctor"
+	"github.com/veilux-lab/keyward/internal/mcpconfig"
 )
 
 // uninstall removes Keyward's startup, local data, and package. Stored secrets are
@@ -29,10 +30,18 @@ func (c *CLI) uninstall(args []string) int {
 	if err != nil && *purge {
 		return c.fail("keyward uninstall: cannot check which files still use keyward, so nothing was purged: %v", err)
 	}
+	// restore cannot rewrite MCP configs; keyward mcp --undo covers those.
+	servers, _ := c.mcpUndo()
+	for _, s := range servers {
+		// A project server's Config names its project after the file.
+		file, _, _ := strings.Cut(s.Config, " (project ")
+		delete(inUse, file)
+	}
 	using := restoreList(inUse)
+	mcpUsing := mcpList(c, servers)
 	// Purging now would leave these files pointing at secrets that no longer exist.
-	if *purge && using != "" {
-		return c.fail("keyward uninstall --purge: these files still use stored secrets. Restore them first, then run it again:\n%s", using)
+	if *purge && (using != "" || mcpUsing != "") {
+		return c.fail("keyward uninstall --purge: these still use stored secrets. Change them back first, then run it again:\n%s%s", using, mcpUsing)
 	}
 	found, err := c.knownBackups()
 	if err != nil {
@@ -42,7 +51,11 @@ func (c *CLI) uninstall(args []string) int {
 	fmt.Fprintf(&plan, "%s\n\n", c.errs(yellow, "Warning: after uninstall, cap:// references in your files stop resolving."))
 	if using != "" {
 		fmt.Fprintf(&plan, "These files still use keyward. Cancel and restore them first to put the values back:\n%s\n", using)
-	} else {
+	}
+	if mcpUsing != "" {
+		fmt.Fprintf(&plan, "These MCP servers start through keyward and stop working without it. Cancel and change them back first:\n%s\n", mcpUsing)
+	}
+	if using == "" && mcpUsing == "" {
 		plan.WriteString("No file keyward knows of uses it. Restore any other file with cap:// references first: keyward restore <file>\n\n")
 	}
 	plan.WriteString("This removes:\n  the daemon and its login startup\n")
@@ -120,6 +133,20 @@ func (c *CLI) uninstall(args []string) int {
 	}
 	fmt.Fprintln(c.Stdout, paintLines(c.ColorOut, strings.Join(lines, "\n"), map[string]string{"✓": green}))
 	return exitOK
+}
+
+// mcpList names each MCP server still starting through keyward, and the command that
+// shows how to change it back.
+func mcpList(c *CLI, servers []mcpconfig.Finding) string {
+	if len(servers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, s := range servers {
+		fmt.Fprintf(&b, "  %s (%s, %s)\n", s.Name, s.Client, c.tilde(s.Config))
+	}
+	b.WriteString("  keyward mcp --undo shows the definition for each\n")
+	return b.String()
 }
 
 // restoreList renders each file still using keyward with the command that restores it.

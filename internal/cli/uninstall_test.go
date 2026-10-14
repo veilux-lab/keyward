@@ -251,3 +251,19 @@ func TestPurgeDeletesTheVaultOnceFilesAreRestored(t *testing.T) {
 		t.Errorf("purged=%v; the plan must say the secrets go permanently:\n%s", purged, r.h.err())
 	}
 }
+
+// restore cannot rewrite an MCP config, so uninstall points at keyward mcp --undo.
+func TestUninstallSendsMCPConfigsToMCPUndo(t *testing.T) {
+	r := uninstallFixture(t, "")
+	home := homed(t, r.h)
+	config := filepath.Join(home, ".claude.json")
+	os.WriteFile(config, []byte(`{"mcpServers": {"pagerduty": {"command": "/opt/homebrew/bin/keyward", "args": ["run", "--only", "PD_KEY", "--", "uvx", "pagerduty-mcp"], "env": {"PD_KEY": "cap://pagerduty-key"}}}}`), 0o600)
+	r.h.cli.Stdin = strings.NewReader("no\n")
+	r.h.cli.Run([]string{"uninstall"})
+	if strings.Contains(r.h.err(), "keyward restore "+config) {
+		t.Errorf("the plan says to restore an MCP config:\n%s", r.h.err())
+	}
+	if !strings.Contains(r.h.err(), "pagerduty") || !strings.Contains(r.h.err(), "keyward mcp --undo") {
+		t.Errorf("the plan does not name the server and keyward mcp --undo:\n%s", r.h.err())
+	}
+}
