@@ -275,3 +275,41 @@ func TestReferencesInsideMultilineShellTextAreNotAssignments(t *testing.T) {
 		}
 	}
 }
+
+// Given the quoting each value had before migrate, restore writes the line back
+// exactly as it was; a value that quoting cannot hold falls back to single quotes.
+func TestApplyWritesValuesBackWithTheirOriginalQuoting(t *testing.T) {
+	path := fixture(t, ".zshrc", "export A='cap://a'\nexport B='cap://b'\nexport C='cap://c'\nexport D='cap://d'\n")
+	store := memory(t, map[string]string{"a": `say "hi" $5`, "b": "plain-token_1", "c": "has space", "d": "it's"})
+	p, err := restore.Read(store, []string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Quotes = map[string]map[string]string{path: {"A": `"`, "B": "", "C": "", "D": "'"}}
+	if r := p.Apply(store); len(r.Restored) != 4 {
+		t.Fatalf("restored %d, skipped %+v", len(r.Restored), r.Skipped)
+	}
+	data, _ := os.ReadFile(path)
+	want := "export A=\"say \\\"hi\\\" \\$5\"\nexport B=plain-token_1\nexport C='has space'\nexport D='it'\\''s'\n"
+	if string(data) != want {
+		t.Errorf("restored:\n%s\nwant:\n%s", data, want)
+	}
+}
+
+// The double-quoted form must read back to the same bytes in a real shell.
+func TestDoubleQuotedRestoreRoundTripsInAShell(t *testing.T) {
+	value := "a \"b\" $HOME `x` \\ c 'd'"
+	path := fixture(t, ".zshrc", "TOKEN='cap://token'\n")
+	s := memory(t, map[string]string{"token": value})
+	p, _ := restore.Read(s, []string{path})
+	p.Quotes = map[string]map[string]string{path: {"TOKEN": `"`}}
+	if r := p.Apply(s); len(r.Restored) != 1 {
+		t.Fatalf("skipped %+v", r.Skipped)
+	}
+	content, _ := os.ReadFile(path)
+	cmd := exec.Command("/bin/sh", "-c", "eval \"$(cat)\"; printf '%s' \"$TOKEN\"")
+	cmd.Stdin = bytes.NewReader(content)
+	if out, err := cmd.Output(); err != nil || string(out) != value {
+		t.Fatalf("read back %q, %v; want %q", out, err, value)
+	}
+}

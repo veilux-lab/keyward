@@ -146,3 +146,23 @@ func TestRestoreNotesMCPServersThatStillStartThroughKeyward(t *testing.T) {
 		t.Errorf("restore does not mention the MCP server:\n%s", h.out())
 	}
 }
+
+// restore puts each value back with the quoting migrate found, and forgets the
+// file once nothing in it uses keyward.
+func TestRestoreUsesTheRecordedQuotingAndForgetsTheFile(t *testing.T) {
+	h := newHarness(t, "yes\n", nil, nil)
+	path := writeFixture(t, "export GITHUB_TOKEN=\"ghp_perfectlyFine0123456789\"\n")
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Fatalf("migrate: %d %s", code, h.err())
+	}
+	h.cli.Stdin = strings.NewReader("yes\n")
+	if code := h.cli.Run([]string{"restore", path}); code != 0 {
+		t.Fatalf("restore: %d %s", code, h.err())
+	}
+	if data, _ := os.ReadFile(path); string(data) != "export GITHUB_TOKEN=\"ghp_perfectlyFine0123456789\"\n" {
+		t.Errorf("restored = %q, want the original line", data)
+	}
+	if records, _ := h.cli.Ledger.Records(); len(records) != 0 {
+		t.Errorf("records = %+v, want the file forgotten", records)
+	}
+}

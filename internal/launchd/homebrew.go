@@ -118,10 +118,12 @@ func (h Homebrew) Remove() (string, error) {
 	if err := m.command(h.Brew, "uninstall", homebrewFormula); err != nil {
 		return "", err
 	}
+	// Best effort: a cache left behind costs disk space, not correctness.
+	_ = m.command(h.Brew, "cleanup", homebrewFormula)
 	if err := m.command(h.Brew, "untap", "veilux-lab/keyward"); err != nil {
 		return "", fmt.Errorf("the formula was removed, but untapping failed: %w", err)
 	}
-	return "Ran brew uninstall and brew untap veilux-lab/keyward.", nil
+	return "Ran brew uninstall, brew cleanup, and brew untap veilux-lab/keyward.", nil
 }
 
 func (h Homebrew) manager() Manager {

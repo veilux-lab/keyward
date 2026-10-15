@@ -102,12 +102,13 @@ func TestUninstallMessageNamesWhatIsKeptAndHowToReturn(t *testing.T) {
 	}
 }
 
-func TestHomebrewRemoveUninstallsTheFormulaThenTheTap(t *testing.T) {
+// The download cache goes too, so brew leaves nothing of keyward behind.
+func TestHomebrewRemoveUninstallsTheFormulaCleansItsCacheThenUntaps(t *testing.T) {
 	h := brewSetup(t)
 	if _, err := h.m.Remove(); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(h.calls, "\n"); got != "brew uninstall veilux-lab/keyward/keyward\nbrew untap veilux-lab/keyward" {
+	if got := strings.Join(h.calls, "\n"); got != "brew uninstall veilux-lab/keyward/keyward\nbrew cleanup veilux-lab/keyward/keyward\nbrew untap veilux-lab/keyward" {
 		t.Fatalf("calls:\n%s", got)
 	}
 }

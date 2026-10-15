@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -36,7 +37,11 @@ func (issue Issue) Location() string {
 type Plan struct {
 	Items   []Item
 	Skipped []Issue
-	files   []*filePlan
+	// Quotes, by absolute path then variable, is how each value was quoted before
+	// migrate: a single or double quote, or "" for none. Restore writes it back
+	// the same way when the value allows; without an entry it single-quotes.
+	Quotes map[string]map[string]string
+	files  []*filePlan
 }
 
 type filePlan struct {
@@ -192,7 +197,8 @@ func (p *Plan) Apply(store vault.Store) Result {
 				r.Skipped = append(r.Skipped, item.issue(reason))
 				continue
 			}
-			quoted, ok := quote(value.Bytes(), f.path)
+			style, known := p.Quotes[f.path][item.Variable]
+			quoted, ok := quoteAs(value.Bytes(), f.path, style, known)
 			if !ok {
 				r.Skipped = append(r.Skipped, item.issue("stored value cannot be represented safely in this file format"))
 				continue
@@ -321,6 +327,29 @@ func supported(path string) bool {
 		return true
 	}
 	return false
+}
+
+// bareSafe is what a shell and a dotenv parser both read as itself, unquoted.
+var bareSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// quoteAs writes value with the quoting it had before migrate, when that
+// quoting reads back to exactly the same bytes, and otherwise as quote does.
+func quoteAs(value []byte, path, style string, known bool) (string, bool) {
+	s := string(value)
+	switch {
+	case !known || !utf8.Valid(value):
+	case style == "" && bareSafe.MatchString(s):
+		return s, true
+	case style == `"` && !strings.ContainsAny(s, "\x00\r\n"):
+		// Dotenv parsers disagree on escapes inside double quotes.
+		if !dotenv(path) {
+			return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`, "`", "\\`").Replace(s) + `"`, true
+		}
+		if !strings.ContainsAny(s, "\\\"$`") {
+			return `"` + s + `"`, true
+		}
+	}
+	return quote(value, path)
 }
 
 func quote(value []byte, path string) (string, bool) {
