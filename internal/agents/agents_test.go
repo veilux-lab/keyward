@@ -167,3 +167,25 @@ func TestLinkAndUnlinkChangeOnlyTheirLine(t *testing.T) {
 		t.Errorf("the CLAUDE.md keyward created remains: %v", err)
 	}
 }
+
+// The notice replaces the instructions but stays keyward's, so a later uninstall
+// still removes it.
+func TestRemovedNoticeTellsAgentsHowToCleanUp(t *testing.T) {
+	f := agents.Default(t.TempDir())
+	if err := f.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.WriteRemovedNotice(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(f.Path)
+	if !strings.Contains(string(data), "keyward uninstall") || strings.Contains(string(data), "keyward run --only") {
+		t.Errorf("notice:\n%s", data)
+	}
+	if st, _ := f.Status(); st != agents.Outdated {
+		t.Errorf("status = %v, want keyward's (outdated)", st)
+	}
+	if removed, err := f.Remove(); !removed || err != nil {
+		t.Errorf("Remove = %v, %v", removed, err)
+	}
+}

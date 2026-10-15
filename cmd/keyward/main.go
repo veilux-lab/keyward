@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/veilux-lab/keyward/internal/activity"
 	"github.com/veilux-lab/keyward/internal/agents"
@@ -106,6 +107,13 @@ func main() {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+			// Under launchd, notice the program being deleted without uninstall.
+			if job, ok := launchd.Managed(os.Getenv); ok && filepath.IsAbs(os.Args[0]) && socket == daemon.DefaultSocket(home) {
+				go launchd.Watchdog{Program: os.Args[0], Every: 5 * time.Minute, Exists: launchd.Exists, Gone: func() {
+					_ = agents.Default(home).WriteRemovedNotice()
+					launchd.Unregister(home, os.Getuid(), job)
+				}}.Run(ctx)
+			}
 			// Only the vault key lives in the Keychain; Legacy is where secrets were
 			// kept before the vault, and they move in on first use.
 			store := &vault.Encrypted{Path: vaultPath, Keys: vault.NewKeychainService(service + "-vault-key"), Legacy: vault.NewKeychainService(service)}

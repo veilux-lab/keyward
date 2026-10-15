@@ -100,6 +100,29 @@ func (f File) Write() error {
 	return os.Rename(tmp.Name(), f.Path)
 }
 
+// removedNotice replaces the instructions when the daemon finds keyward's program
+// deleted without `keyward uninstall`.
+const removedNotice = marker + `, which replaces this file when it updates it. Keep your own notes in another file. -->
+# keyward was removed without uninstalling
+
+keyward's program was deleted (for example by ` + "`brew uninstall`" + `) without
+` + "`keyward uninstall`" + `, so files may still hold ` + "`cap://`" + ` references that nothing
+can resolve, and MCP servers may still try to start through keyward.
+
+- Tell the user, rather than looking for the values.
+- Suggest that they reinstall and uninstall properly, which puts the values back:
+  ` + "`brew install veilux-lab/keyward/keyward && keyward uninstall`" + `
+`
+
+// WriteRemovedNotice replaces the instructions with removedNotice, if keyward
+// wrote the file.
+func (f File) WriteRemovedNotice() error {
+	if st, err := f.Status(); err != nil || (st != Current && st != Outdated) {
+		return err
+	}
+	return writeKeepingMode(f.Path, []byte(removedNotice))
+}
+
 // WriteRecorded is Write, recording in l the folder it had to create, so
 // uninstall can remove that folder once it is empty.
 func (f File) WriteRecorded(l ledger.Ledger) error {
