@@ -119,7 +119,7 @@ func (h Homebrew) Remove() (string, error) {
 		return "", err
 	}
 	// Best effort: a cache left behind costs disk space, not correctness.
-	_ = m.command(h.Brew, "cleanup", homebrewFormula)
+	_ = m.command(h.Brew, "cleanup", "--prune=all", homebrewFormula)
 	if err := m.command(h.Brew, "untap", "veilux-lab/keyward"); err != nil {
 		return "", fmt.Errorf("the formula was removed, but untapping failed: %w", err)
 	}

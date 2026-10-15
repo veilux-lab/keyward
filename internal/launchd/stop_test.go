@@ -108,7 +108,7 @@ func TestHomebrewRemoveUninstallsTheFormulaCleansItsCacheThenUntaps(t *testing.T
 	if _, err := h.m.Remove(); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(h.calls, "\n"); got != "brew uninstall veilux-lab/keyward/keyward\nbrew cleanup veilux-lab/keyward/keyward\nbrew untap veilux-lab/keyward" {
+	if got := strings.Join(h.calls, "\n"); got != "brew uninstall veilux-lab/keyward/keyward\nbrew cleanup --prune=all veilux-lab/keyward/keyward\nbrew untap veilux-lab/keyward" {
 		t.Fatalf("calls:\n%s", got)
 	}
 }
