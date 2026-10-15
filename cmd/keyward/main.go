@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sync"
@@ -93,6 +94,9 @@ func main() {
 		Exec:           syscall.Exec,
 		Home:           home,
 		Workdir:        workdir,
+		LookPath:       exec.LookPath,
+		RunTool:        runTool,
+		Self:           stablePath(home),
 		Backups:        backup.Default(home),
 		Record:         record,
 		Daemon: func() error {
@@ -147,6 +151,25 @@ func main() {
 		}
 	}
 	os.Exit(c.Run(os.Args[1:]))
+}
+
+// stablePath is the keyward path that survives upgrades, for configs keyward
+// edits: Homebrew's bin link, not the versioned Cellar path os.Executable gives.
+func stablePath(home string) string {
+	if homebrewExecutable != "" {
+		return filepath.Join(filepath.Dir(homebrewExecutable), "keyward")
+	}
+	if executable, err := os.Executable(); err == nil {
+		return executable
+	}
+	return "keyward"
+}
+
+// runTool runs another tool's CLI, returning everything it printed.
+func runTool(dir string, argv ...string) ([]byte, error) {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
 }
 
 func managedClient(home, socket, service, brew string) *daemon.Client {

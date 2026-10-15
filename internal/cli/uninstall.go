@@ -31,7 +31,7 @@ func (c *CLI) uninstall(args []string) int {
 	if err != nil && *purge {
 		return c.fail("keyward uninstall: cannot check which files still use keyward, so nothing was purged: %v", err)
 	}
-	// restore cannot rewrite MCP configs; keyward mcp --undo covers those.
+	// restore cannot rewrite MCP configs; keyward mcp unwrap covers those.
 	servers, _ := c.mcpUndo()
 	for _, s := range servers {
 		// A project server's Config names its project after the file.
@@ -174,7 +174,7 @@ func mcpList(c *CLI, servers []mcpconfig.Finding) string {
 	for _, s := range servers {
 		fmt.Fprintf(&b, "  %s (%s, %s)\n", s.Name, s.Client, c.tilde(s.Config))
 	}
-	b.WriteString("  keyward mcp --undo shows the definition for each\n")
+	b.WriteString("  keyward mcp unwrap changes them back\n")
 	return b.String()
 }
 

@@ -252,7 +252,7 @@ func TestPurgeDeletesTheVaultOnceFilesAreRestored(t *testing.T) {
 	}
 }
 
-// restore cannot rewrite an MCP config, so uninstall points at keyward mcp --undo.
+// restore cannot rewrite an MCP config, so uninstall points at keyward mcp unwrap.
 func TestUninstallSendsMCPConfigsToMCPUndo(t *testing.T) {
 	r := uninstallFixture(t, "")
 	home := homed(t, r.h)
@@ -263,8 +263,8 @@ func TestUninstallSendsMCPConfigsToMCPUndo(t *testing.T) {
 	if strings.Contains(r.h.err(), "keyward restore "+config) {
 		t.Errorf("the plan says to restore an MCP config:\n%s", r.h.err())
 	}
-	if !strings.Contains(r.h.err(), "pagerduty") || !strings.Contains(r.h.err(), "keyward mcp --undo") {
-		t.Errorf("the plan does not name the server and keyward mcp --undo:\n%s", r.h.err())
+	if !strings.Contains(r.h.err(), "pagerduty") || !strings.Contains(r.h.err(), "keyward mcp unwrap") {
+		t.Errorf("the plan does not name the server and keyward mcp unwrap:\n%s", r.h.err())
 	}
 }
 

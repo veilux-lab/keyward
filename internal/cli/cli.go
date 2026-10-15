@@ -82,6 +82,15 @@ type CLI struct {
 	KeepDir string
 	// Ledger records what keyward changed outside its data; empty Path, nothing.
 	Ledger ledger.Ledger
+	// LookPath and RunTool find and run other tools' CLIs, such as claude.
+	LookPath func(string) (string, error)
+	RunTool  func(dir string, argv ...string) ([]byte, error)
+	// Self is keyward's stable path, written into configs keyward edits.
+	Self string
+
+	// in reads every confirmation of one run, so no answer is lost to a buffer.
+	in    *bufio.Reader
+	inSrc io.Reader
 	// PurgeVault deletes the vault and its Keychain key, for uninstall --purge.
 	PurgeVault func() error
 	// RemovePackage deletes the installed program after its data; nil for development builds.
@@ -119,8 +128,8 @@ commands:
   restore <file>...      put the values back into files (asks first)
   backups [rm|recover]   list, remove, or recover migrate's backups
   recovery show|restore  save or restore the vault's recovery code
-  agents                 set up instructions for AI agents
-  mcp [--undo]           run MCP servers through keyward, or change them back
+  agents [link|unlink]   point AI agents at keyward's instructions, or stop
+  mcp [wrap|unwrap]      run MCP servers through keyward, or stop
   status | stop | start  check, pause, or resume the daemon
   uninstall              remove keyward; secrets stay in the vault (asks first)
   version
@@ -570,7 +579,10 @@ func (c *CLI) readConfirmation() (bool, error) {
 		c.cancelled = true
 		return false, nil
 	}
-	line, err := bufio.NewReader(c.Stdin).ReadString('\n')
+	if c.in == nil || c.inSrc != c.Stdin {
+		c.in, c.inSrc = bufio.NewReader(c.Stdin), c.Stdin
+	}
+	line, err := c.in.ReadString('\n')
 	fmt.Fprintln(c.Stderr)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("reading the answer: %w", err)

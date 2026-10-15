@@ -41,8 +41,8 @@ func TestAddReplacesTheSameChangeAndMergesQuotes(t *testing.T) {
 	l := book(t)
 	l.Add(ledger.Record{Kind: ledger.Rewrite, Path: "/h/.zshrc", Quotes: map[string]string{"A": `"`}})
 	l.Add(ledger.Record{Kind: ledger.Rewrite, Path: "/h/.zshrc", Quotes: map[string]string{"B": ""}})
-	l.Add(ledger.Record{Kind: ledger.Server, Path: "/h/.claude.json", Name: "github", Hash: "1"})
-	l.Add(ledger.Record{Kind: ledger.Server, Path: "/h/.claude.json", Name: "github", Hash: "2"})
+	l.Add(ledger.Record{Kind: ledger.Server, Path: "/h/.claude.json", Name: "github", Text: "local"})
+	l.Add(ledger.Record{Kind: ledger.Server, Path: "/h/.claude.json", Name: "github", Text: "user"})
 	got, _ := l.Records()
 	if len(got) != 2 {
 		t.Fatalf("Records = %+v, want 2", got)
@@ -51,8 +51,8 @@ func TestAddReplacesTheSameChangeAndMergesQuotes(t *testing.T) {
 		if r.Kind == ledger.Rewrite && (r.Quotes["A"] != `"` || r.Quotes["B"] != "" || len(r.Quotes) != 2) {
 			t.Errorf("quotes = %v", r.Quotes)
 		}
-		if r.Kind == ledger.Server && r.Hash != "2" {
-			t.Errorf("server hash = %q, want the latest", r.Hash)
+		if r.Kind == ledger.Server && r.Text != "user" {
+			t.Errorf("server scope = %q, want the latest", r.Text)
 		}
 	}
 }

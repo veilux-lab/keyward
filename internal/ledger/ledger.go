@@ -22,8 +22,7 @@ const (
 	Rewrite Kind = "file_rewrite"
 	// Link is the line keyward added to an agent's instructions, in Text.
 	Link Kind = "agent_link"
-	// Server is an MCP server keyward changed through its tool; Hash is the
-	// definition keyward applied, so a later edit by the user is not undone.
+	// Server is an MCP server keyward changed through its tool; Text is its scope.
 	Server Kind = "mcp_server"
 	// Dir is a directory keyward created, removed once it is empty.
 	Dir Kind = "owned_dir"
@@ -34,9 +33,10 @@ type Record struct {
 	Path   string            `json:"path"`
 	Name   string            `json:"name,omitempty"`
 	Text   string            `json:"text,omitempty"`
-	Hash   string            `json:"hash,omitempty"`
 	Quotes map[string]string `json:"quotes,omitempty"`
-	Time   time.Time         `json:"time"`
+	// Created means keyward created the file, so undoing the change may delete it.
+	Created bool      `json:"created,omitempty"`
+	Time    time.Time `json:"time"`
 }
 
 func (r Record) same(o Record) bool { return r.Kind == o.Kind && r.Path == o.Path && r.Name == o.Name }

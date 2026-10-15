@@ -142,7 +142,7 @@ func TestRestoreNotesMCPServersThatStillStartThroughKeyward(t *testing.T) {
 	if code := h.cli.Run([]string{"restore", path}); code != 0 {
 		t.Fatalf("restore: %d %s", code, h.err())
 	}
-	if !strings.Contains(h.out(), "1 MCP server(s) still start through keyward") || !strings.Contains(h.out(), "keyward mcp --undo") {
+	if !strings.Contains(h.out(), "1 MCP server(s) still start through keyward") || !strings.Contains(h.out(), "keyward mcp unwrap") {
 		t.Errorf("restore does not mention the MCP server:\n%s", h.out())
 	}
 }

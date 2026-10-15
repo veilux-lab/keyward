@@ -42,8 +42,8 @@ keyward doctor                       # check your setup
   command needs with `--only`: `keyward run --only GITHUB_TOKEN -- gh pr list`.
 - Migration keeps an encrypted backup. Remove it with `keyward backups rm ~/.zshrc`
   once everything works.
-- Keyward writes `~/.agents/keyward.md`, instructions for AI agents; `keyward agents`
-  shows how to point your agents at it.
+- Keyward writes `~/.agents/keyward.md`, instructions for AI agents; `keyward agents
+  link` points your agents at it, and `unlink` reverses that.
 - `keyward help` lists every command.
 
 ## Save your recovery code
@@ -56,15 +56,16 @@ manager. `keyward recovery restore` brings the key back.
 
 MCP servers that use a migrated token must start through keyward too. `keyward mcp`
 prints the fixed definition for each affected server in Claude Code, Codex and
-Cursor, without editing anything; `keyward mcp --undo` prints the way back. A
-server that reads a variable without naming it in its config can't be detected;
-wrap it by hand the same way.
+Cursor; `keyward mcp wrap` makes the changes for Claude Code after a "yes", through
+its own `claude mcp` command, and `keyward mcp unwrap` reverses them. A server
+that reads a variable without naming it in its config can't be detected; wrap it
+by hand the same way.
 
 ## Restore or uninstall
 
 ```sh
 keyward restore ~/.zshrc      # put the values back; asks for "yes"
-keyward mcp --undo            # how to start MCP servers without keyward
+keyward mcp unwrap            # start MCP servers without keyward again
 keyward uninstall             # remove keyward; secrets stay in the vault
 keyward uninstall --purge     # also delete the vault, once nothing uses it
 ```

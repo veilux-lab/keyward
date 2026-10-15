@@ -36,6 +36,9 @@ type Server struct {
 	// PassEnv names variables the client copies from its own environment (Codex).
 	PassEnv []string
 
+	// Scope is where Claude Code keeps the server: user, local, or project.
+	Scope string
+
 	toml        bool
 	timeout     string
 	headerTable string
@@ -51,6 +54,15 @@ type Finding struct {
 	Suggestion string
 	// Note says where the suggestion goes.
 	Note string
+	// Want is the suggested definition, for applying it rather than printing it.
+	Want Definition
+}
+
+// Definition is how a stdio server is started.
+type Definition struct {
+	Command string
+	Args    []string
+	Env     map[string]string
 }
 
 // References maps each variable assigned a cap:// reference in files to its name.
@@ -82,11 +94,11 @@ func Load(home, workdir string) ([]Server, []error) {
 		}
 	}
 	add(loadClaude(filepath.Join(home, ".claude.json"), workdir))
-	add(loadJSON("Claude Code", filepath.Join(workdir, ".mcp.json")))
+	add(loadJSON("Claude Code", filepath.Join(workdir, ".mcp.json"), "project"))
 	add(loadCodex(filepath.Join(home, ".codex", "config.toml")))
-	add(loadJSON("Cursor", filepath.Join(home, ".cursor", "mcp.json")))
+	add(loadJSON("Cursor", filepath.Join(home, ".cursor", "mcp.json"), ""))
 	if workdir != home {
-		add(loadJSON("Cursor", filepath.Join(workdir, ".cursor", "mcp.json")))
+		add(loadJSON("Cursor", filepath.Join(workdir, ".cursor", "mcp.json"), ""))
 	}
 	return servers, errs
 }
@@ -113,10 +125,10 @@ func readJSON(path string, into any) (bool, error) {
 	return true, nil
 }
 
-func fromJSON(client, config string, servers map[string]jsonServer) []Server {
+func fromJSON(client, config, scope string, servers map[string]jsonServer) []Server {
 	var out []Server
 	for name, s := range servers {
-		out = append(out, Server{Client: client, Config: config, Name: name,
+		out = append(out, Server{Client: client, Config: config, Name: name, Scope: scope,
 			Command: s.Command, Args: s.Args, Env: s.Env, URL: s.URL, Headers: s.Headers})
 	}
 	return out
@@ -133,21 +145,21 @@ func loadClaude(path, workdir string) ([]Server, error) {
 	if ok, err := readJSON(path, &file); !ok {
 		return nil, err
 	}
-	servers := fromJSON("Claude Code", path, file.MCPServers)
+	servers := fromJSON("Claude Code", path, "user", file.MCPServers)
 	if p, ok := file.Projects[workdir]; ok {
-		servers = append(servers, fromJSON("Claude Code", path+" (project "+workdir+")", p.MCPServers)...)
+		servers = append(servers, fromJSON("Claude Code", path+" (project "+workdir+")", "local", p.MCPServers)...)
 	}
 	return servers, nil
 }
 
-func loadJSON(client, path string) ([]Server, error) {
+func loadJSON(client, path, scope string) ([]Server, error) {
 	var file struct {
 		MCPServers map[string]jsonServer `json:"mcpServers"`
 	}
 	if ok, err := readJSON(path, &file); !ok {
 		return nil, err
 	}
-	return fromJSON(client, path, file.MCPServers), nil
+	return fromJSON(client, path, scope, file.MCPServers), nil
 }
 
 func loadCodex(path string) ([]Server, error) {
@@ -259,7 +271,7 @@ func Check(servers []Server, refs map[string]string) []Finding {
 			f.Vars = append(f.Vars, v)
 		}
 		slices.Sort(f.Vars)
-		f.Suggestion, f.Note = suggest(s, used)
+		f.Suggestion, f.Note, f.Want = suggest(s, used)
 		findings = append(findings, f)
 	}
 	slices.SortFunc(findings, func(a, b Finding) int {
@@ -270,7 +282,7 @@ func Check(servers []Server, refs map[string]string) []Finding {
 
 // suggest wraps the server in keyward run. A remote server goes through the
 // mcp-remote bridge, so that its headers are filled in by the local process.
-func suggest(s Server, used map[string]string) (string, string) {
+func suggest(s Server, used map[string]string) (string, string, Definition) {
 	inner := append([]string{s.Command}, s.Args...)
 	if s.URL != "" {
 		inner = []string{"npx", "-y", "mcp-remote", s.URL}
@@ -313,10 +325,11 @@ func suggest(s Server, used map[string]string) (string, string) {
 	} else {
 		args = append(args, inner...)
 	}
+	want := Definition{Command: "keyward", Args: args, Env: env}
 	if s.toml {
-		return tomlServer(s, "keyward", args, env, nil), tomlNote(s)
+		return tomlServer(s, "keyward", args, env, nil), tomlNote(s), want
 	}
-	return jsonServerText(s.Name, "keyward", args, env), "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + "."
+	return jsonServerText(s.Name, "keyward", args, env), "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + ".", want
 }
 
 // Undo returns each server that starts through keyward, with the definition that
@@ -358,6 +371,7 @@ func Undo(servers []Server) []Finding {
 			}
 		}
 		slices.Sort(f.Vars)
+		f.Want = Definition{Command: inner[0], Args: inner[1:], Env: env}
 		if s.toml {
 			f.Suggestion = tomlServer(s, inner[0], inner[1:], env, f.Vars)
 			f.Note = tomlNote(s)

@@ -66,7 +66,7 @@ func (c *CLI) restore(args []string) int {
 	c.removeRestoredBackups(restored, skipped)
 	if servers, _ := c.mcpUndo(); len(r.Restored) > 0 && len(servers) > 0 {
 		fmt.Fprintf(c.Stdout, "%d MCP server(s) still start through keyward and keep working. If you are\n"+
-			"removing keyward, keyward mcp --undo shows how to change them back.\n", len(servers))
+			"removing keyward, keyward mcp unwrap changes them back.\n", len(servers))
 	}
 	if len(r.Skipped) != 0 {
 		return exitFailure
