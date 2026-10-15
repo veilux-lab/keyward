@@ -38,7 +38,7 @@ func uninstallFixture(t *testing.T, answer string) *removal {
 	r.h.cli.RemovePackage = func() (string, error) {
 		r.calls = append(r.calls, "package")
 		for _, dir := range r.dirs {
-			if _, err := os.Stat(dir); err == nil {
+			if _, err := os.Stat(dir); err == nil && !strings.HasPrefix(r.h.cli.KeepDir, dir) {
 				t.Error("the package was removed before local data")
 			}
 		}
@@ -265,5 +265,28 @@ func TestUninstallSendsMCPConfigsToMCPUndo(t *testing.T) {
 	}
 	if !strings.Contains(r.h.err(), "pagerduty") || !strings.Contains(r.h.err(), "keyward mcp --undo") {
 		t.Errorf("the plan does not name the server and keyward mcp --undo:\n%s", r.h.err())
+	}
+}
+
+// The vault sits inside keyward's folder: uninstall clears the folder around it,
+// and only --purge takes the vault too.
+func TestUninstallKeepsOnlyTheVaultFolder(t *testing.T) {
+	r := uninstallFixture(t, "yes\n")
+	vaultDir := filepath.Join(r.dirs[0], "vault")
+	os.MkdirAll(vaultDir, 0o700)
+	os.WriteFile(filepath.Join(vaultDir, "keyward.vault"), []byte("sealed"), 0o600)
+	r.h.cli.KeepDir = vaultDir
+	if code := r.h.cli.Run([]string{"uninstall"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, r.h.err())
+	}
+	if _, err := os.Stat(filepath.Join(vaultDir, "keyward.vault")); err != nil {
+		t.Errorf("the vault was removed without --purge: %v", err)
+	}
+	entries, _ := os.ReadDir(r.dirs[0])
+	if len(entries) != 1 || entries[0].Name() != "vault" {
+		t.Errorf("left in keyward's folder: %v", entries)
+	}
+	if _, err := os.Stat(r.dirs[1]); !os.IsNotExist(err) {
+		t.Errorf("a data folder without the vault was kept: %v", err)
 	}
 }

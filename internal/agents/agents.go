@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/veilux-lab/keyward/internal/ledger"
 )
 
 //go:embed keyward.md
@@ -95,6 +97,21 @@ func (f File) Write() error {
 		return err
 	}
 	return os.Rename(tmp.Name(), f.Path)
+}
+
+// WriteRecorded is Write, recording in l the folder it had to create, so
+// uninstall can remove that folder once it is empty.
+func (f File) WriteRecorded(l ledger.Ledger) error {
+	dir := filepath.Dir(f.Path)
+	_, err := os.Lstat(dir)
+	created := errors.Is(err, fs.ErrNotExist)
+	if err := f.Write(); err != nil {
+		return err
+	}
+	if created && l.Path != "" {
+		return l.Add(ledger.Record{Kind: ledger.Dir, Path: dir})
+	}
+	return nil
 }
 
 // Remove deletes the file if keyward wrote it, reporting whether it did.

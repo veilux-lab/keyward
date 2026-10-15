@@ -36,10 +36,39 @@ type Encrypted struct {
 	migrated bool
 }
 
-// DefaultPath is where the daemon keeps the vault for a service. It sits outside
-// keyward's data directory, so uninstall keeps stored secrets.
+// DefaultPath is where the daemon keeps the vault for a service: in its own
+// folder inside keyward's, which plain uninstall keeps and purge deletes.
 func DefaultPath(home, service string) string {
+	return filepath.Join(home, "Library", "Application Support", "keyward", "vault", service+".vault")
+}
+
+func legacyPath(home, service string) string {
 	return filepath.Join(home, "Library", "Application Support", "keyward-vault", service+".vault")
+}
+
+// MoveLegacy moves a vault from its folder before 1.1 into DefaultPath, unless a
+// vault is already there, and removes the old folder once it is empty.
+func MoveLegacy(home, service string) error {
+	old, current := legacyPath(home, service), DefaultPath(home, service)
+	if _, err := os.Lstat(current); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if _, err := os.Lstat(old); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(current), 0o700); err != nil {
+		return err
+	}
+	// The marker first: a vault that moved without it would only show the
+	// recovery reminder once more.
+	if err := os.Rename(old+".recovery-shown", current+".recovery-shown"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(old, current); err != nil {
+		return err
+	}
+	_ = os.Remove(filepath.Dir(old))
+	return nil
 }
 
 const (

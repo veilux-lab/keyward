@@ -15,7 +15,8 @@ func TestPurgeVaultRemovesEverythingItStored(t *testing.T) {
 	const service = "keyward-purge-test"
 	keys, legacy := vault.NewKeychainService(service+"-vault-key"), vault.NewKeychainService(service)
 	t.Cleanup(func() { _ = keys.Delete("master"); _ = legacy.Delete("kwtest-left-behind") })
-	path := filepath.Join(t.TempDir(), "test.vault")
+	root := filepath.Join(t.TempDir(), "keyward")
+	path := filepath.Join(root, "vault", "test.vault")
 	v := &vault.Encrypted{Path: path, Keys: keys}
 	if err := v.Put("kwtest-in-vault", vault.NewSecret([]byte("v")), ""); err != nil {
 		t.Fatal(err)
@@ -25,8 +26,11 @@ func TestPurgeVaultRemovesEverythingItStored(t *testing.T) {
 	}
 	os.WriteFile(path+".recovery-shown", nil, 0o600)
 
-	if err := purgeVault(path, service); err != nil {
+	if err := purgeVault(path, service, true); err != nil {
 		t.Fatalf("purgeVault: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Errorf("the emptied keyward folder remains: %v", err)
 	}
 	for _, file := range []string{path, path + ".recovery-shown"} {
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
@@ -39,7 +43,7 @@ func TestPurgeVaultRemovesEverythingItStored(t *testing.T) {
 	if left, _ := legacy.Entries(); len(left) != 0 {
 		t.Errorf("legacy items remain: %v", left)
 	}
-	if err := purgeVault(path, service); err != nil {
+	if err := purgeVault(path, service, true); err != nil {
 		t.Errorf("purging an already purged vault: %v", err)
 	}
 }

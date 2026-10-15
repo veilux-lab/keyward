@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -102,7 +103,7 @@ func (c *CLI) uninstall(args []string) int {
 		return c.fail("keyward uninstall: %v; nothing else was removed", err)
 	}
 	for _, dir := range c.DataDirs {
-		err = errors.Join(err, os.RemoveAll(dir))
+		err = errors.Join(err, removeAllBut(dir, c.KeepDir))
 	}
 	if ownsAgentFile {
 		_, rmErr := agentFile.Remove()
@@ -133,6 +134,34 @@ func (c *CLI) uninstall(args []string) int {
 	}
 	fmt.Fprintln(c.Stdout, paintLines(c.ColorOut, strings.Join(lines, "\n"), map[string]string{"✓": green}))
 	return exitOK
+}
+
+// removeAllBut deletes dir, except keep and the folders leading to it.
+func removeAllBut(dir, keep string) error {
+	rel, err := filepath.Rel(dir, keep)
+	if keep == "" || err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return os.RemoveAll(dir)
+	}
+	first, _, _ := strings.Cut(rel, string(filepath.Separator))
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range entries {
+		path := filepath.Join(dir, e.Name())
+		if e.Name() == first {
+			if path != keep {
+				errs = append(errs, removeAllBut(path, keep))
+			}
+			continue
+		}
+		errs = append(errs, os.RemoveAll(path))
+	}
+	return errors.Join(errs...)
 }
 
 // mcpList names each MCP server still starting through keyward, and the command that

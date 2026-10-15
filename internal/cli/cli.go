@@ -24,6 +24,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/doctor"
 	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/migrate"
 	"github.com/veilux-lab/keyward/internal/resolve"
 	"github.com/veilux-lab/keyward/internal/vault"
@@ -77,6 +78,10 @@ type CLI struct {
 
 	// DataDirs are deleted by uninstall; empty for isolated instances.
 	DataDirs []string
+	// KeepDir, inside a data dir, holds the vault: kept unless uninstall purges.
+	KeepDir string
+	// Ledger records what keyward changed outside its data; empty Path, nothing.
+	Ledger ledger.Ledger
 	// PurgeVault deletes the vault and its Keychain key, for uninstall --purge.
 	PurgeVault func() error
 	// RemovePackage deletes the installed program after its data; nil for development builds.
@@ -524,6 +529,7 @@ func (c *CLI) migrate(args []string) int {
 	if err != nil {
 		return c.fail("keyward migrate: %v", err)
 	}
+	c.recordRewrite(plan)
 
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)

@@ -2,8 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/veilux-lab/keyward/internal/agents"
+	"github.com/veilux-lab/keyward/internal/ledger"
+	"github.com/veilux-lab/keyward/internal/migrate"
 )
 
 // agents writes the instructions for AI agents and says how to point each
@@ -16,7 +19,7 @@ func (c *CLI) agents(args []string) int {
 	if c.Home == "" {
 		return c.fail("keyward agents: home directory unknown")
 	}
-	if err := agents.Default(c.Home).Write(); err != nil {
+	if err := agents.Default(c.Home).WriteRecorded(c.Ledger); err != nil {
 		return c.fail("keyward agents: %v", err)
 	}
 	fmt.Fprintf(c.Stdout, "%s tells AI agents to run commands that need credentials through keyward.\n", agents.Display)
@@ -24,6 +27,25 @@ func (c *CLI) agents(args []string) int {
 		fmt.Fprintln(c.Stdout, "Every installed agent already reads it.")
 	}
 	return exitOK
+}
+
+// recordRewrite notes a migrated file and its quoting. The file is already
+// rewritten, so a failure only warns: discovery still finds it from the vault.
+func (c *CLI) recordRewrite(plan *migrate.Plan) {
+	if c.Ledger.Path == "" {
+		return
+	}
+	quotes := map[string]string{}
+	for _, change := range plan.Changes {
+		quotes[change.Name] = change.Quote()
+	}
+	path, err := filepath.Abs(plan.Path)
+	if err == nil {
+		err = c.Ledger.Add(ledger.Record{Kind: ledger.Rewrite, Path: path, Quotes: quotes})
+	}
+	if err != nil {
+		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("keyward migrate: could not record the change for uninstall: %v", err)))
+	}
 }
 
 // agentNextSteps follows a migration: installation wrote the file, so this only
