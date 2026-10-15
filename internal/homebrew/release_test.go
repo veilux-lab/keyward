@@ -48,7 +48,7 @@ func TestReleaseArchivesOnlyCommittedFilesAndPinsFormula(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{checksum, `version "0.1.0"`, `homepage "https://github.com/veilux-lab/keyward"`, "https://github.com/veilux-lab/keyward/releases/download/v0.1.0/keyward-0.1.0.tar.gz", "main.homebrewExecutable=", "opt_bin", "daemon", "keyward migrate"} {
+	for _, want := range []string{checksum, `version "0.1.0"`, `homepage "https://github.com/veilux-lab/keyward"`, "https://github.com/veilux-lab/keyward/releases/download/v0.1.0/keyward-0.1.0.tar.gz", "main.homebrewExecutable=", "opt_bin", "daemon", "keyward setup"} {
 		if !strings.Contains(string(formula), want) {
 			t.Fatalf("formula missing %s", want)
 		}
@@ -116,7 +116,7 @@ func TestFormulaCaveatsAreBrief(t *testing.T) {
 	if lines := strings.Count(caveats, "\n") - 1; lines > 4 {
 		t.Errorf("caveats are %d lines, want at most 4:\n%s", lines, caveats)
 	}
-	for _, want := range []string{"keyward migrate", "keyward run --", "keyward help", "keyward uninstall", "brew services"} {
+	for _, want := range []string{"keyward setup", "keyward run --only", "keyward help", "keyward uninstall", "brew services"} {
 		if !strings.Contains(caveats, want) {
 			t.Errorf("caveats lack %q:\n%s", want, caveats)
 		}

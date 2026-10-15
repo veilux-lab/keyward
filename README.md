@@ -19,6 +19,7 @@ value to the one command that needs it.
 ```sh
 brew tap veilux-lab/keyward https://github.com/veilux-lab/keyward.git   # needed first
 brew install veilux-lab/keyward/keyward
+keyward setup                                                            # then this
 ```
 
 Apple Silicon only. On Intel, build it with Go: `go build -o keyward ./cmd/keyward`,
