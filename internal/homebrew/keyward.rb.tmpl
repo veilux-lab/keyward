@@ -28,8 +28,8 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      Get started:   keyward migrate ~/.zshrc
-      Then use:      keyward run -- <command>
+      Get started:   keyward setup
+      Then use:      keyward run --only VAR -- <command>
       More:          keyward help. Remove with keyward uninstall, not brew uninstall.
       Ignore the brew services lines below; keyward starts its own daemon.
     EOS

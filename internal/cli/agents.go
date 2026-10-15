@@ -170,7 +170,7 @@ func (c *CLI) agentNextSteps() {
 	switch st, err := agents.Default(c.Home).Status(); {
 	case err != nil || st == agents.Foreign:
 	case st == agents.Missing:
-		fmt.Fprintf(c.Stdout, "\nTo tell AI agents how to use these references: keyward agents\n")
+		fmt.Fprintf(c.Stdout, "\nTo tell AI agents how to use these references: keyward agents link\n")
 	default:
 		if c.printUnlinked() {
 			fmt.Fprintln(c.Stdout, "keyward agents link adds these lines for you.")

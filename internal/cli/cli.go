@@ -135,18 +135,18 @@ commands:
   agents [link|unlink]   point AI agents at keyward's instructions, or stop
   mcp [wrap|unwrap]      run MCP servers through keyward, or stop
   status | stop | start  check, pause, or resume the daemon
-  uninstall              remove keyward; secrets stay in the vault (asks first)
+  uninstall              undo everything keyward changed, then remove it (asks first)
   version
 
 options:
-  --dry-run              migrate, restore: show what would change, and stop
+  --dry-run              migrate, restore, uninstall: show what would change, and stop
   --force                add: replace an existing secret
   --all                  backups rm: remove every backup
-  --purge                uninstall: also delete the vault, once files are restored
+  --purge                uninstall: also delete the vault and its Keychain key
   --only VAR,...         run: resolve only these variables
 
 examples:
-  keyward migrate ~/.zshrc
+  keyward setup
   pbpaste | keyward add github-token
   keyward run -- npm test
 `
@@ -556,7 +556,7 @@ func (c *CLI) migrate(args []string) int {
 		"the ones a command needs:\n"+
 		"  keyward run --only %s -- <command>\n"+
 		"Started any other way, a program sees the cap:// reference instead of the value.\n"+
-		"MCP servers that use these values must start through keyward too: keyward mcp shows how.\n", plan.Changes[0].Name)
+		"MCP servers that use these values must start through keyward too: keyward mcp wrap changes them.\n", plan.Changes[0].Name)
 	c.agentNextSteps()
 	c.remindRecovery()
 	return exitOK
@@ -632,7 +632,7 @@ func (c *CLI) doctor(args []string) int {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d MCP server(s) would receive cap:// references; see keyward mcp", len(findings))))
 	}
 	if n := c.unlinkedAgents(); n > 0 {
-		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d installed AI agent(s) do not read %s; run keyward agents", n, agents.Display)))
+		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d installed AI agent(s) do not read %s; run keyward agents link", n, agents.Display)))
 	}
 	if report.HasProblems() {
 		return exitFailure

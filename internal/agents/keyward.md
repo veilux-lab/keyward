@@ -18,10 +18,11 @@ reference, not a broken value.
   `curl -v` under `keyward run`, and never write one to a file.
 - An authentication failure, or a tool that receives `cap://…`, usually means it
   was started outside keyward. Say so rather than looking for the value. For an
-  MCP server, `keyward mcp` prints the fix; show it to the user before changing
-  any config.
+  MCP server, `keyward mcp` shows the fix; leave applying it to the user, who can
+  run `keyward mcp wrap`.
 - If keyward says its daemon is not running, or a Keychain dialog appears, stop and
   tell the user. Do not retry in a loop.
-- Do not run `keyward migrate`, `restore`, `rm`, `add --force`, `backups recover`,
-  `backups rm`, `recovery`, or `uninstall`, or read keyward's backups or vault,
+- Do not run `keyward setup`, `migrate`, `restore`, `rm`, `add --force`, `backups
+  recover`, `backups rm`, `recovery`, `mcp wrap`, `mcp unwrap`, `agents link`,
+  `agents unlink`, or `uninstall`, or read keyward's ledger, backups, or vault,
   unless the user asks.
