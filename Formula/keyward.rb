@@ -1,14 +1,14 @@
 class Keyward < Formula
   desc "Move shell secrets into a Keychain-keyed vault, resolved by a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v1.1.0/keyward-1.1.0.tar.gz"
-  version "1.1.0"
-  sha256 "cfcba72818eea64bc1b63406d09973167c06389469846b1abfed23974bcc458f"
+  url "https://github.com/veilux-lab/keyward/releases/download/v1.1.1/keyward-1.1.1.tar.gz"
+  version "1.1.1"
+  sha256 "87c9b748558a1772947a007046496d34a0d3e46c7501e1e43c0f451279331817"
   license "MIT"
 
   bottle do
-    root_url "https://github.com/veilux-lab/keyward/releases/download/v1.1.0"
-    sha256 arm64_sequoia: "66f62eb58238f0a780d0e48e8b9593ea75446818e46673d94c490c88488c0363"
+    root_url "https://github.com/veilux-lab/keyward/releases/download/v1.1.1"
+    sha256 arm64_sequoia: "f7e4b3242e569b102a63ba7af13853d3dd5b413a9813645ccd9d4a1370658642"
   end
 
   depends_on "go" => :build
@@ -33,8 +33,8 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      Get started:   keyward migrate ~/.zshrc
-      Then use:      keyward run -- <command>
+      Get started:   keyward setup
+      Then use:      keyward run --only VAR -- <command>
       More:          keyward help. Remove with keyward uninstall, not brew uninstall.
       Ignore the brew services lines below; keyward starts its own daemon.
     EOS
