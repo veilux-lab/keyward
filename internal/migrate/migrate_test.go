@@ -302,6 +302,11 @@ func TestCheckMovesConflictsToSkips(t *testing.T) {
 			if !strings.Contains(s.Reason, "splunk-mcp-token") {
 				t.Errorf("skip reason = %q, want it to name the vault entry", s.Reason)
 			}
+			// Both ways out are spelled out, including how to keep the two values.
+			if !strings.Contains(s.Reason, "keyward rm splunk-mcp-token") || !strings.Contains(s.Reason, "keyward add <new-name>") ||
+				!strings.Contains(s.Reason, "SPLUNK_MCP_TOKEN='cap://<new-name>'") {
+				t.Errorf("skip reason = %q, want the commands for both fixes", s.Reason)
+			}
 		}
 	}
 	if !found {

@@ -139,6 +139,14 @@ func TestClientStartupFailurePropagates(t *testing.T) {
 	}
 }
 
+// A startup error that already says what to do is not given the hint a second time.
+func TestClientStartupFailureHintIsGivenOnce(t *testing.T) {
+	c := &daemon.Client{Path: socketPath(t), Start: func() error { return errors.New("remove it, then run `keyward start`") }}
+	if err := c.Delete("dummy"); err == nil || strings.Count(err.Error(), "keyward start") != 1 {
+		t.Fatalf("Delete = %v, want the hint once", err)
+	}
+}
+
 func TestClientRetriesOnlyOnceAfterStartup(t *testing.T) {
 	starts := 0
 	c := &daemon.Client{Path: socketPath(t), Start: func() error { starts++; return nil }}

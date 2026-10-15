@@ -195,7 +195,7 @@ func (m Manager) Ensure() error {
 	for _, loaded := range targets {
 		if m.command("/bin/launchctl", "print", loaded) == nil {
 			if err := m.waitReady(); err != nil {
-				return fmt.Errorf("the Keyward login agent is loaded but not responding; use its installation's `keyward start` and check Library/Logs/keyward/activity.jsonl: %w", err)
+				return stuckAgent(m.UID, strings.TrimPrefix(loaded, domain+"/"), m.Label)
 			}
 			return nil
 		}

@@ -16,6 +16,20 @@ import (
 const homebrewLabel = "com.veilux-lab.keyward.homebrew"
 const homebrewFormula = "veilux-lab/keyward/keyward"
 
+// stuckAgent explains a login agent that launchd has loaded but that does not
+// answer. One from another installation only goes away when it is removed.
+func stuckAgent(uid int, job, own string) error {
+	target := fmt.Sprintf("gui/%d/%s", uid, job)
+	switch {
+	case job == own:
+		return errors.New("the keyward login agent is loaded but not responding. Run `keyward stop`, then `keyward start`, and check ~/Library/Logs/keyward/activity.jsonl")
+	case job == homebrewLabel:
+		return fmt.Errorf("another keyward installation, from Homebrew, is loaded but not responding (%s). Stop it, then run `keyward start`:\n  brew services stop %s", job, homebrewFormula)
+	default:
+		return fmt.Errorf("another keyward installation, a development build, is loaded but not responding (%s). Remove it, then run `keyward start`:\n  launchctl bootout %s\n  rm ~/Library/LaunchAgents/%s.plist", job, target, job)
+	}
+}
+
 type startupState struct {
 	root *os.Root
 	lock *os.File

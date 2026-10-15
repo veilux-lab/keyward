@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -147,6 +148,9 @@ func (c *Client) send(req request) (response, error) {
 	conn, err := net.DialTimeout("unix", c.Path, 2*time.Second)
 	if err != nil && req.Op != "ping" && c.Start != nil && notRunning(err) {
 		if err := c.Start(); err != nil {
+			if strings.Contains(err.Error(), "keyward start") {
+				return response{}, fmt.Errorf("starting the keyward daemon: %w", err)
+			}
 			return response{}, fmt.Errorf("starting the keyward daemon: %w; run `keyward start` to recover", err)
 		}
 		// No request was sent, so connecting once more cannot replay a write.

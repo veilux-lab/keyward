@@ -1166,3 +1166,15 @@ func TestMigrateExplainsKeywardRunAtEveryStep(t *testing.T) {
 		t.Errorf("the result should point MCP servers at keyward mcp, not launch an editor:\n%s", h.out())
 	}
 }
+
+// The closing example teaches --only with a variable the user just migrated.
+func TestMigrateEndsWithAnOnlyExampleForAMovedVariable(t *testing.T) {
+	h := newHarness(t, "yes\n", nil, nil)
+	path := writeFixture(t, "export GITHUB_TOKEN=ghp_perfectlyFine0123456789\n")
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if !strings.Contains(h.out(), "keyward run --only GITHUB_TOKEN -- <command>") {
+		t.Errorf("output lacks the --only example:\n%s", h.out())
+	}
+}

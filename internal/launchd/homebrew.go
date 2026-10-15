@@ -152,7 +152,7 @@ func (h Homebrew) Ensure() error {
 	for _, job := range []string{label, homebrewLabel} {
 		if m.command("/bin/launchctl", "print", domain+job) == nil {
 			if err := m.waitReady(); err != nil {
-				return fmt.Errorf("the Keyward login agent is loaded but not responding; use its installation's `keyward start` and check Library/Logs/keyward/activity.jsonl: %w", err)
+				return stuckAgent(h.UID, job, homebrewLabel)
 			}
 			return nil
 		}

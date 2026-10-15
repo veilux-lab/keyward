@@ -528,10 +528,11 @@ func (c *CLI) migrate(args []string) int {
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)
 	fmt.Fprintf(c.Stdout, "  Its key is in keyward's vault. Remove both once the new file works: keyward backups rm %s\n", plan.Path)
-	fmt.Fprint(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward:\n"+
-		"  keyward run -- npm test\n"+
+	fmt.Fprintf(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward, naming\n"+
+		"the ones a command needs:\n"+
+		"  keyward run --only %s -- <command>\n"+
 		"Started any other way, a program sees the cap:// reference instead of the value.\n"+
-		"MCP servers that use these values must start through keyward too: keyward mcp shows how.\n")
+		"MCP servers that use these values must start through keyward too: keyward mcp shows how.\n", plan.Changes[0].Name)
 	c.agentNextSteps()
 	c.remindRecovery()
 	return exitOK
