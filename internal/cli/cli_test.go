@@ -12,6 +12,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/cli"
 	"github.com/veilux-lab/keyward/internal/daemon"
+	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
@@ -55,6 +56,7 @@ func newHarness(t *testing.T, stdin string, seed map[string]string, environ []st
 	h.cli = &cli.CLI{
 		Store:   store,
 		Backups: backup.Dir{Path: filepath.Join(t.TempDir(), "backups")},
+		Ledger:  ledger.Ledger{Path: filepath.Join(t.TempDir(), "ledger.json")},
 		Stdin:   strings.NewReader(stdin),
 		Stdout:  h.stdout,
 		Stderr:  h.stderr,
@@ -205,7 +207,7 @@ func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 	if commands < 0 || options < commands || examples < options {
 		t.Fatalf("help lacks commands, options, and examples sections in that order:\n%s", out)
 	}
-	for _, want := range []string{"migrate <file>", "run -- <command>", "mcp ", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run -- npm test", "--only VAR"} {
+	for _, want := range []string{"migrate <file>", "run -- <command>", "mcp [wrap|unwrap]", "agents [link|unlink]", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run -- npm test", "--only VAR"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q", want)
 		}
@@ -215,8 +217,8 @@ func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 			t.Errorf("help still shows %q", unwanted)
 		}
 	}
-	if lines := strings.Count(out, "\n"); lines > 32 {
-		t.Errorf("help is %d lines, want at most 32", lines)
+	if lines := strings.Count(out, "\n"); lines > 33 {
+		t.Errorf("help is %d lines, want at most 33", lines)
 	}
 }
 
@@ -1164,5 +1166,55 @@ func TestMigrateExplainsKeywardRunAtEveryStep(t *testing.T) {
 	// Starting an editor through keyward would hand every agent in it the values.
 	if strings.Contains(h.out(), "code .") || !strings.Contains(h.out(), "keyward mcp") {
 		t.Errorf("the result should point MCP servers at keyward mcp, not launch an editor:\n%s", h.out())
+	}
+}
+
+// The closing example teaches --only with a variable the user just migrated.
+func TestMigrateEndsWithAnOnlyExampleForAMovedVariable(t *testing.T) {
+	h := newHarness(t, "yes\n", nil, nil)
+	path := writeFixture(t, "export GITHUB_TOKEN=ghp_perfectlyFine0123456789\n")
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if !strings.Contains(h.out(), "keyward run --only GITHUB_TOKEN -- <command>") {
+		t.Errorf("output lacks the --only example:\n%s", h.out())
+	}
+}
+
+// migrate records what it rewrote, with each variable's original quoting, so
+// restore can put the line back exactly and uninstall knows the file.
+func TestMigrateRecordsTheRewriteAndItsQuoting(t *testing.T) {
+	h := newHarness(t, "yes\n", nil, nil)
+	path := writeFixture(t, "export GITHUB_TOKEN=\"ghp_perfectlyFine0123456789\"\nexport NPM_TOKEN=npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789\n")
+	if code := h.cli.Run([]string{"migrate", path}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	records, err := h.cli.Ledger.Records()
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records = %+v, %v", records, err)
+	}
+	r := records[0]
+	if abs, _ := filepath.Abs(path); r.Kind != ledger.Rewrite || r.Path != abs {
+		t.Errorf("record = %+v, want a rewrite of %s", r, abs)
+	}
+	if q, ok := r.Quotes["GITHUB_TOKEN"]; !ok || q != `"` {
+		t.Errorf("GITHUB_TOKEN quote = %q, %v", q, ok)
+	}
+	if q, ok := r.Quotes["NPM_TOKEN"]; !ok || q != "" {
+		t.Errorf("NPM_TOKEN quote = %q, %v", q, ok)
+	}
+}
+
+// A folder keyward creates for the agent instructions is recorded, so uninstall
+// can remove it once it is empty.
+func TestAgentsRecordsTheFolderItCreates(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	home := homed(t, h)
+	if code := h.cli.Run([]string{"agents"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	records, _ := h.cli.Ledger.Records()
+	if len(records) != 1 || records[0].Kind != ledger.Dir || records[0].Path != filepath.Join(home, ".agents") {
+		t.Errorf("records = %+v", records)
 	}
 }

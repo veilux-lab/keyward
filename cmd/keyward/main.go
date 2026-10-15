@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/veilux-lab/keyward/internal/activity"
 	"github.com/veilux-lab/keyward/internal/agents"
@@ -21,6 +23,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/cli"
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/launchd"
+	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/vault"
 	"golang.org/x/term"
 )
@@ -68,7 +71,8 @@ func main() {
 	}
 
 	vaultPath := os.Getenv("KEYWARD_VAULT")
-	if vaultPath == "" {
+	movable := vaultPath == ""
+	if movable {
 		vaultPath = vault.DefaultPath(home, service)
 	}
 	client := managedClient(home, socket, service, homebrewExecutable)
@@ -87,6 +91,9 @@ func main() {
 		Exec:           syscall.Exec,
 		Home:           home,
 		Workdir:        workdir,
+		LookPath:       exec.LookPath,
+		RunTool:        runTool,
+		Self:           stablePath(home),
 		Backups:        backup.Default(home),
 		Record:         record,
 		Daemon: func() error {
@@ -96,6 +103,20 @@ func main() {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+			// Under launchd, notice the program being deleted without uninstall.
+			if job, ok := launchd.Managed(os.Getenv); ok && filepath.IsAbs(os.Args[0]) && socket == daemon.DefaultSocket(home) {
+				go launchd.Watchdog{Program: os.Args[0], Every: 5 * time.Minute, Exists: launchd.Exists, Gone: func() {
+					_ = agents.Default(home).WriteRemovedNotice()
+					launchd.Unregister(home, os.Getuid(), job)
+				}}.Run(ctx)
+			}
+			// Before 1.1 the vault had a folder of its own. Only the daemon moves it,
+			// before opening it, so no older daemon is still reading the old path.
+			if movable {
+				if err := vault.MoveLegacy(home, service); err != nil {
+					return fmt.Errorf("moving the vault into its new folder: %w", err)
+				}
+			}
 			// Only the vault key lives in the Keychain; Legacy is where secrets were
 			// kept before the vault, and they move in on first use.
 			store := &vault.Encrypted{Path: vaultPath, Keys: vault.NewKeychainService(service + "-vault-key"), Legacy: vault.NewKeychainService(service)}
@@ -128,7 +149,12 @@ func main() {
 	}
 	if socket == daemon.DefaultSocket(home) && service == vault.DefaultService {
 		c.DataDirs = []string{filepath.Dir(socket), activity.DefaultConfig(home).Dir}
-		c.PurgeVault = func() error { return purgeVault(vaultPath, service) }
+		c.Ledger = ledger.Default(home)
+		ownFolder := vaultPath == vault.DefaultPath(home, service)
+		if ownFolder {
+			c.KeepDir = filepath.Dir(vaultPath)
+		}
+		c.PurgeVault = func() error { return purgeVault(vaultPath, service, ownFolder) }
 		if homebrewExecutable != "" {
 			c.RemovePackage = (launchd.Homebrew{Home: home, UID: os.Getuid(), Brew: homebrewExecutable}).Remove
 		} else if executable, err := os.Executable(); err == nil && executable == filepath.Join(home, ".local", "bin", "keyward") {
@@ -136,6 +162,25 @@ func main() {
 		}
 	}
 	os.Exit(c.Run(os.Args[1:]))
+}
+
+// stablePath is the keyward path that survives upgrades, for configs keyward
+// edits: Homebrew's bin link, not the versioned Cellar path os.Executable gives.
+func stablePath(home string) string {
+	if homebrewExecutable != "" {
+		return filepath.Join(filepath.Dir(homebrewExecutable), "keyward")
+	}
+	if executable, err := os.Executable(); err == nil {
+		return executable
+	}
+	return "keyward"
+}
+
+// runTool runs another tool's CLI, returning everything it printed.
+func runTool(dir string, argv ...string) ([]byte, error) {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
 }
 
 func managedClient(home, socket, service, brew string) *daemon.Client {
@@ -169,16 +214,28 @@ func withAgentFile(home string, start func() error) func() error {
 // writeAgentFile is best effort; a file keyward did not write is left alone.
 func writeAgentFile(home string) {
 	if home != "" {
-		_ = agents.Default(home).Write()
+		_ = agents.Default(home).WriteRecorded(ledger.Default(home))
 	}
 }
 
-// purgeVault deletes the vault, its recovery marker, its key, and any secrets still
-// stored as separate Keychain items. Deleting needs no Keychain approval.
-func purgeVault(path, service string) error {
+// purgeVault deletes the vault, its recovery marker, its folder once empty, its
+// key, and any secrets still stored as separate Keychain items. Deleting needs no
+// Keychain approval.
+func purgeVault(path, service string, ownFolder bool) error {
 	var errs []error
 	for _, file := range []string{path, path + ".recovery-shown"} {
 		if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	// The vault folder, then keyward's, which uninstall has emptied around it. A
+	// KEYWARD_VAULT elsewhere leaves its folders to their owner.
+	var dirs []string
+	if ownFolder {
+		dirs = []string{filepath.Dir(path), filepath.Dir(filepath.Dir(path))}
+	}
+	for _, dir := range dirs {
+		if err := os.Remove(dir); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
 			errs = append(errs, err)
 		}
 	}

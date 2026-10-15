@@ -68,7 +68,9 @@ daemon upgrade asks once to read the vault key.
 - Changes reach `main` only through a pull request: branch from the latest
   `origin/main`, push the branch, and open a PR. A ruleset blocks direct pushes, and
   the CI `verify` check must pass before merging. Merging publishes a release unless
-  the PR changes only Markdown.
+  the PR changes only Markdown or `images/`. The release bumps the patch version;
+  a line `Release: minor` or `Release: major` in the PR description bumps that part
+  instead, since the squash merge copies the description into the commit.
 - **Never push**, or create, change, merge, or delete a remote branch or pull
   request, without the owner's explicit approval given just before that action. Say
   the repo, the branch, and the action when asking. An earlier approval does not

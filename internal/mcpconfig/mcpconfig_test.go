@@ -217,3 +217,89 @@ func TestCodexUnicodeEscapesAreDecoded(t *testing.T) {
 		t.Errorf("servers = %+v, errors = %v", servers, errs)
 	}
 }
+
+func wrapped(t *testing.T) []mcpconfig.Server {
+	t.Helper()
+	home, workdir := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(home, ".claude.json"), `{"mcpServers": {
+    "pagerduty": {"command": "/opt/homebrew/bin/keyward", "args": ["run", "--only", "PD_KEY", "--", "uvx", "pagerduty-mcp"], "env": {"PD_KEY": "cap://pagerduty-key", "LEVEL": "info"}},
+    "github": {"command": "keyward", "args": ["run", "--", "sh", "-c", "exec npx -y mcp-remote https://api.example.com/mcp/ --header \"Authorization: Bearer $GITHUB_TOKEN\""], "env": {"GITHUB_TOKEN": "cap://github-token"}},
+    "aws": {"command": "uvx", "args": ["aws-mcp"]}
+  }}`)
+	write(t, filepath.Join(home, ".codex", "config.toml"), `[mcp_servers.pagerduty]
+command = "/opt/homebrew/bin/keyward"
+args = ["run", "--only=PD_KEY", "--", "uvx", "pagerduty-mcp"]
+env = { PD_KEY = "cap://pagerduty-key", LEVEL = "info" }
+startup_timeout_sec = 60
+`)
+	write(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers": {"gh": {"command": "keyward", "args": ["run", "--", "npx", "gh-mcp"], "env": {"GITHUB_TOKEN": "cap://github-token"}}}}`)
+	servers, errs := mcpconfig.Load(home, workdir)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	return servers
+}
+
+func undone(t *testing.T, client, name string) mcpconfig.Finding {
+	t.Helper()
+	for _, f := range mcpconfig.Undo(wrapped(t)) {
+		if f.Client == client && f.Name == name {
+			return f
+		}
+	}
+	t.Fatalf("no undo for %s/%s", client, name)
+	return mcpconfig.Finding{}
+}
+
+// Undo lists only servers that start through keyward, each with the definition
+// that starts it without keyward, reading its secrets from the environment again.
+func TestUndoStartsEachServerWithoutKeyward(t *testing.T) {
+	if n := len(mcpconfig.Undo(wrapped(t))); n != 4 {
+		t.Errorf("Undo found %d servers, want the 4 that start through keyward", n)
+	}
+	s := parseJSON(t, undone(t, "Claude Code", "pagerduty"))
+	if s.Command != "uvx" || strings.Join(s.Args, " ") != "pagerduty-mcp" {
+		t.Errorf("command = %s %v", s.Command, s.Args)
+	}
+	if s.Env["PD_KEY"] != "${PD_KEY}" || s.Env["LEVEL"] != "info" {
+		t.Errorf("env = %v", s.Env)
+	}
+	if f := undone(t, "Claude Code", "pagerduty"); strings.Join(f.Vars, ",") != "PD_KEY" {
+		t.Errorf("vars = %v", f.Vars)
+	}
+}
+
+// The mcp-remote bridge needs no keyward: sh fills the header from the environment.
+func TestUndoKeepsTheShellBridgeForARemoteServer(t *testing.T) {
+	s := parseJSON(t, undone(t, "Claude Code", "github"))
+	if s.Command != "sh" || len(s.Args) != 2 || s.Args[0] != "-c" || !strings.Contains(s.Args[1], "mcp-remote") {
+		t.Errorf("command = %s %v", s.Command, s.Args)
+	}
+	if s.Env["GITHUB_TOKEN"] != "${GITHUB_TOKEN}" {
+		t.Errorf("env = %v", s.Env)
+	}
+}
+
+func TestUndoUsesCursorsPlaceholderSyntax(t *testing.T) {
+	if s := parseJSON(t, undone(t, "Cursor", "gh")); s.Env["GITHUB_TOKEN"] != "${env:GITHUB_TOKEN}" || s.Command != "npx" {
+		t.Errorf("undo = %+v", s)
+	}
+}
+
+// Codex does not expand placeholders in env, so secrets pass through env_vars.
+func TestUndoForCodexPassesTheVariablesThrough(t *testing.T) {
+	f := undone(t, "Codex", "pagerduty")
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".codex", "config.toml"), f.Suggestion)
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	if len(errs) != 0 || len(servers) != 1 {
+		t.Fatalf("suggestion did not read back: %v\n%s", errs, f.Suggestion)
+	}
+	s := servers[0]
+	if s.Command != "uvx" || strings.Join(s.PassEnv, ",") != "PD_KEY" || s.Env["LEVEL"] != "info" || s.Env["PD_KEY"] != "" {
+		t.Errorf("read back = %+v\n%s", s, f.Suggestion)
+	}
+	if !strings.Contains(f.Suggestion, "startup_timeout_sec = 60") {
+		t.Errorf("lost the timeout:\n%s", f.Suggestion)
+	}
+}

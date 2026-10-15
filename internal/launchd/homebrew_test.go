@@ -70,7 +70,7 @@ func TestHomebrewRefusesASecondDaemonAndInvalidConfiguration(t *testing.T) {
 			if program == m.Brew {
 				t.Fatal("started a second daemon")
 			}
-			if signed && args[1] == "gui/501/com.nwokolo24.keyward" {
+			if signed && args[1] == "gui/501/com.veilux-lab.keyward.dev" {
 				return nil
 			}
 			return errors.New("not loaded")

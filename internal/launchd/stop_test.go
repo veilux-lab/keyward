@@ -102,12 +102,13 @@ func TestUninstallMessageNamesWhatIsKeptAndHowToReturn(t *testing.T) {
 	}
 }
 
-func TestHomebrewRemoveUninstallsTheFormulaThenTheTap(t *testing.T) {
+// The download cache goes too, so brew leaves nothing of keyward behind.
+func TestHomebrewRemoveUninstallsTheFormulaCleansItsCacheThenUntaps(t *testing.T) {
 	h := brewSetup(t)
 	if _, err := h.m.Remove(); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(h.calls, "\n"); got != "brew uninstall veilux-lab/keyward/keyward\nbrew untap veilux-lab/keyward" {
+	if got := strings.Join(h.calls, "\n"); got != "brew uninstall veilux-lab/keyward/keyward\nbrew cleanup --prune=all veilux-lab/keyward/keyward\nbrew untap veilux-lab/keyward" {
 		t.Fatalf("calls:\n%s", got)
 	}
 }
@@ -151,7 +152,7 @@ func TestSignedRestartKickstartsTheLoginAgent(t *testing.T) {
 	if err := h.m.Restart(); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(h.calls, "\n"); !strings.Contains(got, "launchctl kickstart -k gui/501/com.nwokolo24.keyward") {
+	if got := strings.Join(h.calls, "\n"); !strings.Contains(got, "launchctl kickstart -k gui/501/com.veilux-lab.keyward.dev") {
 		t.Fatalf("calls:\n%s", got)
 	}
 }

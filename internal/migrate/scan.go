@@ -150,6 +150,15 @@ func (a Assignment) Rewritten(refName string) string {
 	return a.Prefix + a.Name + "='cap://" + refName + "'" + a.Trailer
 }
 
+// Quote is the quoting the value was written with: a single or double quote, or
+// "" for none. Restore writes the value back the same way.
+func (a Assignment) Quote() string {
+	if rest := strings.TrimPrefix(a.Raw, a.Prefix+a.Name+"="); rest != "" && (rest[0] == '\'' || rest[0] == '"') {
+		return rest[:1]
+	}
+	return ""
+}
+
 // parseAssignment recognises `[indent][export ]NAME=VALUE[trailer]`.
 //
 // Returns false for anything else, including commented lines, multiple

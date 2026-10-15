@@ -184,8 +184,9 @@ func (p *Plan) Check(store vault.Store) error {
 		}
 		p.Skips = append(p.Skips, Skip{
 			Assignment: c.Assignment,
-			Reason: fmt.Sprintf("the vault already holds a different value under %q; remove it with `keyward rm %s` or rename the variable",
-				c.RefName, c.RefName),
+			Reason: fmt.Sprintf("the vault already holds a different value under %q; remove it with `keyward rm %s`, "+
+				"or keep both: store this one with `keyward add <new-name>` and set %s='cap://<new-name>'",
+				c.RefName, c.RefName, c.Name),
 			Actionable: true,
 		})
 	}
@@ -340,7 +341,7 @@ func storeSecret(store vault.Store, name, value, note string) error {
 	if existing.Equal(secret) {
 		return nil
 	}
-	return fmt.Errorf("%q already holds a different value; remove it or rename the variable", name)
+	return fmt.Errorf("%q already holds a different value; remove it with `keyward rm %s`, or store this one under another name", name, name)
 }
 
 // writeAtomic replaces path via a temporary file in the same directory and a

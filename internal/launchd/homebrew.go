@@ -118,10 +118,12 @@ func (h Homebrew) Remove() (string, error) {
 	if err := m.command(h.Brew, "uninstall", homebrewFormula); err != nil {
 		return "", err
 	}
+	// Best effort: a cache left behind costs disk space, not correctness.
+	_ = m.command(h.Brew, "cleanup", "--prune=all", homebrewFormula)
 	if err := m.command(h.Brew, "untap", "veilux-lab/keyward"); err != nil {
 		return "", fmt.Errorf("the formula was removed, but untapping failed: %w", err)
 	}
-	return "Ran brew uninstall and brew untap veilux-lab/keyward.", nil
+	return "Ran brew uninstall, brew cleanup, and brew untap veilux-lab/keyward.", nil
 }
 
 func (h Homebrew) manager() Manager {
@@ -149,10 +151,10 @@ func (h Homebrew) Ensure() error {
 		return err
 	}
 	domain := fmt.Sprintf("gui/%d/", h.UID)
-	for _, job := range []string{label, homebrewLabel} {
+	for _, job := range []string{label, legacyLabel, homebrewLabel} {
 		if m.command("/bin/launchctl", "print", domain+job) == nil {
 			if err := m.waitReady(); err != nil {
-				return fmt.Errorf("the Keyward login agent is loaded but not responding; use its installation's `keyward start` and check Library/Logs/keyward/activity.jsonl: %w", err)
+				return stuckAgent(h.UID, job, homebrewLabel)
 			}
 			return nil
 		}

@@ -46,7 +46,7 @@ func brewSetup(t *testing.T) *brewStartup {
 			h.loaded, h.ready = false, false
 			return nil
 		}
-		if args[0] == "print" && (strings.HasSuffix(args[1], "/com.veilux-lab.keyward.homebrew") && h.loaded || strings.HasSuffix(args[1], "/com.nwokolo24.keyward") && h.signed) {
+		if args[0] == "print" && (strings.HasSuffix(args[1], "/com.veilux-lab.keyward.homebrew") && h.loaded || strings.HasSuffix(args[1], "/com.veilux-lab.keyward.dev") && h.signed) {
 			return nil
 		}
 		return errors.New("not loaded")
@@ -503,5 +503,39 @@ func TestHomebrewEnsurePropagatesFailureWithoutRepeatedRestarts(t *testing.T) {
 	calls := strings.Join(h.calls, "\n")
 	if strings.Count(calls, "brew services start ") != 1 || strings.Contains(calls, "restart") || strings.Contains(calls, "stop") {
 		t.Fatalf("automatic retry changed a loaded service: %s", calls)
+	}
+}
+
+// A loaded agent from another installation is only fixable by removing it, so the
+// error names it and the commands, once, instead of nesting every layer's hint.
+func TestHomebrewEnsureNamesAStuckAgentFromAnotherInstallation(t *testing.T) {
+	h := brewSetup(t)
+	h.signed = true
+	err := h.m.Ensure()
+	if err == nil {
+		t.Fatal("ensure succeeded with a stuck agent")
+	}
+	msg := err.Error()
+	for _, want := range []string{"another keyward installation", "com.veilux-lab.keyward.dev", "launchctl bootout gui/", "Library/LaunchAgents/com.veilux-lab.keyward.dev.plist"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error lacks %q:\n%s", want, msg)
+		}
+	}
+	if n := strings.Count(msg, "keyward start"); n != 1 {
+		t.Errorf("error says keyward start %d times:\n%s", n, msg)
+	}
+	for _, call := range h.calls {
+		if !strings.HasPrefix(call, "launchctl print ") {
+			t.Fatalf("ensure changed another installation's agent: %s", call)
+		}
+	}
+}
+
+func TestHomebrewEnsureSaysHowToRestartItsOwnStuckAgent(t *testing.T) {
+	h := brewSetup(t)
+	h.loaded = true
+	err := h.m.Ensure()
+	if err == nil || !strings.Contains(err.Error(), "keyward stop") || strings.Contains(err.Error(), "another keyward installation") {
+		t.Fatalf("own stuck agent: %v", err)
 	}
 }

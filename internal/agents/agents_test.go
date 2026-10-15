@@ -128,3 +128,64 @@ func TestLinkedFindsAgentConfigsThatPointAtTheFile(t *testing.T) {
 		t.Errorf("Linked = %v", got)
 	}
 }
+
+// Linking appends one line, creating the file if needed; unlinking removes
+// exactly that line, and a file keyward created goes once it is empty.
+func TestLinkAndUnlinkChangeOnlyTheirLine(t *testing.T) {
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	codex := filepath.Join(home, ".codex", "AGENTS.md")
+	os.WriteFile(codex, []byte("# my rules\nbe nice"), 0o644)
+	found := agents.Unlinked(home)
+	if len(found) != 2 {
+		t.Fatalf("unlinked = %+v", found)
+	}
+	created := map[string]bool{}
+	for _, a := range found {
+		c, err := a.Link()
+		if err != nil {
+			t.Fatal(err)
+		}
+		created[a.Config] = c
+	}
+	if data, _ := os.ReadFile(codex); string(data) != "# my rules\nbe nice\n"+found[1].Line+"\n" || created[codex] {
+		t.Errorf("codex after link = %q (created %v)", data, created[codex])
+	}
+	if len(agents.Unlinked(home)) != 0 {
+		t.Error("still unlinked after linking")
+	}
+	for _, a := range found {
+		if err := agents.Unlink(a.Config, a.Line, created[a.Config]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if data, _ := os.ReadFile(codex); string(data) != "# my rules\nbe nice\n" {
+		t.Errorf("codex after unlink = %q", data)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Errorf("the CLAUDE.md keyward created remains: %v", err)
+	}
+}
+
+// The notice replaces the instructions but stays keyward's, so a later uninstall
+// still removes it.
+func TestRemovedNoticeTellsAgentsHowToCleanUp(t *testing.T) {
+	f := agents.Default(t.TempDir())
+	if err := f.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.WriteRemovedNotice(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(f.Path)
+	if !strings.Contains(string(data), "keyward uninstall") || strings.Contains(string(data), "keyward run --only") {
+		t.Errorf("notice:\n%s", data)
+	}
+	if st, _ := f.Status(); st != agents.Outdated {
+		t.Errorf("status = %v, want keyward's (outdated)", st)
+	}
+	if removed, err := f.Remove(); !removed || err != nil {
+		t.Errorf("Remove = %v, %v", removed, err)
+	}
+}

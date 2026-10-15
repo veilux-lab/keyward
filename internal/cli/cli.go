@@ -24,6 +24,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/doctor"
 	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/migrate"
 	"github.com/veilux-lab/keyward/internal/resolve"
 	"github.com/veilux-lab/keyward/internal/vault"
@@ -77,6 +78,22 @@ type CLI struct {
 
 	// DataDirs are deleted by uninstall; empty for isolated instances.
 	DataDirs []string
+	// KeepDir, inside a data dir, holds the vault: kept unless uninstall purges.
+	KeepDir string
+	// Ledger records what keyward changed outside its data; empty Path, nothing.
+	Ledger ledger.Ledger
+	// LookPath and RunTool find and run other tools' CLIs, such as claude.
+	LookPath func(string) (string, error)
+	RunTool  func(dir string, argv ...string) ([]byte, error)
+	// Self is keyward's stable path, written into configs keyward edits.
+	Self string
+
+	// inSetup quiets each step's closing advice; setup gives it once at the end.
+	inSetup bool
+
+	// in reads every confirmation of one run, so no answer is lost to a buffer.
+	in    *bufio.Reader
+	inSrc io.Reader
 	// PurgeVault deletes the vault and its Keychain key, for uninstall --purge.
 	PurgeVault func() error
 	// RemovePackage deletes the installed program after its data; nil for development builds.
@@ -105,6 +122,7 @@ Moves secrets out of your dotfiles into an encrypted vault and leaves cap://
 references behind, so an AI agent reading the files finds nothing to leak.
 
 commands:
+  setup [file...]        guided first run: secrets, agents, MCP servers, recovery code
   migrate <file>         move a file's secrets into the vault (asks first)
   run -- <command>       run a command with the real values
   add <name>             store a secret read from stdin
@@ -114,8 +132,8 @@ commands:
   restore <file>...      put the values back into files (asks first)
   backups [rm|recover]   list, remove, or recover migrate's backups
   recovery show|restore  save or restore the vault's recovery code
-  agents                 set up instructions for AI agents
-  mcp                    show how to run MCP servers through keyward
+  agents [link|unlink]   point AI agents at keyward's instructions, or stop
+  mcp [wrap|unwrap]      run MCP servers through keyward, or stop
   status | stop | start  check, pause, or resume the daemon
   uninstall              remove keyward; secrets stay in the vault (asks first)
   version
@@ -149,7 +167,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
+	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "setup", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -206,6 +224,8 @@ func (c *CLI) dispatch(args []string) int {
 		return c.recovery(args[1:])
 	case "mcp":
 		return c.mcp(args[1:])
+	case "setup":
+		return c.setup(args[1:])
 	case "doctor":
 		return c.doctor(args[1:])
 	case "daemon":
@@ -524,14 +544,19 @@ func (c *CLI) migrate(args []string) int {
 	if err != nil {
 		return c.fail("keyward migrate: %v", err)
 	}
+	c.recordRewrite(plan)
 
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)
 	fmt.Fprintf(c.Stdout, "  Its key is in keyward's vault. Remove both once the new file works: keyward backups rm %s\n", plan.Path)
-	fmt.Fprint(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward:\n"+
-		"  keyward run -- npm test\n"+
+	if c.inSetup {
+		return exitOK
+	}
+	fmt.Fprintf(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward, naming\n"+
+		"the ones a command needs:\n"+
+		"  keyward run --only %s -- <command>\n"+
 		"Started any other way, a program sees the cap:// reference instead of the value.\n"+
-		"MCP servers that use these values must start through keyward too: keyward mcp shows how.\n")
+		"MCP servers that use these values must start through keyward too: keyward mcp shows how.\n", plan.Changes[0].Name)
 	c.agentNextSteps()
 	c.remindRecovery()
 	return exitOK
@@ -563,7 +588,10 @@ func (c *CLI) readConfirmation() (bool, error) {
 		c.cancelled = true
 		return false, nil
 	}
-	line, err := bufio.NewReader(c.Stdin).ReadString('\n')
+	if c.in == nil || c.inSrc != c.Stdin {
+		c.in, c.inSrc = bufio.NewReader(c.Stdin), c.Stdin
+	}
+	line, err := c.in.ReadString('\n')
 	fmt.Fprintln(c.Stderr)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("reading the answer: %w", err)

@@ -303,3 +303,17 @@ func TestRewrittenAppliedToFile(t *testing.T) {
 		t.Errorf("Bytes() =\n%q\nwant\n%q", got, want)
 	}
 }
+
+func TestQuoteIsHowTheValueWasWritten(t *testing.T) {
+	for line, want := range map[string]string{
+		"export A='x'": "'", `export A="x"`: `"`, "export A=x": "", "  A=\"x\" # note": `"`, "A=": "",
+	} {
+		found := migrate.Scan([]byte(line + "\n")).Assignments
+		if len(found) != 1 {
+			t.Fatalf("%q did not parse", line)
+		}
+		if got := found[0].Quote(); got != want {
+			t.Errorf("Quote(%q) = %q, want %q", line, got, want)
+		}
+	}
+}

@@ -2,8 +2,8 @@
 // references, and finds installed agents whose global instructions do not point
 // at them yet.
 //
-// keyward never edits an agent's own instruction file. Those files belong to the
-// user, so it prints the line to add instead.
+// The agents' own instruction files belong to the user: keyward adds or removes
+// its one line only when asked.
 package agents
 
 import (
@@ -14,7 +14,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"github.com/veilux-lab/keyward/internal/ledger"
 )
 
 //go:embed keyward.md
@@ -97,6 +100,44 @@ func (f File) Write() error {
 	return os.Rename(tmp.Name(), f.Path)
 }
 
+// removedNotice replaces the instructions when the daemon finds keyward's program
+// deleted without `keyward uninstall`.
+const removedNotice = marker + `, which replaces this file when it updates it. Keep your own notes in another file. -->
+# keyward was removed without uninstalling
+
+keyward's program was deleted (for example by ` + "`brew uninstall`" + `) without
+` + "`keyward uninstall`" + `, so files may still hold ` + "`cap://`" + ` references that nothing
+can resolve, and MCP servers may still try to start through keyward.
+
+- Tell the user, rather than looking for the values.
+- Suggest that they reinstall and uninstall properly, which puts the values back:
+  ` + "`brew install veilux-lab/keyward/keyward && keyward uninstall`" + `
+`
+
+// WriteRemovedNotice replaces the instructions with removedNotice, if keyward
+// wrote the file.
+func (f File) WriteRemovedNotice() error {
+	if st, err := f.Status(); err != nil || (st != Current && st != Outdated) {
+		return err
+	}
+	return writeKeepingMode(f.Path, []byte(removedNotice))
+}
+
+// WriteRecorded is Write, recording in l the folder it had to create, so
+// uninstall can remove that folder once it is empty.
+func (f File) WriteRecorded(l ledger.Ledger) error {
+	dir := filepath.Dir(f.Path)
+	_, err := os.Lstat(dir)
+	created := errors.Is(err, fs.ErrNotExist)
+	if err := f.Write(); err != nil {
+		return err
+	}
+	if created && l.Path != "" {
+		return l.Add(ledger.Record{Kind: ledger.Dir, Path: dir})
+	}
+	return nil
+}
+
 // Remove deletes the file if keyward wrote it, reporting whether it did.
 func (f File) Remove() (bool, error) {
 	st, err := f.Status()
@@ -108,8 +149,8 @@ func (f File) Remove() (bool, error) {
 
 type Agent struct {
 	Name, Config string
-	// Command appends the pointer to the agent's global instructions.
-	Command string
+	// Line points the agent at the instructions; Command appends it by hand.
+	Line, Command string
 }
 
 // Claude Code imports files with @; the others are asked to read it.
@@ -134,10 +175,65 @@ func Unlinked(home string) []Agent {
 		found = append(found, Agent{
 			Name:    k.name,
 			Config:  config,
+			Line:    k.line,
 			Command: fmt.Sprintf("echo '%s' >> ~/%s/%s", strings.ReplaceAll(k.line, "'", `'\''`), k.dir, k.file),
 		})
 	}
 	return found
+}
+
+// Link appends the agent's line to its instructions, creating the file if it is
+// missing, and reports whether it did.
+func (a Agent) Link() (created bool, err error) {
+	data, err := os.ReadFile(a.Config)
+	created = errors.Is(err, fs.ErrNotExist)
+	if err != nil && !created {
+		return false, err
+	}
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
+	return created, writeKeepingMode(a.Config, append(data, a.Line+"\n"...))
+}
+
+// Unlink removes the line Link added, and the file too if keyward created it and
+// nothing else is left. A file without the line is left as it is.
+func Unlink(config, line string, created bool) error {
+	data, err := os.ReadFile(config)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	lines := strings.SplitAfter(string(data), "\n")
+	i := slices.IndexFunc(lines, func(l string) bool { return strings.TrimRight(l, "\r\n") == line })
+	if i < 0 {
+		return nil
+	}
+	rest := strings.Join(slices.Delete(lines, i, i+1), "")
+	if created && strings.TrimSpace(rest) == "" {
+		return os.Remove(config)
+	}
+	return writeKeepingMode(config, []byte(rest))
+}
+
+// writeKeepingMode replaces a file atomically, keeping its permissions.
+func writeKeepingMode(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	_, err = tmp.Write(data)
+	if err = errors.Join(err, tmp.Chmod(mode), tmp.Close()); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // Linked returns the agent instruction files that point at the file, which the

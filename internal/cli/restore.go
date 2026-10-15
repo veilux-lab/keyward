@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 
+	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/restore"
 )
 
@@ -24,6 +26,7 @@ func (c *CLI) restore(args []string) int {
 	if err != nil {
 		return c.fail("keyward restore: %v", err)
 	}
+	p.Quotes = c.recordedQuotes()
 	if _, err := io.WriteString(c.Stdout, paintLines(c.ColorOut, p.Preview(), map[string]string{"  skip ": yellow})); err != nil {
 		return c.fail("keyward restore: could not print the plan; no files were changed")
 	}
@@ -64,8 +67,29 @@ func (c *CLI) restore(args []string) int {
 		skipped = append(skipped, issue.File)
 	}
 	c.removeRestoredBackups(restored, skipped)
+	for _, file := range restored {
+		if !slices.Contains(skipped, file) {
+			_ = c.Ledger.Remove(ledger.Rewrite, file, "")
+		}
+	}
+	if servers, _ := c.mcpUndo(); len(r.Restored) > 0 && len(servers) > 0 {
+		fmt.Fprintf(c.Stdout, "%d MCP server(s) still start through keyward and keep working. If you are\n"+
+			"removing keyward, keyward mcp unwrap changes them back.\n", len(servers))
+	}
 	if len(r.Skipped) != 0 {
 		return exitFailure
 	}
 	return exitOK
+}
+
+// recordedQuotes is how each migrated value was quoted, by file and variable.
+func (c *CLI) recordedQuotes() map[string]map[string]string {
+	quotes := map[string]map[string]string{}
+	records, _ := c.Ledger.Records()
+	for _, r := range records {
+		if r.Kind == ledger.Rewrite {
+			quotes[r.Path] = r.Quotes
+		}
+	}
+	return quotes
 }
