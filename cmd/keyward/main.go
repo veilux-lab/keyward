@@ -71,13 +71,9 @@ func main() {
 	}
 
 	vaultPath := os.Getenv("KEYWARD_VAULT")
-	if vaultPath == "" {
+	movable := vaultPath == ""
+	if movable {
 		vaultPath = vault.DefaultPath(home, service)
-		// Before 1.1 the vault had a folder of its own. Best effort: on failure
-		// the daemon creates a new vault, and the old one is still on disk.
-		if err := vault.MoveLegacy(home, service); err != nil {
-			fmt.Fprintln(os.Stderr, "keyward: could not move the vault into its new folder:", err)
-		}
 	}
 	client := managedClient(home, socket, service, homebrewExecutable)
 	c := &cli.CLI{
@@ -113,6 +109,13 @@ func main() {
 					_ = agents.Default(home).WriteRemovedNotice()
 					launchd.Unregister(home, os.Getuid(), job)
 				}}.Run(ctx)
+			}
+			// Before 1.1 the vault had a folder of its own. Only the daemon moves it,
+			// before opening it, so no older daemon is still reading the old path.
+			if movable {
+				if err := vault.MoveLegacy(home, service); err != nil {
+					return fmt.Errorf("moving the vault into its new folder: %w", err)
+				}
 			}
 			// Only the vault key lives in the Keychain; Legacy is where secrets were
 			// kept before the vault, and they move in on first use.
