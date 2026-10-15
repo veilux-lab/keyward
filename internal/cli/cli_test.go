@@ -217,8 +217,8 @@ func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 			t.Errorf("help still shows %q", unwanted)
 		}
 	}
-	if lines := strings.Count(out, "\n"); lines > 32 {
-		t.Errorf("help is %d lines, want at most 32", lines)
+	if lines := strings.Count(out, "\n"); lines > 33 {
+		t.Errorf("help is %d lines, want at most 33", lines)
 	}
 }
 

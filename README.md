@@ -28,6 +28,7 @@ Development certificate: `make install SIGN_IDENTITY='Apple Development: …'`.
 ## Use
 
 ```sh
+keyward setup                        # guided first run: each step asks first
 keyward migrate --dry-run ~/.zshrc   # preview; values are never printed
 keyward migrate ~/.zshrc             # move the secrets; asks for "yes"
 keyward run -- npm test              # run a command with the real values

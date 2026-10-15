@@ -88,6 +88,9 @@ type CLI struct {
 	// Self is keyward's stable path, written into configs keyward edits.
 	Self string
 
+	// inSetup quiets each step's closing advice; setup gives it once at the end.
+	inSetup bool
+
 	// in reads every confirmation of one run, so no answer is lost to a buffer.
 	in    *bufio.Reader
 	inSrc io.Reader
@@ -119,6 +122,7 @@ Moves secrets out of your dotfiles into an encrypted vault and leaves cap://
 references behind, so an AI agent reading the files finds nothing to leak.
 
 commands:
+  setup [file...]        guided first run: secrets, agents, MCP servers, recovery code
   migrate <file>         move a file's secrets into the vault (asks first)
   run -- <command>       run a command with the real values
   add <name>             store a secret read from stdin
@@ -163,7 +167,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
+	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "setup", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -220,6 +224,8 @@ func (c *CLI) dispatch(args []string) int {
 		return c.recovery(args[1:])
 	case "mcp":
 		return c.mcp(args[1:])
+	case "setup":
+		return c.setup(args[1:])
 	case "doctor":
 		return c.doctor(args[1:])
 	case "daemon":
@@ -543,6 +549,9 @@ func (c *CLI) migrate(args []string) int {
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)
 	fmt.Fprintf(c.Stdout, "  Its key is in keyward's vault. Remove both once the new file works: keyward backups rm %s\n", plan.Path)
+	if c.inSetup {
+		return exitOK
+	}
 	fmt.Fprintf(c.Stdout, "\nOpen a new terminal, then start what needs these values through keyward, naming\n"+
 		"the ones a command needs:\n"+
 		"  keyward run --only %s -- <command>\n"+
