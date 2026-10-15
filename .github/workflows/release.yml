@@ -40,7 +40,8 @@ jobs:
   # The next version after the newest v* tag, or 1.0.0 when there is none: a patch,
   # unless the commit message has a line "Release: minor" or "Release: major" (a
   # squash merge copies it from the PR description), or a manual run picks one.
-  # A rerun of an already tagged commit keeps that tag's version.
+  # A rerun of an already tagged commit keeps that tag's version. Steps run under
+  # bash -e -o pipefail, so a grep that matches nothing must not end the step.
   version:
     if: github.repository == 'veilux-lab/keyward' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -57,7 +58,7 @@ jobs:
           version=$(printf '%s\n' "$tags" | awk -v sha="$GITHUB_SHA" '$1 == sha { sub(/^refs\/tags\/v/, "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
           if [ -z "$version" ]; then
             latest=$(printf '%s\n' "$tags" | sed -n 's|.*refs/tags/v\([0-9]*\.[0-9]*\.[0-9]*\)$|\1|p' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
-            bump=${CHOSEN:-$(printf '%s\n' "$MESSAGE" | grep -oE '^Release: (minor|major)[[:space:]]*$' | head -1 | cut -d' ' -f2)}
+            bump=${CHOSEN:-$(printf '%s\n' "$MESSAGE" | grep -oE '^Release: (minor|major)[[:space:]]*$' | head -1 | cut -d' ' -f2 || true)}
             IFS=. read -r major minor patch <<< "${latest:-0.0.0}"
             case "$bump" in
               major) version="$((major + 1)).0.0" ;;
