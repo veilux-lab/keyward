@@ -62,17 +62,22 @@ its own `claude mcp` command, and `keyward mcp unwrap` reverses them. A server
 that reads a variable without naming it in its config can't be detected; wrap it
 by hand the same way.
 
-## Restore or uninstall
+## Uninstall
 
 ```sh
-keyward restore ~/.zshrc      # put the values back; asks for "yes"
-keyward mcp unwrap            # start MCP servers without keyward again
-keyward uninstall             # remove keyward; secrets stay in the vault
-keyward uninstall --purge     # also delete the vault, once nothing uses it
+keyward uninstall --dry-run   # the full plan; changes nothing
+keyward uninstall             # undo everything, after one "yes"; secrets stay in the vault
+keyward uninstall --purge     # the same, and delete the vault and its key
 ```
 
-Use `keyward uninstall`, not `brew uninstall`: Homebrew removes only the program,
-leaving the daemon's login item and every file that uses keyward behind.
+Uninstall changes Claude Code's MCP servers back, removes the agent lines keyward
+added, puts every value back into its file as it was written, then removes keyward
+and checks that nothing is left. It lists anything it cannot change itself, such as
+Codex servers. To put one file back without uninstalling: `keyward restore ~/.zshrc`.
+
+Use `keyward uninstall`, not `brew uninstall`: Homebrew removes only the program.
+If that happens, the daemon unregisters itself, and reinstalling then running
+`keyward uninstall` finishes the job.
 
 ## What it protects
 
