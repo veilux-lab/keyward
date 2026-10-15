@@ -29,7 +29,7 @@ func TestSignedInstallLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	label := "com.nwokolo24.keyward.test." + filepath.Base(dir)
+	label := "com.veilux-lab.keyward.test." + filepath.Base(dir)
 	service := "keyward-install-test-" + filepath.Base(dir)
 	m := launchd.Manager{Home: dir, UID: os.Getuid(), Executable: first, Label: label, Socket: filepath.Join(dir, "d.sock"), Service: service}
 	client := &daemon.Client{Path: m.Socket, Timeout: 2 * time.Second}

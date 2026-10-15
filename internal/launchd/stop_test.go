@@ -152,7 +152,7 @@ func TestSignedRestartKickstartsTheLoginAgent(t *testing.T) {
 	if err := h.m.Restart(); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(h.calls, "\n"); !strings.Contains(got, "launchctl kickstart -k gui/501/com.nwokolo24.keyward") {
+	if got := strings.Join(h.calls, "\n"); !strings.Contains(got, "launchctl kickstart -k gui/501/com.veilux-lab.keyward.dev") {
 		t.Fatalf("calls:\n%s", got)
 	}
 }

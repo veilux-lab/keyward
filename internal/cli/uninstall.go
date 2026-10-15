@@ -335,7 +335,7 @@ func (c *CLI) residue(purge bool, p offboarding) []string {
 			}
 		}
 		agentsDir := filepath.Join(c.Home, "Library", "LaunchAgents")
-		for _, name := range []string{"com.veilux-lab.keyward.plist", "com.veilux-lab.keyward.homebrew.plist", "com.nwokolo24.keyward.plist"} {
+		for _, name := range []string{"com.veilux-lab.keyward.dev.plist", "com.veilux-lab.keyward.homebrew.plist", "com.nwokolo24.keyward.plist"} {
 			if path := filepath.Join(agentsDir, name); exists(path) {
 				left = append(left, c.tilde(path))
 			}

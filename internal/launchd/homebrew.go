@@ -151,7 +151,7 @@ func (h Homebrew) Ensure() error {
 		return err
 	}
 	domain := fmt.Sprintf("gui/%d/", h.UID)
-	for _, job := range []string{label, homebrewLabel} {
+	for _, job := range []string{label, legacyLabel, homebrewLabel} {
 		if m.command("/bin/launchctl", "print", domain+job) == nil {
 			if err := m.waitReady(); err != nil {
 				return stuckAgent(h.UID, job, homebrewLabel)

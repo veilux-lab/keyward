@@ -18,7 +18,11 @@ import (
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
-const label = "com.nwokolo24.keyward"
+const label = "com.veilux-lab.keyward.dev"
+
+// legacyLabel is the agent's label before 1.1, which carried a personal name. The
+// codesign identifier keeps that name: changing it would reset Keychain access.
+const legacyLabel = "com.nwokolo24.keyward"
 
 type Manager struct {
 	Home, Executable string
@@ -84,6 +88,9 @@ func (m Manager) Run(action string) (string, error) {
 			return "", err
 		}
 		defer state.close()
+		if err := m.retireLegacy(); err != nil {
+			return "", err
+		}
 		if _, err := state.marked(disabledMarker); err != nil {
 			return "", err
 		}
@@ -113,6 +120,24 @@ func (m Manager) Run(action string) (string, error) {
 	default:
 		return "", errors.New("usage: keyward start|start|stop|status|uninstall")
 	}
+}
+
+// retireLegacy unloads and deletes the agent installed under its old label.
+func (m Manager) retireLegacy() error {
+	if !m.defaultNamespace() {
+		return nil
+	}
+	target := fmt.Sprintf("gui/%d/%s", m.UID, legacyLabel)
+	if m.command("/bin/launchctl", "print", target) == nil {
+		if err := m.command("/bin/launchctl", "bootout", target); err != nil {
+			return err
+		}
+	}
+	err := os.Remove(filepath.Join(m.Home, "Library", "LaunchAgents", legacyLabel+".plist"))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // Restart relaunches the login agent so it runs the installed build.
@@ -183,6 +208,9 @@ func (m Manager) Ensure() error {
 		return nil
 	}
 	if err := state.blocked(); err != nil {
+		return err
+	}
+	if err := m.retireLegacy(); err != nil {
 		return err
 	}
 	plist := filepath.Join(m.Home, "Library", "LaunchAgents", m.Label+".plist")

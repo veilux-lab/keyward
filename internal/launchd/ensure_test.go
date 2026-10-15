@@ -46,7 +46,7 @@ func brewSetup(t *testing.T) *brewStartup {
 			h.loaded, h.ready = false, false
 			return nil
 		}
-		if args[0] == "print" && (strings.HasSuffix(args[1], "/com.veilux-lab.keyward.homebrew") && h.loaded || strings.HasSuffix(args[1], "/com.nwokolo24.keyward") && h.signed) {
+		if args[0] == "print" && (strings.HasSuffix(args[1], "/com.veilux-lab.keyward.homebrew") && h.loaded || strings.HasSuffix(args[1], "/com.veilux-lab.keyward.dev") && h.signed) {
 			return nil
 		}
 		return errors.New("not loaded")
@@ -516,7 +516,7 @@ func TestHomebrewEnsureNamesAStuckAgentFromAnotherInstallation(t *testing.T) {
 		t.Fatal("ensure succeeded with a stuck agent")
 	}
 	msg := err.Error()
-	for _, want := range []string{"another keyward installation", "com.nwokolo24.keyward", "launchctl bootout gui/", "Library/LaunchAgents/com.nwokolo24.keyward.plist"} {
+	for _, want := range []string{"another keyward installation", "com.veilux-lab.keyward.dev", "launchctl bootout gui/", "Library/LaunchAgents/com.veilux-lab.keyward.dev.plist"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error lacks %q:\n%s", want, msg)
 		}

@@ -50,7 +50,7 @@ func setup(t *testing.T) *harness {
 		case "print":
 			job := h.m.Label
 			if job == "" {
-				job = "com.nwokolo24.keyward"
+				job = "com.veilux-lab.keyward.dev"
 			}
 			if !h.loaded || !strings.HasSuffix(args[1], "/"+job) {
 				return errors.New("not loaded")
@@ -75,7 +75,7 @@ func setup(t *testing.T) *harness {
 
 func (h *harness) binary() string { return filepath.Join(h.m.Home, ".local", "bin", "keyward") }
 func (h *harness) plist() string {
-	return filepath.Join(h.m.Home, "Library", "LaunchAgents", "com.nwokolo24.keyward.plist")
+	return filepath.Join(h.m.Home, "Library", "LaunchAgents", "com.veilux-lab.keyward.dev.plist")
 }
 
 func TestInstallSignedCLIWithoutACompanion(t *testing.T) {
@@ -106,7 +106,7 @@ func TestInstallSignedCLIWithoutACompanion(t *testing.T) {
 		}
 		switch args[0] {
 		case "print":
-			if !loaded || !strings.HasSuffix(args[1], "/com.nwokolo24.keyward") {
+			if !loaded || !strings.HasSuffix(args[1], "/com.veilux-lab.keyward.dev") {
 				return errors.New("not loaded")
 			}
 		case "bootstrap":
@@ -126,7 +126,7 @@ func TestInstallSignedCLIWithoutACompanion(t *testing.T) {
 	if strings.Count(strings.Join(calls, "\n"), "codesign ") != 1 {
 		t.Fatal("installation verified more than the signed CLI")
 	}
-	plist, err := os.ReadFile(filepath.Join(home, "Library", "LaunchAgents", "com.nwokolo24.keyward.plist"))
+	plist, err := os.ReadFile(filepath.Join(home, "Library", "LaunchAgents", "com.veilux-lab.keyward.dev.plist"))
 	if err != nil || strings.Contains(string(plist), "AssociatedBundleIdentifiers") || strings.Contains(string(plist), "com.nwokolo24.keyward.app") {
 		t.Fatalf("CLI-only daemon retained app association: %v", err)
 	}
@@ -362,5 +362,22 @@ func TestInstallRefusesInvalidLabel(t *testing.T) {
 	}
 	if len(h.calls) != 0 {
 		t.Fatal("invalid label reached launchctl")
+	}
+}
+
+// The agent's label used to carry a personal name; installing retires it.
+func TestSignedInstallRetiresTheOldLabel(t *testing.T) {
+	h := setup(t)
+	old := filepath.Join(h.m.Home, "Library", "LaunchAgents", "com.nwokolo24.keyward.plist")
+	os.MkdirAll(filepath.Dir(old), 0o755)
+	os.WriteFile(old, []byte("<plist/>"), 0o644)
+	if _, err := h.m.Run("install"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("the old agent's plist remains: %v", err)
+	}
+	if _, err := os.Stat(h.plist()); err != nil {
+		t.Errorf("the agent was not installed under its new label: %v", err)
 	}
 }
