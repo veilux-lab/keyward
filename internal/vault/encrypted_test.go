@@ -247,3 +247,16 @@ func TestEncryptedRefusesASymlinkedDirectory(t *testing.T) {
 		t.Errorf("wrote into the symlink target: %v", entries)
 	}
 }
+
+// A vault without its key is what a new Mac sees until the recovery code is
+// restored, so the error says how.
+func TestAVaultWithoutItsKeyPointsToRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keyward.vault")
+	if err := (&vault.Encrypted{Path: path, Keys: vault.NewMemory()}).Put("token", vault.NewSecret([]byte("v")), ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&vault.Encrypted{Path: path, Keys: vault.NewMemory()}).Get("token")
+	if err == nil || !strings.Contains(err.Error(), "keyward recovery restore") {
+		t.Errorf("Get = %v, want a pointer to keyward recovery restore", err)
+	}
+}

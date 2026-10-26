@@ -278,7 +278,7 @@ func (e *Encrypted) masterKey(fileExists bool) ([]byte, error) {
 		return key, nil
 	}
 	if errors.Is(err, ErrNotFound) {
-		return nil, fmt.Errorf("the vault key is missing, so %s cannot be decrypted", e.Path)
+		return nil, fmt.Errorf("the vault key is missing, so %s cannot be decrypted; after moving to a new Mac, run: keyward recovery restore", e.Path)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("the vault key: %w", err)

@@ -21,7 +21,8 @@ reference, not a broken value.
   MCP server, `keyward mcp` shows the fix; leave applying it to the user, who can
   run `keyward mcp wrap`.
 - If keyward says its daemon is not running, or a Keychain dialog appears, stop and
-  tell the user. Do not retry in a loop.
+  tell the user. Do not retry in a loop. If it says the vault key is missing, tell
+  the user to run `keyward recovery restore` with their recovery code.
 - Do not run `keyward setup`, `migrate`, `restore`, `rm`, `add --force`, `backups
   recover`, `backups rm`, `recovery`, `mcp wrap`, `mcp unwrap`, `agents link`,
   `agents unlink`, or `uninstall`, or read keyward's ledger, backups, or vault,
