@@ -54,6 +54,24 @@ The vault key exists only in your Keychain; if it is lost, so are your secrets.
 Run `keyward recovery show` once in a terminal and keep the code in a password
 manager. `keyward recovery restore` brings the key back.
 
+## Moving to a new Mac
+
+Your secrets are in two places, and both must reach the new Mac: the vault file,
+`~/Library/Application Support/keyward/vault/keyward.vault`, and its key, in the
+login Keychain. Apple's Migration Assistant usually copies both with your user
+account; other migration tools often copy the files but not the Keychain.
+
+1. On the old Mac, make sure you have the recovery code: `keyward recovery show`.
+2. On the new Mac, install keyward (see [Install](#install)), then run `keyward ls`.
+   If it lists your secrets, you're done; macOS may ask once for Keychain access.
+3. If it says the vault key is missing, run `keyward recovery restore` and paste the
+   code. If the vault file is missing too, copy it over from the old Mac first.
+4. Open a new terminal, and restart your editor and AI tools.
+
+Your rc files, `.env` files, and MCP configs keep their `cap://` references, so they
+work again as soon as the vault opens. Without the recovery code and with the old
+Mac gone, the secrets cannot be recovered.
+
 ## MCP servers
 
 MCP servers that use a migrated token must start through keyward too. `keyward mcp`
