@@ -370,7 +370,7 @@ func TestExposuresAreFoundInsideTheDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := start(t, &daemon.Server{Store: store, Processes: func() ([]exposure.Process, error) {
-		return []exposure.Process{{PID: 7, Args: []string{"/usr/local/bin/node", "--header", "Authorization: Bearer " + value}}}, nil
+		return []exposure.Process{{PID: 7, Path: "/usr/local/bin/node", Args: []string{"/usr/local/bin/node", "--header", "Authorization: Bearer " + value}}}, nil
 	}})
 
 	found, err := c.Exposures()
