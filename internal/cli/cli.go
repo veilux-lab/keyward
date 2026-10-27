@@ -23,6 +23,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/doctor"
+	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/migrate"
@@ -87,6 +88,9 @@ type CLI struct {
 	RunTool  func(dir string, argv ...string) ([]byte, error)
 	// Self is keyward's stable path, written into configs keyward edits.
 	Self string
+	// Exposures asks the daemon which secrets are in a running program's command
+	// line, so doctor never holds a value; nil skips that check.
+	Exposures func() ([]exposure.Exposure, error)
 
 	// inSetup quiets each step's closing advice; setup gives it once at the end.
 	inSetup bool
@@ -128,7 +132,7 @@ commands:
   add <name>             store a secret read from stdin
   ls                     list stored names
   rm <name>              remove a secret
-  doctor [file...]       check references, backups, and setup
+  doctor [file...]       check references, backups, exposed secrets, and setup
   restore <file>...      put the values back into files (asks first)
   backups [rm|recover]   list, remove, or recover migrate's backups
   recovery show|restore  save or restore the vault's recovery code
@@ -628,13 +632,25 @@ func (c *CLI) doctor(args []string) int {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
 	}
 	c.remindRecovery()
-	if findings, _ := c.mcpFindings(); len(findings) > 0 {
-		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d MCP server(s) would receive cap:// references; see keyward mcp", len(findings))))
+	findings, _ := c.mcpFindings()
+	for _, problem := range mcpProblems(findings) {
+		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+problem+"; see keyward mcp"))
 	}
 	if n := c.unlinkedAgents(); n > 0 {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d installed AI agent(s) do not read %s; run keyward agents link", n, agents.Display)))
 	}
-	if report.HasProblems() {
+	var exposed []exposure.Exposure
+	if c.Exposures != nil {
+		exposed, err = c.Exposures()
+	}
+	if err != nil {
+		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check running programs for secrets: %v", err)))
+	}
+	for _, e := range exposed {
+		fmt.Fprintln(c.Stdout, c.out(red, fmt.Sprintf("\n%s is in the command line of %s (pid %d), where any process can read it.\n"+
+			"Start that program without it there (keyward mcp shows how for MCP servers), then rotate the secret.", e.Secret, e.Program, e.PID)))
+	}
+	if report.HasProblems() || len(exposed) > 0 {
 		return exitFailure
 	}
 	return exitOK

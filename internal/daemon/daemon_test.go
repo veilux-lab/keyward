@@ -15,6 +15,7 @@ import (
 
 	"github.com/veilux-lab/keyward/internal/activity"
 	"github.com/veilux-lab/keyward/internal/daemon"
+	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/vault"
 	"github.com/veilux-lab/keyward/internal/vault/vaulttest"
@@ -357,6 +358,30 @@ func TestActivityNamesButNeverValues(t *testing.T) {
 	}
 	if strings.Contains(out, value) {
 		t.Errorf("activity contains the value:\n%s", out)
+	}
+}
+
+// The daemon searches command lines itself, so no value crosses the socket: the
+// answer names each secret and process, and the raw response holds no value.
+func TestExposuresAreFoundInsideTheDaemon(t *testing.T) {
+	const value = "ghp_dummyExposedValue0123"
+	store := vault.NewMemory()
+	if err := store.Seed(map[string]string{"github-token": value, "other": "dummy-unused-value"}); err != nil {
+		t.Fatal(err)
+	}
+	c := start(t, &daemon.Server{Store: store, Processes: func() ([]exposure.Process, error) {
+		return []exposure.Process{{PID: 7, Args: []string{"/usr/local/bin/node", "--header", "Authorization: Bearer " + value}}}, nil
+	}})
+
+	found, err := c.Exposures()
+	if err != nil {
+		t.Fatalf("Exposures: %v", err)
+	}
+	if want := []exposure.Exposure{{Secret: "github-token", PID: 7, Program: "node"}}; len(found) != 1 || found[0] != want[0] {
+		t.Errorf("Exposures = %+v, want %+v", found, want)
+	}
+	if resp := rawRequest(t, c.Path, []byte(`{"op":"exposures"}`+"\n")); strings.Contains(resp, value) || !strings.Contains(resp, "github-token") {
+		t.Errorf("response = %s", resp)
 	}
 }
 

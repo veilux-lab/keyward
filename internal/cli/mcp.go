@@ -31,8 +31,8 @@ func (c *CLI) mcp(args []string) int {
 		fmt.Fprintln(c.Stdout, "No MCP server needs a change.")
 		return exitOK
 	}
-	fmt.Fprintf(c.Stdout, "%d MCP server(s) would receive cap:// references instead of values.\n"+
-		"Run each through keyward, so only that server gets its secrets:\n", len(findings))
+	fmt.Fprintf(c.Stdout, "%s.\nRun each through keyward like this, so only that server gets its secrets:\n",
+		strings.Join(mcpProblems(findings), ".\n"))
 	c.printFindings(findings, "uses")
 	fmt.Fprint(c.Stdout, "\nkeyward mcp wrap makes these changes, through each tool's own command where it can.\n"+
 		"If mcp-remote reports a certificate error behind a corporate proxy, add\n"+
@@ -145,10 +145,32 @@ func (c *CLI) manualReason(manual []mcpconfig.Finding, haveClaude bool, command 
 
 func (c *CLI) printFindings(findings []mcpconfig.Finding, verb string) {
 	for _, f := range findings {
+		v := verb
+		if f.Exposed {
+			v = "exposes"
+		}
 		fmt.Fprintf(c.Stdout, "\n%s\n  %s %s (%s, %s)\n\n%s\n\n  %s\n",
-			c.out(bold, f.Name), verb, strings.Join(f.Vars, ", "), f.Client, c.tilde(f.Config),
+			c.out(bold, f.Name), v, strings.Join(f.Vars, ", "), f.Client, c.tilde(f.Config),
 			indent(f.Suggestion, "    "), c.tilde(f.Note))
 	}
+}
+
+// mcpProblems counts findings by kind: the fix is the same, the reason is not.
+func mcpProblems(findings []mcpconfig.Finding) []string {
+	exposed := 0
+	for _, f := range findings {
+		if f.Exposed {
+			exposed++
+		}
+	}
+	var problems []string
+	if n := len(findings) - exposed; n > 0 {
+		problems = append(problems, fmt.Sprintf("%d MCP server(s) would receive cap:// references instead of values", n))
+	}
+	if exposed > 0 {
+		problems = append(problems, fmt.Sprintf("%d MCP server(s) put a secret in a command line, which any process can read", exposed))
+	}
+	return problems
 }
 
 func (c *CLI) reportUnreadable(errs []error) {

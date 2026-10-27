@@ -12,6 +12,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/cli"
 	"github.com/veilux-lab/keyward/internal/daemon"
+	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
@@ -1054,6 +1055,29 @@ func TestDoctorReportsDanglingReferencesAndFails(t *testing.T) {
 	}
 	if !strings.Contains(h.out(), "keyward add absent") {
 		t.Errorf("stdout does not offer the fix:\n%s", h.out())
+	}
+}
+
+// A secret in a running program's command line is readable by any process, so it
+// fails doctor, named but never shown.
+func TestDoctorReportsASecretInACommandLineAndFails(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"alpha": "dummy-alpha-value"}, nil)
+	dir := homed(t, h)
+	if err := os.WriteFile(filepath.Join(dir, ".zshrc"), []byte("export A='cap://alpha'\n"), 0o644); err != nil {
+		t.Fatalf("writing .zshrc: %v", err)
+	}
+	h.cli.Exposures = func() ([]exposure.Exposure, error) {
+		return exposure.Find(h.store, []exposure.Process{{PID: 42, Args: []string{"/usr/local/bin/node", "--header", "Authorization: Bearer dummy-alpha-value"}}})
+	}
+
+	if code := h.cli.Run([]string{"doctor"}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(h.out(), "alpha is in the command line of node (pid 42)") {
+		t.Errorf("stdout does not name the exposure:\n%s", h.out())
+	}
+	if strings.Contains(h.out()+h.err(), "dummy-alpha-value") {
+		t.Errorf("doctor printed the value")
 	}
 }
 

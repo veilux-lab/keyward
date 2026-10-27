@@ -94,6 +94,7 @@ func main() {
 		LookPath:       exec.LookPath,
 		RunTool:        runTool,
 		Self:           stablePath(home),
+		Exposures:      client.Exposures,
 		Backups:        backup.Default(home),
 		Record:         record,
 		Daemon: func() error {

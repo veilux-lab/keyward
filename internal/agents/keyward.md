@@ -11,9 +11,11 @@ reference, not a broken value.
   inline so it does not depend on the shell's startup files, and naming it in
   `--only` so the command gets that secret and no other:
   `GITHUB_TOKEN=cap://github-token keyward run --only GITHUB_TOKEN -- gh pr list`
-- When the value is part of an argument, expand it inside the child, after
-  resolution. `"$API_TOKEN"` outside the `sh -c` sends the literal reference:
-  `API_TOKEN=cap://api-token keyward run --only API_TOKEN -- sh -c 'curl -sS -H "Authorization: Bearer $API_TOKEN" "$1"' _ "$URL"`
+- Never put a resolved value in another program's arguments: any process can read
+  a command line. Expand it inside the child, after resolution, and pass it on
+  stdin; `printf` is built into the shell, so it has no command line of its own.
+  `"$API_TOKEN"` outside the `sh -c` sends the literal reference:
+  `API_TOKEN=cap://api-token keyward run --only API_TOKEN -- sh -c 'printf "header = \"Authorization: Bearer %s\"\n" "$API_TOKEN" | curl -sS -K - "$1"' _ "$URL"`
 - Never print a resolved value: no `env`, `printenv`, `echo "$VAR"`, `set -x`, or
   `curl -v` under `keyward run`, and never write one to a file.
 - An authentication failure, or a tool that receives `cap://…`, usually means it

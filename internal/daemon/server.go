@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/veilux-lab/keyward/internal/activity"
+	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
@@ -36,6 +37,9 @@ type Server struct {
 
 	Record func(activity.Event)
 
+	// Processes lists running programs for the exposures request; nil refuses it.
+	Processes func() ([]exposure.Process, error)
+
 	wg          sync.WaitGroup
 	mu          sync.Mutex
 	connections map[net.Conn]struct{}
@@ -54,7 +58,7 @@ func RunLogged(ctx context.Context, path string, store vault.Store, record func(
 	stop := context.AfterFunc(ctx, l.stopAccepting)
 	defer stop()
 
-	s := &Server{Store: store, Record: record, Version: Version}
+	s := &Server{Store: store, Record: record, Version: Version, Processes: exposure.Processes}
 	s.event("start", "", "ok", 0)
 	err = s.Serve(l)
 	s.event("stop", "", "ok", 0)
@@ -141,7 +145,7 @@ func (s *Server) handle(conn net.Conn) {
 		op = "status"
 	case "entries":
 		op = "list"
-	case "get", "put", "replace", "delete", "export-key", "restore-key":
+	case "get", "put", "replace", "delete", "export-key", "restore-key", "exposures":
 	default:
 		op = "request"
 	}
@@ -180,6 +184,20 @@ func (s *Server) dispatch(req request) response {
 		var entries []vault.Entry
 		if entries, err = s.Store.Entries(); err == nil {
 			return response{Entries: entries}
+		}
+	case "exposures":
+		// Searched here, where the values already are, so none is sent anywhere.
+		if s.Processes == nil {
+			err = errors.New("this daemon cannot list processes")
+			break
+		}
+		var procs []exposure.Process
+		if procs, err = s.Processes(); err != nil {
+			break
+		}
+		var found []exposure.Exposure
+		if found, err = exposure.Find(s.Store, procs); err == nil {
+			return response{Exposures: found}
 		}
 	case "export-key", "restore-key":
 		recovery, ok := s.Store.(vault.KeyRecovery)

@@ -9,6 +9,7 @@ package daemon
 import (
 	"errors"
 
+	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
@@ -31,6 +32,8 @@ type response struct {
 	Entries []vault.Entry `json:"entries,omitempty"`
 	// Changed answers restore-key: whether the stored key was replaced.
 	Changed bool `json:"changed,omitempty"`
+	// Exposures answers exposures, by secret name and process.
+	Exposures []exposure.Exposure `json:"exposures,omitempty"`
 
 	// Code is empty on success. Message carries the error text, which by the
 	// Store contract never contains a value.

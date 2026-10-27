@@ -56,6 +56,9 @@ type Finding struct {
 	Note string
 	// Want is the suggested definition, for applying it rather than printing it.
 	Want Definition
+	// Exposed marks a server that already runs through keyward but puts its secrets
+	// in a command line, which any process can read.
+	Exposed bool
 }
 
 // Definition is how a stdio server is started.
@@ -233,6 +236,10 @@ func runsThroughKeyward(s Server) bool {
 func Check(servers []Server, refs map[string]string) []Finding {
 	var findings []Finding
 	for _, s := range servers {
+		exposed := false
+		if bridge, ok := exposingBridge(s); ok {
+			s, exposed = bridge, true
+		}
 		if s.disabled || runsThroughKeyward(s) {
 			continue
 		}
@@ -266,7 +273,7 @@ func Check(servers []Server, refs map[string]string) []Finding {
 		if len(used) == 0 {
 			continue
 		}
-		f := Finding{Server: s}
+		f := Finding{Server: s, Exposed: exposed}
 		for v := range used {
 			f.Vars = append(f.Vars, v)
 		}
@@ -284,6 +291,7 @@ func Check(servers []Server, refs map[string]string) []Finding {
 // mcp-remote bridge, so that its headers are filled in by the local process.
 func suggest(s Server, used map[string]string) (string, string, Definition) {
 	inner := append([]string{s.Command}, s.Args...)
+	var headers []int
 	if s.URL != "" {
 		inner = []string{"npx", "-y", "mcp-remote", s.URL}
 		names := make([]string, 0, len(s.Headers))
@@ -293,6 +301,7 @@ func suggest(s Server, used map[string]string) (string, string, Definition) {
 		slices.Sort(names)
 		for _, h := range names {
 			inner = append(inner, "--header", h+": "+s.Headers[h])
+			headers = append(headers, len(inner)-1)
 		}
 		inner = append(inner, "--transport", "http-only")
 	}
@@ -321,7 +330,7 @@ func suggest(s Server, used map[string]string) (string, string, Definition) {
 	slices.Sort(only)
 	args := []string{"run", "--only", strings.Join(only, ","), "--"}
 	if slices.ContainsFunc(inner, placeholder.MatchString) {
-		args = append(args, "sh", "-c", "exec "+shellWords(inner))
+		args = append(args, "sh", "-c", "exec "+shellWords(inner, headers))
 	} else {
 		args = append(args, inner...)
 	}
@@ -341,15 +350,7 @@ func Undo(servers []Server) []Finding {
 		if s.disabled || !runsThroughKeyward(s) {
 			continue
 		}
-		inner := s.Args[1:]
-		if len(inner) > 1 && inner[0] == "--only" {
-			inner = inner[2:]
-		} else if len(inner) > 0 && strings.HasPrefix(inner[0], "--only=") {
-			inner = inner[1:]
-		}
-		if len(inner) > 0 && inner[0] == "--" {
-			inner = inner[1:]
-		}
+		inner := wrappedCommand(s)
 		if len(inner) == 0 {
 			continue
 		}
@@ -387,10 +388,133 @@ func Undo(servers []Server) []Finding {
 	return findings
 }
 
+// wrappedCommand is the command a keyward-wrapped server starts, after keyward
+// run and its options.
+func wrappedCommand(s Server) []string {
+	inner := s.Args[1:]
+	if len(inner) > 1 && inner[0] == "--only" {
+		inner = inner[2:]
+	} else if len(inner) > 0 && strings.HasPrefix(inner[0], "--only=") {
+		inner = inner[1:]
+	}
+	if len(inner) > 0 && inner[0] == "--" {
+		inner = inner[1:]
+	}
+	return inner
+}
+
+// exposingBridge recognises the mcp-remote bridge that earlier versions of keyward
+// wrote, whose shell expanded each secret into a --header argument, and returns
+// the remote server it stands for.
+func exposingBridge(s Server) (Server, bool) {
+	if s.disabled || !runsThroughKeyward(s) {
+		return Server{}, false
+	}
+	inner := wrappedCommand(s)
+	if len(inner) != 3 || inner[0] != "sh" || inner[1] != "-c" {
+		return Server{}, false
+	}
+	script, ok := strings.CutPrefix(inner[2], "exec ")
+	if !ok {
+		return Server{}, false
+	}
+	words, ok := splitWords(script)
+	if !ok || len(words) < 4 || words[0] != "npx" || words[1] != "-y" || words[2] != "mcp-remote" {
+		return Server{}, false
+	}
+	bridge := Server{Client: s.Client, Config: s.Config, Name: s.Name, Scope: s.Scope, Env: s.Env,
+		URL: words[3], Headers: map[string]string{}, toml: s.toml, timeout: s.timeout}
+	exposed := false
+	for rest := words[4:]; len(rest) > 0; rest = rest[2:] {
+		if len(rest) < 2 {
+			return Server{}, false
+		}
+		switch rest[0] {
+		case "--transport":
+		case "--header":
+			name, value, ok := strings.Cut(rest[1], ": ")
+			if !ok {
+				return Server{}, false
+			}
+			bridge.Headers[name] = value
+			exposed = exposed || placeholder.MatchString(value)
+		default:
+			return Server{}, false
+		}
+	}
+	return bridge, exposed
+}
+
+// splitWords reverses shellWords, turning each $VAR back into ${VAR}. It accepts
+// nothing else, so a script written by hand is never mistaken for keyward's.
+func splitWords(script string) ([]string, bool) {
+	var words []string
+	for i := 0; i < len(script); i++ {
+		if script[i] != '"' {
+			end := strings.IndexByte(script[i:], ' ')
+			if end < 0 {
+				end = len(script) - i
+			}
+			if !safeWord.MatchString(script[i : i+end]) {
+				return nil, false
+			}
+			words = append(words, script[i:i+end])
+			i += end
+		} else {
+			var b strings.Builder
+			for i < len(script) && script[i] == '"' {
+				var ok bool
+				if i, ok = unquote(script, i+1, &b); !ok {
+					return nil, false
+				}
+			}
+			words = append(words, b.String())
+		}
+		if i < len(script) && script[i] != ' ' {
+			return nil, false
+		}
+	}
+	return words, true
+}
+
+// unquote reads one double-quoted segment starting after its opening quote, and
+// returns the index after its closing one.
+func unquote(script string, i int, b *strings.Builder) (int, bool) {
+	for i < len(script) {
+		switch c := script[i]; {
+		case c == '"':
+			return i + 1, true
+		case c == '\\' && i+1 < len(script) && strings.IndexByte("\\\"$`", script[i+1]) >= 0:
+			b.WriteByte(script[i+1])
+			i += 2
+		case c == '$':
+			n := 0
+			for i+1+n < len(script) && isNameChar(script[i+1+n]) {
+				n++
+			}
+			if n == 0 {
+				return 0, false
+			}
+			b.WriteString("${" + script[i+1:i+1+n] + "}")
+			i += 1 + n
+		case c == '\\' || c == '`':
+			return 0, false
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	return 0, false
+}
+
 // shellWords quotes arguments for sh so each placeholder expands there, after
 // keyward resolves it. It is written $VAR, without braces, because clients such
 // as Claude Code expand ${VAR} themselves before starting the command.
-func shellWords(args []string) string {
+//
+// A header for mcp-remote is the exception: it keeps ${VAR} for mcp-remote to
+// fill in from its own environment, so the value stays out of every command line,
+// which any process can read. It is spelled so neither the client nor sh sees ${.
+func shellWords(args []string, headers []int) string {
 	words := make([]string, len(args))
 	for i, arg := range args {
 		if safeWord.MatchString(arg) {
@@ -402,7 +526,11 @@ func shellWords(args []string) string {
 		last := 0
 		for _, m := range placeholder.FindAllStringSubmatchIndex(arg, -1) {
 			b.WriteString(escapeDouble(arg[last:m[0]]))
-			b.WriteString("$" + arg[m[2]:m[3]])
+			if slices.Contains(headers, i) {
+				b.WriteString(`"'$''{` + arg[m[2]:m[3]] + `}'"`)
+			} else {
+				b.WriteString("$" + arg[m[2]:m[3]])
+			}
 			last = m[1]
 			// A name character right after the variable would extend its name.
 			if last < len(arg) && isNameChar(arg[last]) {
