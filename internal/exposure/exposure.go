@@ -16,7 +16,10 @@ import (
 
 // Process is a running program and the arguments it was started with.
 type Process struct {
-	PID  int
+	PID int
+	// Path is the executable, which the program cannot change. Args[0] it can:
+	// npm rewrites it to its whole command line, secrets included.
+	Path string
 	Args []string
 }
 
@@ -46,7 +49,7 @@ func Find(store vault.Store, procs []Process) ([]Exposure, error) {
 		if secret.Len() >= minLength {
 			for _, p := range procs {
 				if containsIn(p.Args, secret.Bytes()) {
-					found = append(found, Exposure{Secret: e.Name, PID: p.PID, Program: filepath.Base(p.Args[0])})
+					found = append(found, Exposure{Secret: e.Name, PID: p.PID, Program: filepath.Base(p.Path)})
 				}
 			}
 		}
@@ -66,28 +69,29 @@ func containsIn(args []string, value []byte) bool {
 	return false
 }
 
-// parseArgs reads the arguments from a kern.procargs2 buffer: the argument count,
-// the executable path and its padding, then the arguments. The environment that
-// follows is left unread.
-func parseArgs(raw []byte) ([]string, bool) {
+// parseArgs reads the executable path and the arguments from a kern.procargs2
+// buffer: the argument count, the path and its padding, then the arguments. The
+// environment that follows is left unread.
+func parseArgs(raw []byte) (string, []string, bool) {
 	if len(raw) < 4 {
-		return nil, false
+		return "", nil, false
 	}
 	argc := int(binary.NativeEndian.Uint32(raw))
 	rest := raw[4:]
 	end := bytes.IndexByte(rest, 0)
 	if end < 0 {
-		return nil, false
+		return "", nil, false
 	}
+	path := string(rest[:end])
 	rest = bytes.TrimLeft(rest[end:], "\x00")
 	args := make([]string, 0, argc)
 	for len(args) < argc {
 		end := bytes.IndexByte(rest, 0)
 		if end < 0 {
-			return nil, false
+			return "", nil, false
 		}
 		args = append(args, string(rest[:end]))
 		rest = rest[end+1:]
 	}
-	return args, argc > 0
+	return path, args, argc > 0
 }

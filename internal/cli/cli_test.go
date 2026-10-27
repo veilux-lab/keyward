@@ -1067,7 +1067,7 @@ func TestDoctorReportsASecretInACommandLineAndFails(t *testing.T) {
 		t.Fatalf("writing .zshrc: %v", err)
 	}
 	h.cli.Exposures = func() ([]exposure.Exposure, error) {
-		return exposure.Find(h.store, []exposure.Process{{PID: 42, Args: []string{"/usr/local/bin/node", "--header", "Authorization: Bearer dummy-alpha-value"}}})
+		return exposure.Find(h.store, []exposure.Process{{PID: 42, Path: "/usr/local/bin/node", Args: []string{"/usr/local/bin/node", "--header", "Authorization: Bearer dummy-alpha-value"}}})
 	}
 
 	if code := h.cli.Run([]string{"doctor"}); code != 1 {

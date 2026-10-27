@@ -20,8 +20,8 @@ func Processes() ([]Process, error) {
 		if err != nil {
 			continue
 		}
-		if args, ok := parseArgs(raw); ok {
-			out = append(out, Process{PID: pid, Args: args})
+		if path, args, ok := parseArgs(raw); ok {
+			out = append(out, Process{PID: pid, Path: path, Args: args})
 		}
 	}
 	return out, nil
