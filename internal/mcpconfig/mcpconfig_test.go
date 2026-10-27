@@ -141,19 +141,82 @@ func TestALocalServerIsWrappedDirectly(t *testing.T) {
 	}
 }
 
-// A remote server's header must be filled in after keyward resolves the value, and
-// without ${} braces, which Claude Code would expand first.
-func TestARemoteServerGoesThroughABridgeThatExpandsTheHeaderLate(t *testing.T) {
+// bridgeArgs runs a generated script with npx replaced by a probe, and returns
+// the arguments mcp-remote would have been started with.
+func bridgeArgs(t *testing.T, script string) string {
+	t.Helper()
+	bin := t.TempDir()
+	write(t, filepath.Join(bin, "npx"), "#!/bin/sh\nprintf '[%s]' \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "npx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Env = []string{"GITHUB_TOKEN=resolved-value", "PATH=" + bin + ":/usr/bin:/bin"}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// mcp-remote fills ${VAR} in a header from its own environment, so the token never
+// enters a command line, where any process can read it. The script must still not
+// contain ${, which Claude Code would expand to the reference first.
+func TestARemoteServersTokenNeverReachesACommandLine(t *testing.T) {
 	s := parseJSON(t, finding(t, "Claude Code", "github"))
 	if s.Command != "keyward" || len(s.Args) != 7 || s.Args[2] != "GITHUB_TOKEN" || s.Args[4] != "sh" || s.Args[5] != "-c" {
 		t.Fatalf("args = %v", s.Args)
 	}
-	script := s.Args[6]
-	if strings.Contains(script, "${") || !strings.Contains(script, "mcp-remote") || !strings.Contains(script, "https://api.example.com/mcp/") {
-		t.Errorf("script = %s", script)
+	if strings.Contains(s.Args[6], "${") {
+		t.Errorf("Claude Code would expand the script: %s", s.Args[6])
+	}
+	if got, want := bridgeArgs(t, s.Args[6]), "[-y][mcp-remote][https://api.example.com/mcp/][--header][Authorization: Bearer ${GITHUB_TOKEN}][--transport][http-only]"; got != want {
+		t.Errorf("mcp-remote args = %s, want %s", got, want)
 	}
 	if s.Env["GITHUB_TOKEN"] != "cap://github-token" {
 		t.Errorf("env = %v", s.Env)
+	}
+}
+
+// Earlier versions of keyward let sh expand the header, putting the token in
+// mcp-remote's command line. Those bridges are offered the current form.
+func TestAnEarlierBridgeThatExposesTheTokenIsWrappedAgain(t *testing.T) {
+	findings := mcpconfig.Check(wrapped(t), refs)
+	if len(findings) != 1 || findings[0].Name != "github" || !findings[0].Exposed || strings.Join(findings[0].Vars, ",") != "GITHUB_TOKEN" {
+		t.Fatalf("findings = %+v", findings)
+	}
+	s := parseJSON(t, findings[0])
+	if got, want := bridgeArgs(t, s.Args[len(s.Args)-1]), "[-y][mcp-remote][https://api.example.com/mcp/][--header][Authorization: Bearer ${GITHUB_TOKEN}][--transport][http-only]"; got != want {
+		t.Errorf("mcp-remote args = %s, want %s", got, want)
+	}
+	if strings.Join(s.Args[:4], " ") != "run --only GITHUB_TOKEN --" || s.Env["GITHUB_TOKEN"] != "cap://github-token" {
+		t.Errorf("suggestion = %+v", s)
+	}
+}
+
+// A bridge written by hand cannot be rewritten safely, so it is left alone.
+func TestAHandWrittenBridgeIsNotRewritten(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".claude.json"), `{"mcpServers": {"atlassian": {"command": "keyward", "args": ["run", "--only", "JIRA", "--", "sh", "-c",
+    "exec npx -y mcp-remote https://mcp.example.com/v1/mcp --header \"Authorization: Basic $(printf '%s' \"$JIRA\" | base64)\""], "env": {"JIRA": "cap://jira-token"}}}}`)
+	servers, _ := mcpconfig.Load(home, t.TempDir())
+	if findings := mcpconfig.Check(servers, refs); len(findings) != 0 {
+		t.Errorf("findings = %+v", findings)
+	}
+}
+
+// Once wrapped in the current form, a server is not reported again.
+func TestACurrentBridgeIsNotReported(t *testing.T) {
+	s := parseJSON(t, finding(t, "Claude Code", "github"))
+	def, err := json.Marshal(map[string]any{"mcpServers": map[string]any{"github": s}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".claude.json"), string(def))
+	servers, _ := mcpconfig.Load(home, t.TempDir())
+	if findings := mcpconfig.Check(servers, refs); len(findings) != 0 {
+		t.Errorf("findings = %+v", findings)
 	}
 }
 

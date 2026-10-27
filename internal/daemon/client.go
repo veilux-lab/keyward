@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
@@ -60,6 +61,13 @@ func (c *Client) Get(name string) (vault.Secret, error) {
 	secret := vault.NewSecret(resp.Value)
 	clear(resp.Value)
 	return secret, nil
+}
+
+// Exposures asks the daemon which stored secrets are in a running program's
+// command line. The answer holds names and processes, never values.
+func (c *Client) Exposures() ([]exposure.Exposure, error) {
+	resp, err := c.do(request{Op: "exposures"})
+	return resp.Exposures, err
 }
 
 func (c *Client) Put(name string, value vault.Secret, note string) error {

@@ -51,6 +51,32 @@ func TestDoctorPointsAtMCPWhenAServerNeedsKeyward(t *testing.T) {
 	}
 }
 
+// A bridge from an earlier keyward is reported for what it does: it already runs
+// through keyward, but its token is in mcp-remote's command line.
+func TestMCPAndDoctorReportABridgeThatExposesItsToken(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	home := homed(t, h)
+	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers": {"github": {"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "sh", "-c", "exec npx -y mcp-remote https://api.example.com/mcp/ --header \"Authorization: Bearer $GITHUB_TOKEN\" --transport http-only"], "env": {"GITHUB_TOKEN": "cap://github-token"}}}}`), 0o600)
+	if code := h.cli.Run([]string{"mcp"}); code != 1 {
+		t.Errorf("exit %d, want 1 while a server exposes a secret", code)
+	}
+	for _, want := range []string{"1 MCP server(s) put a secret in a command line", "exposes GITHUB_TOKEN", "'$''{GITHUB_TOKEN}'"} {
+		if !strings.Contains(h.out(), want) {
+			t.Errorf("mcp output lacks %q:\n%s", want, h.out())
+		}
+	}
+	if strings.Contains(h.out(), "would receive cap://") {
+		t.Errorf("mcp says the server would receive a reference:\n%s", h.out())
+	}
+
+	h = newHarness(t, "", nil, nil)
+	h.cli.Home = home
+	h.cli.Run([]string{"doctor"})
+	if !strings.Contains(h.out(), "put a secret in a command line, which any process can read; see keyward mcp") {
+		t.Errorf("doctor output:\n%s", h.out())
+	}
+}
+
 const wrappedServer = `{"mcpServers": {"pagerduty": {"command": "/opt/homebrew/bin/keyward", "args": ["run", "--only", "PD_KEY", "--", "uvx", "pagerduty-mcp"], "env": {"PD_KEY": "cap://pagerduty-key"}}}}`
 
 func TestMCPUndoShowsHowToStartEachServerWithoutKeyward(t *testing.T) {
