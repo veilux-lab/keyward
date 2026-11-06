@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // recoveryPrefix names the format, so a later version can change it.
@@ -78,7 +79,7 @@ func (e *Encrypted) ExportKey() (Secret, error) {
 	}
 	defer clear(key)
 	if err := opens(key, f); err != nil {
-		return Secret{}, fmt.Errorf("%s does not match its key", e.Path)
+		return Secret{}, e.mismatch()
 	}
 	return NewSecret(key), nil
 }
@@ -116,7 +117,12 @@ func (e *Encrypted) RestoreKey(key Secret) (bool, error) {
 		e.gcm = gcm
 		return false, nil
 	default:
-		// The stored key does not open the vault, since only one key can.
+		// The stored key does not open the vault, since only one key can, but
+		// values may have been sealed under it; keep it rather than destroy it.
+		replaced := fmt.Sprintf("%s.replaced-%d", masterKey, time.Now().Unix())
+		if err := e.Keys.Put(replaced, current, "replaced by keyward recovery restore"); err != nil {
+			return false, fmt.Errorf("keeping the replaced vault key: %w", err)
+		}
 		err = e.Keys.Replace(masterKey, encoded, "decrypts "+e.Path)
 	}
 	if err != nil {

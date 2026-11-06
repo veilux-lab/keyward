@@ -101,6 +101,11 @@ func (e *Encrypted) Get(name string) (Secret, error) {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// Before the vault exists there is nothing to read, and creating a key here
+	// would seal later values with one a vault copied over later cannot share.
+	if f, err := e.read(); err == nil && f == nil && !e.legacyHas(key) {
+		return Secret{}, fmt.Errorf("vault get %q: %w", key, ErrNotFound)
+	}
 	f, err := e.unlock()
 	if err != nil {
 		return Secret{}, fmt.Errorf("vault get %q: %w", key, err)
@@ -245,12 +250,15 @@ func (e *Encrypted) unlock() (*vaultFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		if f != nil {
-			if _, err := open(gcm, f.Check, aad("")); err != nil {
-				return nil, fmt.Errorf("%s does not match its key", e.Path)
-			}
-		}
 		e.gcm = gcm
+	}
+	// Checked on every use, not only when the key is first read: a vault copied
+	// over while the daemon runs must not be mixed with values under another key.
+	if f != nil {
+		if _, err := open(e.gcm, f.Check, aad("")); err != nil {
+			e.gcm = nil
+			return nil, e.mismatch()
+		}
 	}
 	if f == nil {
 		f = &vaultFile{Version: vaultVersion, Check: e.seal(checkText, ""), Entries: map[string]sealedEntry{}}
@@ -260,6 +268,11 @@ func (e *Encrypted) unlock() (*vaultFile, error) {
 		e.adoptAll(f)
 	}
 	return f, nil
+}
+
+// mismatch explains a vault file the Keychain key does not open.
+func (e *Encrypted) mismatch() error {
+	return fmt.Errorf("%s does not match the vault key in your Keychain; if this vault came from another Mac, run: keyward recovery restore", e.Path)
 }
 
 // masterKey reads the key, creating one only for a vault that does not exist yet:
