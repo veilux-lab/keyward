@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-formula=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "${1:?usage: update-homebrew.sh formula}")
+formula=$(python3 -I -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "${1:?usage: update-homebrew.sh formula}")
 directory=$(mktemp -d "${TMPDIR:-/tmp}/keyward-formula.XXXXXX")
 worktree="$directory/source"
 cleanup() {
@@ -15,7 +15,7 @@ trap 'exit 143' TERM
 for attempt in 1 2 3; do
   git fetch --no-tags origin main
   git worktree add --detach "$worktree" FETCH_HEAD
-  decision=$(python3 - "$worktree/Formula/keyward.rb" "$formula" <<'PY'
+  decision=$(python3 -I - "$worktree/Formula/keyward.rb" "$formula" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -36,8 +36,9 @@ PY
     echo "Homebrew already has this or a newer release"
     exit 0
   fi
+  # No project code runs here: the push credential bypasses the main ruleset, and
+  # CI has already tested main. Only the formula changes.
   cp "$formula" "$worktree/Formula/keyward.rb"
-  make -C "$worktree" verify
   git -C "$worktree" add Formula/keyward.rb
   git -C "$worktree" -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Update Homebrew to the published release'
   if git -C "$worktree" push origin HEAD:refs/heads/main; then
