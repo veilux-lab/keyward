@@ -549,6 +549,9 @@ func (c *CLI) migrate(args []string) int {
 		return c.fail("keyward migrate: %v", err)
 	}
 	c.recordRewrite(plan)
+	if migrate.InGitRepository(plan.Path) {
+		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("%s is in a git repository, so the values it held are still in its history. Rotate them: anyone with a copy of the repository can read them.", plan.Path)))
+	}
 
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)

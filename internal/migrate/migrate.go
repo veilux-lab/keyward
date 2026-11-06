@@ -40,8 +40,11 @@ type Skip struct {
 // Plan is a proposed migration of one file. Building a plan changes nothing;
 // Apply does the work.
 type Plan struct {
-	// Path is the file the plan describes.
+	// Path is the file the plan describes: for a symlink, the file it points to,
+	// which is rewritten in place so the link survives.
 	Path string
+	// Link is the symlink the user named, if they named one.
+	Link string
 
 	Changes []Change
 	Skips   []Skip
@@ -132,13 +135,26 @@ func possibleSkip(a Assignment, d Detection) Skip {
 	return Skip{Assignment: a, Reason: reason, Actionable: true}
 }
 
-// Read builds a plan from a file on disk.
+// Read builds a plan from a file on disk. A symlink, as stow or dotbot leave,
+// is followed: replacing it would leave the plaintext in the file it points to.
 func Read(path string) (*Plan, error) {
+	link := ""
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return nil, err
+		}
+		link, path = path, target
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return NewPlan(path, content)
+	p, err := NewPlan(path, content)
+	if p != nil {
+		p.Link = link
+	}
+	return p, err
 }
 
 // Empty reports whether there is nothing to move.
@@ -221,6 +237,9 @@ func (p *Plan) Blocked() []Skip {
 func (p *Plan) Diff() string {
 	var b strings.Builder
 
+	if p.Link != "" {
+		fmt.Fprintf(&b, "%s -> %s\n", p.Link, p.Path)
+	}
 	fmt.Fprintf(&b, "%s: %d value(s) to move, %d left alone\n", p.Path, len(p.Changes), len(p.Skips))
 
 	for _, c := range p.Changes {
@@ -342,6 +361,19 @@ func storeSecret(store vault.Store, name, value, note string) error {
 		return nil
 	}
 	return fmt.Errorf("%q already holds a different value; remove it with `keyward rm %s`, or store this one under another name", name, name)
+}
+
+// InGitRepository reports whether path is inside a git work tree, where the
+// values it held stay in the repository's history after migrating.
+func InGitRepository(path string) bool {
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+		if parent := filepath.Dir(dir); parent == dir {
+			return false
+		}
+	}
 }
 
 // writeAtomic replaces path via a temporary file in the same directory and a
