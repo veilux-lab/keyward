@@ -488,7 +488,8 @@ class FormulaUpdateTests(unittest.TestCase):
         self.git("-C", self.repo, "config", "user.email", "fixture@example.invalid")
         (self.repo / "Formula").mkdir()
         (self.repo / "Formula/keyward.rb").write_text('version "0.1.1"\n')
-        (self.repo / "Makefile").write_text("verify:\n\t@test ! -f fail-verify\n")
+        self.ran = self.root / "ran-project-code"
+        (self.repo / "Makefile").write_text(f"verify:\n\t@touch {self.ran}\n")
         self.git("-C", self.repo, "add", ".")
         self.git("-C", self.repo, "commit", "-qm", "fixture")
         self.git("-C", self.repo, "push", "origin", "main")
@@ -504,7 +505,7 @@ class FormulaUpdateTests(unittest.TestCase):
         return subprocess.run(["bash", str(SCRIPTS / "update-homebrew.sh"), str(self.formula)],
                               cwd=self.repo, text=True, capture_output=True)
 
-    def test_update_publishes_only_verified_formula_commit(self):
+    def test_update_publishes_only_the_formula_commit(self):
         result = self.update()
         self.assertEqual(result.returncode, 0, result.stderr)
         changed = self.git("--git-dir", self.remote, "diff", "--name-only", "HEAD~1", "HEAD")
@@ -522,16 +523,12 @@ class FormulaUpdateTests(unittest.TestCase):
         self.assertNotEqual(self.update().returncode, 0)
         self.assertEqual(first, self.git("--git-dir", self.remote, "rev-parse", "HEAD"))
 
-    def test_failed_verification_leaves_remote_unchanged(self):
-        (self.repo / "fail-verify").touch()
-        self.git("-C", self.repo, "add", "fail-verify")
-        self.git("-C", self.repo, "commit", "-qm", "failing fixture")
-        self.git("-C", self.repo, "push", "origin", "main")
-        first = self.git("--git-dir", self.remote, "rev-parse", "HEAD")
+    # The push holds a token that bypasses the main ruleset, so no project code
+    # (tests, their dependencies) may run while it is set; CI already tested main.
+    def test_update_runs_no_project_code(self):
         result = self.update()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("make", result.stderr)
-        self.assertEqual(first, self.git("--git-dir", self.remote, "rev-parse", "HEAD"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.ran.exists(), "the update ran make verify while holding the push token")
 
     def test_retry_preserves_a_concurrent_main_commit(self):
         other = self.root / "other"
