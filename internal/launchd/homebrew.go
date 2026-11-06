@@ -1,9 +1,13 @@
 package launchd
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -13,7 +17,9 @@ type Homebrew struct {
 	UID            int
 	StartupTimeout time.Duration
 	Command        func(string, ...string) error
-	Ready          func(string) error
+	// Output runs brew and returns what it printed; nil runs it for real.
+	Output func(string, ...string) ([]byte, error)
+	Ready  func(string) error
 }
 
 func (h Homebrew) Run(action string) (string, error) {
@@ -115,15 +121,61 @@ func (h Homebrew) Restart() error {
 // Remove uninstalls the formula and its tap, which brew cannot do from a formula.
 func (h Homebrew) Remove() (string, error) {
 	m := h.manager()
+	// Asked before uninstalling, while brew can still resolve the formula.
+	cached := h.cachedDownloads()
 	if err := m.command(h.Brew, "uninstall", homebrewFormula); err != nil {
 		return "", err
 	}
 	// Best effort: a cache left behind costs disk space, not correctness.
 	_ = m.command(h.Brew, "cleanup", "--prune=all", homebrewFormula)
+	// cleanup leaves the download behind on some Homebrew installs.
+	for _, path := range cached {
+		removeDownload(path)
+	}
 	if err := m.command(h.Brew, "untap", "veilux-lab/keyward"); err != nil {
 		return "", fmt.Errorf("the formula was removed, but untapping failed: %w", err)
 	}
 	return "Ran brew uninstall, brew cleanup, and brew untap veilux-lab/keyward.", nil
+}
+
+// cachedDownloads are where brew keeps keyward's bottle and source archive.
+func (h Homebrew) cachedDownloads() []string {
+	var paths []string
+	for _, args := range [][]string{{"--cache", homebrewFormula}, {"--cache", "--build-from-source", homebrewFormula}} {
+		out, err := h.output(args...)
+		if path := strings.TrimSpace(string(out)); err == nil && path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+func (h Homebrew) output(args ...string) ([]byte, error) {
+	if h.Output != nil {
+		return h.Output(h.Brew, args...)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, h.Brew, args...).Output()
+}
+
+// removeDownload deletes a cached keyward download and the links brew keeps to
+// it, and only that: anything not named like keyward's download is left alone.
+func removeDownload(path string) {
+	name := filepath.Base(path)
+	if !filepath.IsAbs(path) || filepath.Base(filepath.Dir(path)) != "downloads" ||
+		!(strings.Contains(name, "--keyward-") || strings.Contains(name, "--keyward--")) {
+		return
+	}
+	_ = os.Remove(path)
+	cache := filepath.Dir(filepath.Dir(path))
+	entries, _ := os.ReadDir(cache)
+	for _, e := range entries {
+		link := filepath.Join(cache, e.Name())
+		if target, err := os.Readlink(link); err == nil && filepath.Base(target) == name {
+			_ = os.Remove(link)
+		}
+	}
 }
 
 func (h Homebrew) manager() Manager {

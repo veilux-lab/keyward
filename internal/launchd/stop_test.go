@@ -1,7 +1,9 @@
 package launchd_test
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -154,5 +156,66 @@ func TestSignedRestartKickstartsTheLoginAgent(t *testing.T) {
 	}
 	if got := strings.Join(h.calls, "\n"); !strings.Contains(got, "launchctl kickstart -k gui/501/com.veilux-lab.keyward.dev") {
 		t.Fatalf("calls:\n%s", got)
+	}
+}
+
+// brew cleanup leaves keyward's download behind on some Homebrew installs, so
+// Remove deletes the exact cached files brew reports, and nothing else.
+func TestHomebrewRemoveDeletesKeywardsCachedDownloads(t *testing.T) {
+	h := brewSetup(t)
+	cache := t.TempDir()
+	downloads := filepath.Join(cache, "downloads")
+	os.MkdirAll(downloads, 0o755)
+	bottle := filepath.Join(downloads, "aaa--keyward--1.1.6.arm64_sequoia.bottle.tar.gz")
+	source := filepath.Join(downloads, "bbb--keyward-1.1.6.tar.gz")
+	other := filepath.Join(downloads, "ccc--hello-2.12.tar.gz")
+	for _, f := range []string{bottle, source, other} {
+		os.WriteFile(f, []byte("x"), 0o644)
+	}
+	link := filepath.Join(cache, "keyward--1.1.6.tar.gz")
+	os.Symlink("downloads/bbb--keyward-1.1.6.tar.gz", link)
+	otherLink := filepath.Join(cache, "hello--2.12.tar.gz")
+	os.Symlink("downloads/ccc--hello-2.12.tar.gz", otherLink)
+	h.m.Output = func(program string, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "--cache veilux-lab/keyward/keyward":
+			return []byte(bottle + "\n"), nil
+		case "--cache --build-from-source veilux-lab/keyward/keyward":
+			return []byte(source + "\n"), nil
+		}
+		return nil, errors.New("unexpected brew call")
+	}
+	if _, err := h.m.Remove(); err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{bottle, source, link} {
+		if _, err := os.Lstat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s remains", filepath.Base(gone))
+		}
+	}
+	for _, kept := range []string{other, otherLink} {
+		if _, err := os.Lstat(kept); err != nil {
+			t.Errorf("%s was removed", filepath.Base(kept))
+		}
+	}
+}
+
+// A path brew reports that is not keyward's download is never deleted, and a
+// failed lookup does not stop the uninstall.
+func TestHomebrewRemoveDeletesOnlyKeywardCacheFiles(t *testing.T) {
+	h := brewSetup(t)
+	victim := filepath.Join(t.TempDir(), "downloads", "important.txt")
+	os.MkdirAll(filepath.Dir(victim), 0o755)
+	os.WriteFile(victim, nil, 0o644)
+	h.m.Output = func(string, ...string) ([]byte, error) { return []byte(victim + "\n"), nil }
+	if _, err := h.m.Remove(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Error("deleted a file that is not keyward's download")
+	}
+	h.m.Output = func(string, ...string) ([]byte, error) { return nil, errors.New("brew failed") }
+	if _, err := h.m.Remove(); err != nil {
+		t.Errorf("a failed cache lookup stopped the uninstall: %v", err)
 	}
 }
