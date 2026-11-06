@@ -62,10 +62,11 @@ login Keychain. Apple's Migration Assistant usually copies both with your user
 account; other migration tools often copy the files but not the Keychain.
 
 1. On the old Mac, make sure you have the recovery code: `keyward recovery show`.
-2. On the new Mac, install keyward (see [Install](#install)), then run `keyward ls`.
-   If it lists your secrets, you're done; macOS may ask once for Keychain access.
-3. If it says the vault key is missing, run `keyward recovery restore` and paste the
-   code. If the vault file is missing too, copy it over from the old Mac first.
+2. On the new Mac, copy the vault file over first if it did not come across, then
+   install keyward (see [Install](#install)) and run `keyward doctor`. If it says the
+   vault opens with its key, you're done; macOS may ask once for Keychain access.
+3. If it says the vault key is missing or does not match, run
+   `keyward recovery restore` and paste the code.
 4. Open a new terminal, and restart your editor and AI tools.
 
 Your rc files, `.env` files, and MCP configs keep their `cap://` references, so they

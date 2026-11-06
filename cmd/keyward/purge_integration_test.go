@@ -14,7 +14,11 @@ import (
 func TestPurgeVaultRemovesEverythingItStored(t *testing.T) {
 	const service = "keyward-purge-test"
 	keys, legacy := vault.NewKeychainService(service+"-vault-key"), vault.NewKeychainService(service)
-	t.Cleanup(func() { _ = keys.Delete("master"); _ = legacy.Delete("kwtest-left-behind") })
+	t.Cleanup(func() {
+		_ = keys.Delete("master")
+		_ = keys.Delete("master.replaced-1")
+		_ = legacy.Delete("kwtest-left-behind")
+	})
 	root := filepath.Join(t.TempDir(), "keyward")
 	path := filepath.Join(root, "vault", "test.vault")
 	v := &vault.Encrypted{Path: path, Keys: keys}
@@ -25,6 +29,10 @@ func TestPurgeVaultRemovesEverythingItStored(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.WriteFile(path+".recovery-shown", nil, 0o600)
+	// recovery restore keeps a key it replaces; purge must not leave it behind.
+	if err := keys.Put("master.replaced-1", vault.NewSecret([]byte("old key")), ""); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := purgeVault(path, service, true); err != nil {
 		t.Fatalf("purgeVault: %v", err)

@@ -218,8 +218,16 @@ func Unlink(config, line string, created bool) error {
 	return writeKeepingMode(config, []byte(rest))
 }
 
-// writeKeepingMode replaces a file atomically, keeping its permissions.
+// writeKeepingMode replaces a file atomically, keeping its permissions. A symlink
+// is followed, so the link survives and its target gets the change.
 func writeKeepingMode(path string, data []byte) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return err
+		}
+		path = target
+	}
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()

@@ -66,6 +66,12 @@ func Read(store vault.Store, paths []string) (*Plan, error) {
 			p.Skipped = append(p.Skipped, Issue{File: path, Reason: "could not locate file"})
 			continue
 		}
+		// A symlinked dotfile is restored in the file it points to, keeping the link.
+		if info, err := os.Lstat(absolute); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if target, err := filepath.EvalSymlinks(absolute); err == nil {
+				absolute = target
+			}
+		}
 		if seen[absolute] {
 			continue
 		}
@@ -76,7 +82,7 @@ func Read(store vault.Store, paths []string) (*Plan, error) {
 			continue
 		}
 		if !info.Mode().IsRegular() {
-			p.Skipped = append(p.Skipped, Issue{File: path, Reason: "not a regular file; symlinks are not replaced"})
+			p.Skipped = append(p.Skipped, Issue{File: path, Reason: "not a regular file"})
 			continue
 		}
 		if !supported(absolute) {

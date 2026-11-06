@@ -220,7 +220,7 @@ func writeAgentFile(home string) {
 }
 
 // purgeVault deletes the vault, its recovery marker, its folder once empty, its
-// key, and any secrets still stored as separate Keychain items. Deleting needs no
+// keys, and any secrets still stored as separate Keychain items. Deleting needs no
 // Keychain approval.
 func purgeVault(path, service string, ownFolder bool) error {
 	var errs []error
@@ -240,8 +240,12 @@ func purgeVault(path, service string, ownFolder bool) error {
 			errs = append(errs, err)
 		}
 	}
-	if err := vault.NewKeychainService(service + "-vault-key").Delete("master"); err != nil && !errors.Is(err, vault.ErrNotFound) {
-		errs = append(errs, err)
+	// Every key the service holds: recovery restore keeps the keys it replaces.
+	keys := vault.NewKeychainService(service + "-vault-key")
+	stored, err := keys.Entries()
+	errs = append(errs, err)
+	for _, e := range stored {
+		errs = append(errs, keys.Delete(e.Name))
 	}
 	legacy := vault.NewKeychainService(service)
 	entries, err := legacy.Entries()

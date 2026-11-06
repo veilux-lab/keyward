@@ -549,6 +549,9 @@ func (c *CLI) migrate(args []string) int {
 		return c.fail("keyward migrate: %v", err)
 	}
 	c.recordRewrite(plan)
+	if migrate.InGitRepository(plan.Path) {
+		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("%s is in a git repository, so the values it held are still in its history. Rotate them: anyone with a copy of the repository can read them.", plan.Path)))
+	}
 
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
 	fmt.Fprintf(c.Stdout, "Encrypted backup of the original: %s\n", applied.BackupPath)
@@ -626,6 +629,7 @@ func (c *CLI) doctor(args []string) int {
 	}
 
 	fmt.Fprint(c.Stdout, report.String())
+	opens := c.checkVaultOpens()
 	if found, err := c.knownBackups(); err != nil {
 		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check for backups: %v", err)))
 	} else if len(found) > 0 {
@@ -650,10 +654,33 @@ func (c *CLI) doctor(args []string) int {
 		fmt.Fprintln(c.Stdout, c.out(red, fmt.Sprintf("\n%s is in the command line of %s (pid %d), where any process can read it.\n"+
 			"Start that program without it there (keyward mcp shows how for MCP servers), then rotate the secret.", e.Secret, e.Program, e.PID)))
 	}
-	if report.HasProblems() || len(exposed) > 0 {
+	if report.HasProblems() || len(exposed) > 0 || !opens {
 		return exitFailure
 	}
 	return exitOK
+}
+
+// checkVaultOpens decrypts one stored value, since keyward ls lists names without
+// the key and so cannot tell a vault that opens from one whose key is wrong.
+func (c *CLI) checkVaultOpens() bool {
+	entries, err := c.Store.Entries()
+	if err != nil {
+		return true // doctor.Run has already reported an unreachable store
+	}
+	for _, e := range entries {
+		if backup.IsKey(e.Name) {
+			continue
+		}
+		secret, err := c.Store.Get(e.Name)
+		if err != nil {
+			fmt.Fprintln(c.Stdout, c.out(red, fmt.Sprintf("\nThe vault does not open: %v", err)))
+			return false
+		}
+		secret.Destroy()
+		fmt.Fprintln(c.Stdout, "\nThe vault opens with its key.")
+		return true
+	}
+	return true
 }
 
 // failResolve renders resolution failures with a suggested fix.
