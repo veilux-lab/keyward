@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/veilux-lab/keyward/internal/doctor"
 )
@@ -15,7 +14,7 @@ import (
 // .env, plus any named.
 func (c *CLI) setup(args []string) int {
 	if !c.Interactive {
-		return c.fail("keyward setup: run it in a terminal; it asks before each change")
+		return c.fail("keyward setup: run it in Terminal.app; it asks before each change. An AI agent must ask the user to run it.")
 	}
 	if c.Home == "" {
 		return c.fail("keyward setup: home directory unknown")
@@ -40,14 +39,14 @@ func (c *CLI) setup(args []string) int {
 		return exitOK
 	})
 	step(2, "point your AI agents at keyward's instructions", c.agentsLink)
-	step(3, "run MCP servers through keyward", func() int { return c.mcpChange(true, nil) })
+	step(3, "run MCP servers through keyward", func() int { return c.mcpChange(true, false, nil) })
 	step(4, "save your recovery code", func() int {
 		if _, err := os.Stat(c.RecoveryMarker); c.RecoveryMarker != "" && err == nil {
-			fmt.Fprintln(c.Stdout, "Already shown once; keyward recovery show prints it again.")
+			fmt.Fprintln(c.Stdout, "Already shown once; to see it again, run keyward recovery show in Terminal.app. An AI agent must ask the user to run it.")
 			return exitOK
 		}
 		if c.Recovery == nil {
-			fmt.Fprintln(c.Stdout, "Run keyward recovery show once the daemon is running.")
+			fmt.Fprintln(c.Stdout, "Run keyward recovery show in Terminal.app once the daemon is running. An AI agent must ask the user to run it.")
 			return exitOK
 		}
 		return c.showRecovery()
@@ -66,8 +65,7 @@ func setupFiles(home, workdir string, named []string) []string {
 	}
 	var files []string
 	for _, path := range doctor.DefaultPaths(home, workdir) {
-		switch filepath.Base(path) {
-		case ".claude.json", "config.toml":
+		if doctor.IsMCPConfig(path) {
 			continue // MCP configs are step 3's
 		}
 		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {

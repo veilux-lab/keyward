@@ -156,8 +156,8 @@ type Agent struct {
 // Claude Code imports files with @; the others are asked to read it.
 var known = []struct{ name, dir, file, line string }{
 	{"Claude Code", ".claude", "CLAUDE.md", "@" + Display},
-	{"Codex", ".codex", "AGENTS.md", "Before running a command that needs credentials, read " + Display + "."},
-	{"Gemini CLI", ".gemini", "GEMINI.md", "Before running a command that needs credentials, read " + Display + "."},
+	{"Codex", ".codex", "AGENTS.md", "Before working with credentials or running keyward, read " + Display + "."},
+	{"Gemini CLI", ".gemini", "GEMINI.md", "Before working with credentials or running keyward, read " + Display + "."},
 }
 
 // Unlinked returns installed agents whose global instructions never mention the

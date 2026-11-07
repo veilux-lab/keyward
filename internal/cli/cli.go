@@ -26,6 +26,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/ledger"
+	"github.com/veilux-lab/keyward/internal/mcpconfig"
 	"github.com/veilux-lab/keyward/internal/migrate"
 	"github.com/veilux-lab/keyward/internal/resolve"
 	"github.com/veilux-lab/keyward/internal/vault"
@@ -126,16 +127,16 @@ Moves secrets out of your dotfiles into an encrypted vault and leaves cap://
 references behind, so an AI agent reading the files finds nothing to leak.
 
 commands:
-  setup [file...]        guided first run: secrets, agents, MCP servers, recovery code
+  setup [file...]        first run, in Terminal.app: secrets, agents, MCP, recovery code
   migrate <file>         move a file's secrets into the vault (asks first)
   run -- <command>       run a command with the real values
   add <name>             store a secret read from stdin
   ls                     list stored names
   rm <name>              remove a secret
-  doctor [file...]       check references, backups, exposed secrets, and setup
+  doctor [file...]       check references, plaintext and exposed secrets, backups, and setup
   restore <file>...      put the values back into files (asks first)
   backups [rm|recover]   list, remove, or recover migrate's backups
-  recovery show|restore  save or restore the vault's recovery code
+  recovery show|restore  save or restore the vault's recovery code, in Terminal.app
   agents [link|unlink]   point AI agents at keyward's instructions, or stop
   mcp [wrap|unwrap]      run MCP servers through keyward, or stop
   status | stop | start  check, pause, or resume the daemon
@@ -148,11 +149,12 @@ options:
   --all                  backups rm: remove every backup
   --purge                uninstall: also delete the vault and its Keychain key
   --only VAR,...         run: resolve only these variables
+  --allow-command-line   mcp wrap: also wrap a server whose URL reads a migrated secret
 
 examples:
   keyward setup
   pbpaste | keyward add github-token
-  keyward run -- npm test
+  keyward run --only GITHUB_TOKEN -- gh pr list
 `
 
 // Run dispatches a command and returns a process exit code.
@@ -252,7 +254,7 @@ func (c *CLI) dispatch(args []string) int {
 
 func (c *CLI) service(args []string) int {
 	if len(args) != 1 || !slices.Contains([]string{"install", "start", "stop", "status", "uninstall"}, args[0]) {
-		fmt.Fprintln(c.Stderr, "usage: keyward start|start|stop|status|uninstall")
+		fmt.Fprintln(c.Stderr, "usage: keyward service install|start|stop|status|uninstall")
 		return exitUsage
 	}
 	if c.Service == nil {
@@ -519,6 +521,7 @@ func (c *CLI) migrate(args []string) int {
 		for _, s := range plan.Blocked() {
 			fmt.Fprintf(c.Stdout, "\n  line %d  %s\n    %s\n", s.Line, s.Name, s.Reason)
 		}
+		fmt.Fprint(c.Stdout, plan.Unmovable())
 		return exitOK
 	}
 
@@ -526,10 +529,11 @@ func (c *CLI) migrate(args []string) int {
 	// to something unseen. The diff withholds values; see migrate.Plan.Diff.
 	fmt.Fprint(c.Stdout, paintLines(c.ColorOut, plan.Diff(), map[string]string{
 		"@@": cyan, "-": red, "+": green, "not moved, check these yourself:": yellow,
+		"credential-shaped text keyward cannot move:": yellow,
 	}))
 
 	if *dryRun {
-		fmt.Fprintf(c.Stdout, "\n%s\n%s", c.out(cyan, "Dry run: nothing was changed."), runReminder)
+		fmt.Fprintf(c.Stdout, "\n%s\n%s", c.out(cyan, "Dry run: nothing was changed."), runReminder(plan.Changes[0].Name))
 		return exitOK
 	}
 
@@ -549,8 +553,11 @@ func (c *CLI) migrate(args []string) int {
 		return c.fail("keyward migrate: %v", err)
 	}
 	c.recordRewrite(plan)
+	// keyward does not run git, which may not be installed, so it cannot tell a
+	// committed file from one never committed, such as a gitignored .env.
 	if migrate.InGitRepository(plan.Path) {
-		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("%s is in a git repository, so the values it held are still in its history. Rotate them: anyone with a copy of the repository can read them.", plan.Path)))
+		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("%s is in a git repository. If it was ever committed, the values it held are still in its history, where anyone with a copy can read them: "+
+			"rotate them, then store each new value with keyward add --force NAME.", plan.Path)))
 	}
 
 	fmt.Fprintf(c.Stdout, "\n%s\n", c.out(green, fmt.Sprintf("Stored %d secret(s): %s", len(applied.Stored), strings.Join(applied.Stored, ", "))))
@@ -569,9 +576,13 @@ func (c *CLI) migrate(args []string) int {
 	return exitOK
 }
 
-// runReminder says what changes for programs once the values are references.
-const runReminder = "After migrating, programs that read these variables must start through\n" +
-	"keyward run, for example `keyward run -- npm test`; otherwise they see cap:// references.\n"
+// runReminder says what changes for programs once the values are references, with
+// an example that names one, as keyward run without --only resolves them all.
+func runReminder(name string) string {
+	return "After migrating, start programs that read these variables through keyward run,\n" +
+		"naming them, for example `keyward run --only " + name + " -- npm test`; otherwise\n" +
+		"they see cap:// references.\n"
+}
 
 // confirmWord is the only accepted answer. Compared exactly, so a hurried "y" or a
 // capitalised "Yes" does not rewrite a shell config.
@@ -585,7 +596,7 @@ const confirmWord = "yes"
 func (c *CLI) confirm(count int, path string) (bool, error) {
 	fmt.Fprintf(c.Stderr, "\nMove %d value(s) out of %s and into keyward's encrypted vault?\n", count, path)
 	fmt.Fprintf(c.Stderr, "  The file will be rewritten. The original is first saved to an encrypted backup.\n")
-	fmt.Fprintf(c.Stderr, "  Afterwards, start commands that use these values as: keyward run -- <command>\n")
+	fmt.Fprintf(c.Stderr, "  Afterwards, start commands that use these values as: keyward run --only VAR -- <command>\n")
 	fmt.Fprintf(c.Stderr, "  %s\n\n  Enter a value: ", c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord)))
 	return c.readConfirmation()
 }
@@ -611,7 +622,7 @@ func (c *CLI) readConfirmation() (bool, error) {
 }
 
 // doctor reports on the health of the setup: references with nothing behind them,
-// and stored secrets nothing refers to.
+// credentials still in plaintext, and stored secrets nothing refers to.
 //
 // It never deletes. Removal stays a deliberate `keyward rm`, because doctor cannot
 // prove a secret is unused — only that it did not find a reference in the files it
@@ -623,22 +634,36 @@ func (c *CLI) doctor(args []string) int {
 	// makes every "unreferenced" verdict more trustworthy.
 	paths = append(paths, args...)
 
-	report, err := doctor.Run(c.Store, paths)
+	servers := c.mcpServers()
+	report, err := doctor.Run(c.Store, paths, servers)
 	if err != nil {
 		return c.fail("keyward doctor: %v", err)
 	}
 
 	fmt.Fprint(c.Stdout, report.String())
-	opens := c.checkVaultOpens()
+	problems := report.Problems()
+	if !c.checkVaultOpens() {
+		problems = append(problems, "the vault does not open")
+	}
 	if found, err := c.knownBackups(); err != nil {
 		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check for backups: %v", err)))
 	} else if len(found) > 0 {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
 	}
 	c.remindRecovery()
-	findings, _ := c.mcpFindings()
-	for _, problem := range mcpProblems(findings) {
+	here, elsewhere, allowed, passed, gone := c.checkServers(servers)
+	for _, problem := range mcpProblems(append(here, elsewhere...)) {
 		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+problem+"; see keyward mcp"))
+		problems = append(problems, problem)
+	}
+	if len(allowed) > 0 {
+		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+allowedProblem(len(allowed))+"; see keyward mcp"))
+	}
+	if len(passed) > 0 {
+		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+passedProblem(len(passed))+"; see keyward mcp"))
+	}
+	if note := c.skippedNote(gone); note != "" {
+		fmt.Fprintln(c.Stdout, "\n"+note)
 	}
 	if n := c.unlinkedAgents(); n > 0 {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d installed AI agent(s) do not read %s; run keyward agents link", n, agents.Display)))
@@ -654,10 +679,27 @@ func (c *CLI) doctor(args []string) int {
 		fmt.Fprintln(c.Stdout, c.out(red, fmt.Sprintf("\n%s is in the command line of %s (pid %d), where any process can read it.\n"+
 			"Start that program without it there (keyward mcp shows how for MCP servers), then rotate the secret.", e.Secret, e.Program, e.PID)))
 	}
-	if report.HasProblems() || len(exposed) > 0 || !opens {
+	if len(exposed) > 0 {
+		problems = append(problems, fmt.Sprintf("%d secret(s) in a running program's command line", len(exposed)))
+	}
+	// Last, so it sums up every check above; the reminders are advice, not problems.
+	if len(problems) > 0 {
+		fmt.Fprintln(c.Stdout, c.out(red, "\nProblems found: "+strings.Join(problems, "; ")+"."))
 		return exitFailure
 	}
+	fmt.Fprintln(c.Stdout, c.out(green, "\nNo problems found."))
 	return exitOK
+}
+
+// mcpServers reads the MCP servers of every client keyward knows, in every Claude
+// Code project, and says which configs it could not read.
+func (c *CLI) mcpServers() []mcpconfig.Server {
+	if c.Home == "" {
+		return nil
+	}
+	servers, errs := mcpconfig.LoadAll(c.Home, c.Workdir)
+	c.reportUnreadable(errs)
+	return servers
 }
 
 // checkVaultOpens decrypts one stored value, since keyward ls lists names without

@@ -2,6 +2,7 @@ package migrate_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +182,31 @@ func TestNewPlanLeavesUnexportedSecretsForTheUser(t *testing.T) {
 	}
 }
 
+// A line whose comment holds keyward:ignore stays as written, whatever Detect makes
+// of it, and needs no attention. doctor suggests the marker for GIT_AUTHOR_EMAIL;
+// moved, it would give git a reference as the author's email.
+func TestNewPlanLeavesMarkedLinesAlone(t *testing.T) {
+	content := "export GIT_AUTHOR_EMAIL=someone@example.com # keyward:ignore\n" +
+		"export BUILD_ID=Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i # keyward:ignore\n" +
+		"export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE # AWS's documented example, keyward:ignore\n" +
+		"export GITHUB_TOKEN=ghp_perfectlyFine0123456789\n"
+	p := mustPlan(t, "/tmp/.zshrc", content)
+
+	if len(p.Changes) != 1 || p.Changes[0].Name != "GITHUB_TOKEN" {
+		t.Fatalf("Changes = %+v, want only GITHUB_TOKEN", p.Changes)
+	}
+	var skipped []string
+	for _, s := range p.Skips {
+		if s.Reason != "marked keyward:ignore" || s.Actionable {
+			t.Errorf("%s: reason %q, actionable %v; want %q, not actionable", s.Name, s.Reason, s.Actionable, "marked keyward:ignore")
+		}
+		skipped = append(skipped, s.Name)
+	}
+	if want := "GIT_AUTHOR_EMAIL,BUILD_ID,AWS_ACCESS_KEY_ID"; strings.Join(skipped, ",") != want {
+		t.Errorf("Skips = %v, want %s", skipped, want)
+	}
+}
+
 // ===========================================================================
 // Diff
 // ===========================================================================
@@ -261,6 +287,328 @@ func TestDiffSeparatesSkipsNeedingAttention(t *testing.T) {
 	}
 	if strings.Contains(diff, "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i") {
 		t.Errorf("diff leaked a possible secret's value:\n%s", diff)
+	}
+}
+
+// ===========================================================================
+// Credential-shaped text keyward cannot move
+//
+// Comments, trailers, and lines the scanner does not parse are never rewritten,
+// and old tokens sit in them. The plan says where such text is, never what it is.
+// ===========================================================================
+
+// hide masks each fake value in out, so a failing test never prints one.
+func hide(out string, values ...string) string {
+	for _, v := range values {
+		out = strings.ReplaceAll(out, v, "<fake value>")
+	}
+	return out
+}
+
+// A comment beside a value often holds the token it replaced, in any of the shapes
+// credentials take. The rewritten line keeps it, so both sides of the diff show
+// only its length.
+func TestDiffHidesATrailerShapedLikeACredential(t *testing.T) {
+	const value = "ghp_exampleTokenValue0123456789"
+	for _, tt := range []struct{ shape, old string }{
+		{"prefix", "ghp_oldTokenValue0123456789abcdef"},
+		{"hex", "0123456789abcdef0123456789abcdef"},
+		{"UUID", "123e4567-e89b-12d3-a456-426614174000"},
+		{"split by slashes", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"named", "PGPASSWORD=s3cretpassw0rd"},
+	} {
+		t.Run(tt.shape, func(t *testing.T) {
+			diff := mustPlan(t, "/tmp/.zshrc", "export GITHUB_TOKEN="+value+"  # was "+tt.old+"\n").Diff()
+
+			if hide(diff, value, tt.old) != diff {
+				t.Errorf("diff shows a value:\n%s", hide(diff, value, tt.old))
+			}
+			hidden := fmt.Sprintf("  # <%d bytes hidden>\n", len(" was "+tt.old))
+			for _, want := range []string{
+				"-export GITHUB_TOKEN=<31 bytes hidden>" + hidden,
+				"+export GITHUB_TOKEN='cap://github-token'" + hidden,
+			} {
+				if !strings.Contains(diff, want) {
+					t.Errorf("diff lacks %q:\n%s", want, hide(diff, value, tt.old))
+				}
+			}
+		})
+	}
+}
+
+// Only what looks like a credential is hidden: a note about the value is part of
+// what the user approves.
+func TestDiffShowsAnOrdinaryTrailer(t *testing.T) {
+	p := mustPlan(t, "/tmp/.zshrc", "export GITHUB_TOKEN=ghp_exampleTokenValue0123456789 # work, see https://github.com/settings/tokens\n")
+	want := "+export GITHUB_TOKEN='cap://github-token' # work, see https://github.com/settings/tokens\n"
+	if diff := p.Diff(); !strings.Contains(diff, want) {
+		t.Errorf("diff lacks %q:\n%s", want, hide(diff, "ghp_exampleTokenValue0123456789"))
+	}
+}
+
+// One line of each kind keyward cannot move a value from.
+const unmovableRC = `# ~/.zshrc
+# export OPENAI_API_KEY=sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789
+export GITHUB_TOKEN=ghp_exampleTokenValue0123456789 # was ghp_oldTokenValue0123456789abcdef
+export EDITOR=vim # AKIAIOSFODNN7EXAMPLE
+alias gh='GITHUB_TOKEN=ghp_aliasTokenValue0123456789 gh'
+launchctl setenv NPM_TOKEN npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789
+declare -x VAULT_TOKEN=hvs.AbCdEfGhIjKlMnOpQrStUvWxYz
+set -gx ANTHROPIC_API_KEY sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx
+GOOGLE_API_KEY = AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz01234567
+export A=1 GITLAB_TOKEN=glpat-AbCdEfGhIjKlMnOpQrSt
+`
+
+// unmovableValues are unmovableRC's fake tokens, none of which may be printed.
+var unmovableValues = []string{
+	"sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+	"ghp_exampleTokenValue0123456789",
+	"ghp_oldTokenValue0123456789abcdef",
+	"AKIAIOSFODNN7EXAMPLE",
+	"ghp_aliasTokenValue0123456789",
+	"npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",
+	"hvs.AbCdEfGhIjKlMnOpQrStUvWxYz",
+	"sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx",
+	"AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz01234567",
+	"glpat-AbCdEfGhIjKlMnOpQrSt",
+}
+
+// Each line is reported by number and kind, in file order. A trailer on a line
+// that is rewritten says so: the user might take the whole line as dealt with.
+// The advice is doctor's: it says to rotate, and steers whoever fixes the lines,
+// an agent included, away from opening or printing them.
+func TestUnmovableReportsEachKindByLine(t *testing.T) {
+	out := mustPlan(t, "/tmp/.zshrc", unmovableRC).Unmovable()
+
+	want := "\ncredential-shaped text keyward cannot move:\n" +
+		"  line 2 (comment)\n" +
+		"  line 3 (trailer): it stays in the rewritten line; remove it by hand\n" +
+		"  line 4 (trailer)\n" +
+		"  line 5 (alias)\n" +
+		"  line 6 (launchctl)\n" +
+		"  line 7 (unsupported syntax)\n" +
+		"  line 8 (unsupported syntax)\n" +
+		"  line 9 (unsupported syntax)\n" +
+		"  line 10 (unsupported syntax)\n" +
+		"  Remove them by hand in an editor, then rotate any real credential. AI agents must not open or print these lines.\n" +
+		"  If a line holds no secret, end it with # keyward:ignore yourself, and keyward leaves the line alone; an AI agent must not.\n"
+	if out != want {
+		t.Errorf("Unmovable() =\n%s\nwant\n%s", hide(out, unmovableValues...), want)
+	}
+	if hide(out, unmovableValues...) != out {
+		t.Errorf("the report shows a value:\n%s", hide(out, unmovableValues...))
+	}
+}
+
+// The plan carries the report, ahead of the ordinary skips it would be lost in,
+// and still shows no value.
+func TestDiffIncludesTheUnmovableReport(t *testing.T) {
+	p := mustPlan(t, "/tmp/.zshrc", unmovableRC)
+	diff := p.Diff()
+
+	report := strings.Index(diff, "credential-shaped text keyward cannot move:")
+	alone := strings.Index(diff, "\nleft alone:")
+	if report < 0 || alone < 0 || report > alone || !strings.Contains(diff, p.Unmovable()) {
+		t.Errorf("the report is missing from the diff, or follows the ordinary skips:\n%s", hide(diff, unmovableValues...))
+	}
+	if hide(diff, unmovableValues...) != diff {
+		t.Errorf("diff shows a value:\n%s", hide(diff, unmovableValues...))
+	}
+}
+
+// The patterns: known prefixes, a URL with a password in it, long tokens that mix
+// upper case, lower case and digits, hex keys and UUIDs, and base64 that / splits.
+func TestUnmovableFindsCredentialShapes(t *testing.T) {
+	shapes := []string{
+		"old: ghp_exampleTokenValue0123456789",
+		"AKIAIOSFODNN7EXAMPLE",
+		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJl",
+		"Authorization: Bearer Qm2vLp7wRt4yNb8cFj1h",
+		"Authorization: Basic dXNlcjpwYXNzd29yZA==",
+		// Split so secret scanners do not report this fake token.
+		"xoxb-" + "123456789012-1234567890123-AbCdEfGhIjKlMnOp",
+		"postgres://admin:hunter2@db.internal/prod",
+		// The password is literal, though the path expands.
+		"curl https://admin:hunter2@db.internal/$DB",
+		"Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i",
+		// A line from the body of a private key.
+		"MIIEpAIBAAKCAQEA3Tz2mr7SZiAMfQyuvBjM9OiZ1BjP5CE",
+		"old: 0123456789abcdef0123456789abcdef",
+		"prev 123E4567-E89B-12D3-A456-426614174000",
+		// A hex key inside a longer token. Split so secret scanners do not report it.
+		"0123456789abcdef0123456789abcdef" + "-us12",
+		// A full stop does not hide the key.
+		"was wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY.",
+	}
+	var content strings.Builder
+	for _, s := range shapes {
+		content.WriteString("# " + s + "\n")
+	}
+	out := mustPlan(t, "/tmp/.zshrc", content.String()).Unmovable()
+
+	for i := range shapes {
+		if !strings.Contains(out, fmt.Sprintf("  line %d (comment)\n", i+1)) {
+			t.Errorf("line %d holds a credential shape but was not reported:\n%s", i+1, hide(out, shapes...))
+		}
+	}
+	if hide(out, shapes...) != out {
+		t.Errorf("the report shows a value:\n%s", hide(out, shapes...))
+	}
+}
+
+// An assignment keyward cannot move is judged as Detect judges a plain one, so a
+// secret too short or plain to look like one is still found by its name.
+func TestUnmovableFindsSecretsByName(t *testing.T) {
+	content := "# export PGPASSWORD=s3cretpassw0rd\n" +
+		"#ONCALL_TOKEN='Ab3dEf6hIj9lMn2pQr5t'\n" +
+		"declare -x METRICS_API_KEY=QX7RT2KL9MZ4WB8NC3VH\n" +
+		"export A=1 DB_PASSWORD=s3cretpassw0rd\n" +
+		"launchctl setenv DB_PASSWORD s3cretpassw0rd\n" +
+		"set -gx DB_PASSWORD 's3cretpassw0rd'\n" +
+		"DB_PASSWORD = s3cretpassw0rd\n" +
+		"export PGHOST=db.internal # PGPASSWORD=s3cretpassw0rd\n"
+	out := hide(mustPlan(t, "/tmp/.zshrc", content).Unmovable(), "s3cretpassw0rd", "Ab3dEf6hIj9lMn2pQr5t", "QX7RT2KL9MZ4WB8NC3VH")
+
+	want := "\ncredential-shaped text keyward cannot move:\n" +
+		"  line 1 (comment)\n" +
+		"  line 2 (comment)\n" +
+		"  line 3 (unsupported syntax)\n" +
+		"  line 4 (unsupported syntax)\n" +
+		"  line 5 (launchctl)\n" +
+		"  line 6 (unsupported syntax)\n" +
+		"  line 7 (unsupported syntax)\n" +
+		"  line 8 (trailer)\n"
+	if !strings.HasPrefix(out, want) {
+		t.Errorf("Unmovable() =\n%s\nwant it to begin\n%s", out, want)
+	}
+}
+
+// Ordinary rc lines stay out of the report, including URLs, paths, versions, long
+// identifiers, credentials the shell expands, and commented-out settings.
+func TestUnmovableLeavesOrdinaryLinesAlone(t *testing.T) {
+	ordinary := []string{
+		"# ~/.zshrc",
+		"# personal token, rotate monthly",
+		"# see https://github.com/Homebrew/brew/issues/12345",
+		"# see https://github.com/SomeOrganisation/SomeRepositoryName2024",
+		"# https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html",
+		"# python user base: /Users/me/Library/Python/3.11/bin",
+		"# notes are in Documents/PersonalNotes/ObsidianVaultBackups",
+		"alias proj='cd $HOME/Projects2024/SomeVeryLongProjectName'",
+		"alias ext='cd /Volumes/ExternalDrive2024/SomeVeryLongFolderName'",
+		"# placeholders: 00000000-0000-0000-0000-000000000000, ffffffff-ffff-ffff-ffff-ffffffffffff",
+		`# export CPPFLAGS="-I/Library/Developer/CommandLineTools/SDKs/MacOSX14.sdk/usr/include"`,
+		"# Uses Bearer authentication; sk-SK is the Slovak locale",
+		"# Basic Authentication for the proxy, Bearer Authentication upstream",
+		"# git clone https://oauth2:$GITLAB_TOKEN@gitlab.com/group/repo.git",
+		"alias gc='git clone https://${GH_USER}:${GH_TOKEN}@github.com/org/repo.git'",
+		`# export SSH_KEY_PATH="~/.ssh/rsa_id"`,
+		"# export LANG=en_US.UTF-8",
+		"# SomeVeryLongJavaClassNameFactoryBean, python3-pip-install-requirements-2024",
+		"# ssh://git@github.com/veilux-lab/keyward.git",
+		"# >>> conda initialize >>>",
+		`__conda_setup="$('/opt/homebrew/Caskroom/miniforge/base/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"`,
+		"typeset -g POWERLEVEL9K_INSTANT_PROMPT=verbose",
+		"alias k='kubectl --context arn:aws:eks:us-west-2:123456789012:cluster/prod'",
+		"launchctl setenv PATH /usr/local/bin:/usr/bin:/bin",
+		"set -gx PATH /opt/homebrew/bin $PATH",
+		"set -gx SSH_KEY_PATH '~/.ssh/id_ed25519'",
+		`[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm`,
+		"export EDITOR=vim # see https://github.com/veilux-lab/keyward/pull/21",
+	}
+	p := mustPlan(t, "/tmp/.zshrc", strings.Join(ordinary, "\n")+"\n")
+	if out := p.Unmovable(); out != "" {
+		t.Errorf("ordinary lines were reported:\n%s", out)
+	}
+}
+
+// A line known to hold no secret, such as a documented example, can be marked in
+// its comment so it is not reported again. Only a comment as the shell reads one
+// counts: a marker in a quoted value or inside a word neither stops NewPlan moving
+// the line nor hides the line here.
+func TestUnmovableHonoursTheIgnoreMarker(t *testing.T) {
+	content := "# AWS's documented example key: AKIAIOSFODNN7EXAMPLE  keyward:ignore\n" +
+		"alias demo='echo ghp_exampleTokenValue0123456789' # keyward:ignore\n" +
+		"export EDITOR=vim # AKIAIOSFODNN7EXAMPLE, keyward:ignore\n" +
+		"alias demo2='echo ghp_exampleTokenValue0123456789 keyward:ignore'\n" +
+		`export GIT_AUTHOR_EMAIL="someone@example.com#keyward:ignore" # old ghp_exampleTokenValue0123456789` + "\n" +
+		`export A="x#keyward:ignore" GITHUB_TOKEN=ghp_exampleTokenValue0123456789` + "\n" +
+		`alias demo3="echo \"ghp_exampleTokenValue0123456789 #keyward:ignore"` + "\n" +
+		"alias demo4=ghp_exampleTokenValue0123456789#keyward:ignore\n"
+	out := hide(mustPlan(t, "/tmp/.zshrc", content).Unmovable(), "AKIAIOSFODNN7EXAMPLE", "ghp_exampleTokenValue0123456789")
+
+	want := "\ncredential-shaped text keyward cannot move:\n  line 4 (alias)\n" +
+		"  line 5 (trailer): it stays in the rewritten line; remove it by hand\n" +
+		"  line 6 (unsupported syntax)\n" +
+		"  line 7 (alias)\n" +
+		"  line 8 (alias)\n"
+	if !strings.HasPrefix(out, want) {
+		t.Errorf("Unmovable() =\n%s\nwant it to begin\n%s", out, want)
+	}
+	if !strings.Contains(out, "keyward:ignore") {
+		t.Errorf("the report does not say how to mark a line that holds no secret:\n%s", out)
+	}
+}
+
+// The note about a kept trailer follows the plan that is approved: a change Check
+// turns into a skip leaves its line, trailer and all, as it was.
+func TestUnmovableNotesOnlyLinesStillRewritten(t *testing.T) {
+	content := "export SPLUNK_MCP_TOKEN=eyJaNewValue0123456789 # was eyJanOlderValue0123456789AbCd\n" +
+		"export GITHUB_TOKEN=ghp_exampleTokenValue0123456789 # was ghp_oldTokenValue0123456789abcdef\n"
+	p := mustPlan(t, "/tmp/.zshrc", content)
+	store := vault.NewMemory()
+	if err := store.Seed(map[string]string{"splunk-mcp-token": "eyJanOlderValue"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := p.Check(store); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+
+	out := hide(p.Unmovable(), "eyJaNewValue0123456789", "eyJanOlderValue0123456789AbCd",
+		"ghp_exampleTokenValue0123456789", "ghp_oldTokenValue0123456789abcdef")
+	for _, want := range []string{
+		"  line 1 (trailer)\n",
+		"  line 2 (trailer): it stays in the rewritten line; remove it by hand\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Unmovable() lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// doctor fails only on text this scan says has a known shape, as Detect says of a
+// value: a prefix or URL credentials at a credential's length, or an assignment
+// Detect gives one. A name, randomness, or a value too short for its shape only
+// suggests a credential.
+func TestUnmovableSaysWhichTextHasAKnownShape(t *testing.T) {
+	content := "# old: ghp_exampleTokenValue0123456789\n" +
+		"export EDITOR=vim # AKIAIOSFODNN7EXAMPLE\n" +
+		"alias db='psql postgres://admin:hunter2@db.internal/prod'\n" +
+		// Too plain to look like a token in text, but Detect knows its shape.
+		"declare -x GITHUB_TOKEN=ghp_aaaaaaaaaaaaaaaaaaaaaaaa\n" +
+		"# export PGPASSWORD=s3cretpassw0rd\n" +
+		"# export GIT_AUTHOR_EMAIL=someone@example.com\n" +
+		"# old: 0123456789abcdef0123456789abcdef\n" +
+		"# Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i\n" +
+		"# was wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n" +
+		"# old: ghp_Ab3dEf6hIj9l\n" +
+		"# ftp://me:pw@host\n" +
+		// Without NAME=, as Detect measures them, these URLs are too short.
+		"# export DATABASE_URL=ftp://me:pw@host\n" +
+		"export B=1 DATABASE_URL=ftp://me:pw@host\n"
+
+	var got []string
+	for _, u := range migrate.Scan([]byte(content)).Unmovable() {
+		got = append(got, fmt.Sprintf("%d %s %v", u.Line, u.Kind, u.KnownShape))
+	}
+	want := []string{
+		"1 comment true", "2 trailer true", "3 alias true", "4 unsupported syntax true",
+		"5 comment false", "6 comment false", "7 comment false", "8 comment false",
+		"9 comment false", "10 comment false", "11 comment false", "12 comment false",
+		"13 unsupported syntax false",
+	}
+	if strings.Join(got, ", ") != strings.Join(want, ", ") {
+		t.Errorf("Unmovable() = %v\nwant %v", got, want)
 	}
 }
 

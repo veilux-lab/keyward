@@ -14,6 +14,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/doctor"
 	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/mcpconfig"
+	"github.com/veilux-lab/keyward/internal/migrate"
 	"github.com/veilux-lab/keyward/internal/restore"
 )
 
@@ -39,7 +40,7 @@ func (c *CLI) uninstall(args []string) int {
 		return c.fail("keyward uninstall: %v; nothing was changed", err)
 	}
 	// Purging while something still points at the vault would strand it for good.
-	if *purge && (len(p.manual) > 0 || len(p.files.Skipped) > 0) {
+	if *purge && (len(p.manual) > 0 || len(p.gone) > 0 || len(p.files.Skipped) > 0 || len(p.unset) > 0) {
 		return c.fail("keyward uninstall --purge: these would still use stored secrets after uninstall. Change them first, then run it again:\n%s",
 			p.leftForUser(c))
 	}
@@ -166,6 +167,14 @@ type offboarding struct {
 	backups       []backup.Backup
 	dirs          []string
 	ownsAgentFile bool
+	// gone are servers of Claude Code projects whose folder no longer exists,
+	// where Claude Code's CLI cannot run to change them.
+	gone []mcpconfig.Finding
+	// folders hold a .mcp.json the ledger says wrap changed, kept for the check
+	// at the end, after the ledger is gone.
+	folders []string
+	// unset are servers that, changed back, read a variable no file sets.
+	unset []unset
 }
 
 func (c *CLI) offboardingPlan() (offboarding, error) {
@@ -190,16 +199,24 @@ func (c *CLI) offboardingPlan() (offboarding, error) {
 			p.links = append(p.links, r)
 		case ledger.Dir:
 			p.dirs = append(p.dirs, r.Path)
+		case ledger.Server:
+			if filepath.Base(r.Path) == ".mcp.json" {
+				p.folders = append(p.folders, filepath.Dir(r.Path))
+			}
 		}
 	}
-	servers, _ := c.mcpUndo()
-	for _, s := range servers {
-		// MCP configs are changed through their tools, never restored as text.
+	// MCP configs are changed through their tools, never restored as text: those
+	// whose servers were read, and the Claude Code and Codex configs, which can
+	// mention a reference outside a server, as in a prompt's history.
+	loaded, servers := c.everyWrapped(p.folders)
+	for _, s := range loaded {
 		file, _, _ := strings.Cut(s.Config, " (project ")
 		delete(inUse, file)
 	}
 	for path := range inUse {
-		p.paths = append(p.paths, path)
+		if !doctor.IsMCPConfig(path) {
+			p.paths = append(p.paths, path)
+		}
 	}
 	slices.Sort(p.paths)
 	if p.files, err = restore.Read(c.Store, p.paths); err != nil {
@@ -210,12 +227,16 @@ func (c *CLI) offboardingPlan() (offboarding, error) {
 	var haveClaude bool
 	p.claude, haveClaude = c.findClaude()
 	for _, f := range servers {
-		if f.Client == "Claude Code" && haveClaude && c.Interactive {
+		switch {
+		case mcpconfig.Gone(f.Project):
+			p.gone = append(p.gone, f)
+		case f.Client == "Claude Code" && haveClaude && c.Interactive && len(c.heldCredentials(f)) == 0:
 			p.viaClaude = append(p.viaClaude, f)
-		} else {
+		default:
 			p.manual = append(p.manual, f)
 		}
 	}
+	p.unset = unsetIn(slices.Concat(p.viaClaude, p.manual), slices.Concat(c.variableFiles(), p.paths))
 	for _, config := range agents.Linked(c.Home) {
 		if !slices.ContainsFunc(p.links, func(r ledger.Record) bool { return r.Path == config }) {
 			p.handLinks = append(p.handLinks, config)
@@ -242,8 +263,14 @@ func (c *CLI) uninstallPlan(p offboarding, purge bool) string {
 	if len(p.viaClaude) > 0 {
 		next("Change %d Claude Code MCP server(s) back to start without keyward:", len(p.viaClaude))
 		for _, f := range p.viaClaude {
+			indent := "     "
+			// Another project's server is changed in its folder.
+			if f.Project != "" && f.Project != c.Workdir {
+				fmt.Fprintf(&b, "%sIn %s:\n", indent, c.tilde(f.Project))
+				indent += "  "
+			}
 			for _, line := range p.claude.Commands(f) {
-				fmt.Fprintf(&b, "     %s\n", line)
+				fmt.Fprintf(&b, "%s%s\n", indent, line)
 			}
 		}
 	}
@@ -295,7 +322,23 @@ func (c *CLI) uninstallPlan(p offboarding, purge bool) string {
 func (p offboarding) leftForUser(c *CLI) string {
 	var b strings.Builder
 	for _, f := range p.manual {
-		fmt.Fprintf(&b, "  MCP server %s (%s, %s): keyward mcp unwrap shows the change\n", f.Name, f.Client, c.tilde(f.Config))
+		if fields := c.heldCredentials(f); len(fields) > 0 {
+			fmt.Fprintf(&b, "  MCP server %s (%s, %s): %s, then run keyward uninstall again\n", f.Name, f.Client, c.tilde(f.Config), credentialsReason(fields))
+			continue
+		}
+		unwrap := "keyward mcp unwrap"
+		if f.Project != "" && f.Project != c.Workdir {
+			unwrap += " in " + c.tilde(f.Project)
+		}
+		fmt.Fprintf(&b, "  MCP server %s (%s, %s): %s shows the change\n", f.Name, f.Client, c.tilde(f.Config), unwrap)
+	}
+	for _, f := range p.gone {
+		file, _, _ := strings.Cut(f.Config, " (project ")
+		fmt.Fprintf(&b, "  MCP server %s (%s, %s): its project's folder no longer exists; with Claude Code closed, remove the server from %s\n",
+			f.Name, f.Client, c.tilde(f.Config), c.tilde(file))
+	}
+	for _, u := range p.unset {
+		fmt.Fprintf(&b, "  MCP server %s (%s, %s): %s\n", u.Name, u.Client, c.tilde(u.Config), u.fix())
 	}
 	for _, config := range p.handLinks {
 		fmt.Fprintf(&b, "  %s: remove the keyward.md line you added\n", c.tilde(config))
@@ -304,6 +347,79 @@ func (p offboarding) leftForUser(c *CLI) string {
 		fmt.Fprintf(&b, "  %s: %s\n", c.tilde(issue.Location()), issue.Reason)
 	}
 	return b.String()
+}
+
+// unset is a server that, changed back, reads variables from its client's
+// environment, as each reference in its env becomes a variable of the same name,
+// that no file sets.
+type unset struct {
+	mcpconfig.Finding
+	vars []string
+}
+
+// fix says how to set them first, so that restoring puts each value there.
+func (u unset) fix() string {
+	exports := make([]string, len(u.vars))
+	for i, v := range u.vars {
+		exports[i] = "export " + v + "='" + u.Env[v] + "'"
+	}
+	return "once changed back, it reads " + strings.Join(u.vars, ", ") + ", which no file sets; first add " + strings.Join(exports, " and ") + " to ~/.zshrc"
+}
+
+// unsetIn returns each of findings that, changed back, reads a variable none of
+// files sets.
+func unsetIn(findings []mcpconfig.Finding, files []string) []unset {
+	set := map[string]bool{}
+	for _, path := range files {
+		if content, err := os.ReadFile(path); err == nil {
+			for _, a := range migrate.Scan(content).Assignments {
+				set[a.Name] = true
+			}
+		}
+	}
+	var found []unset
+	for _, f := range findings {
+		var vars []string
+		for _, v := range f.Vars {
+			if !set[v] {
+				vars = append(vars, v)
+			}
+		}
+		if len(vars) > 0 {
+			found = append(found, unset{f, vars})
+		}
+	}
+	return found
+}
+
+// variableFiles names the files that can set what a server reads from its
+// client's environment: those doctor reads but MCP configs, and each file the
+// ledger says migrate rewrote.
+func (c *CLI) variableFiles() []string {
+	var files []string
+	for _, path := range doctor.DefaultPaths(c.Home, c.Workdir) {
+		if !doctor.IsMCPConfig(path) {
+			files = append(files, path)
+		}
+	}
+	records, _ := c.Ledger.Records()
+	for _, r := range records {
+		if r.Kind == ledger.Rewrite {
+			files = append(files, r.Path)
+		}
+	}
+	return files
+}
+
+// everyWrapped reads the MCP servers of every client keyward knows, in every
+// Claude Code project and in each of folders, as wrap changes each project's in
+// its folder, and returns them and those that start through keyward.
+func (c *CLI) everyWrapped(folders []string) ([]mcpconfig.Server, []mcpconfig.Finding) {
+	if c.Home == "" {
+		return nil, nil
+	}
+	servers, _ := mcpconfig.LoadAll(c.Home, c.Workdir, folders...)
+	return servers, mcpconfig.Undo(servers)
 }
 
 // residue checks the places keyward writes to and reports what is still there.
@@ -353,10 +469,12 @@ func (c *CLI) residue(purge bool, p offboarding) []string {
 			left = append(left, c.tilde(path)+" still has cap:// references")
 		}
 	}
-	if servers, _ := c.mcpUndo(); len(servers) > 0 {
-		for _, s := range servers {
-			left = append(left, fmt.Sprintf("MCP server %s still starts through keyward (%s)", s.Name, c.tilde(s.Config)))
-		}
+	_, servers := c.everyWrapped(p.folders)
+	for _, s := range servers {
+		left = append(left, fmt.Sprintf("MCP server %s still starts through keyward (%s)", s.Name, c.tilde(s.Config)))
+	}
+	for _, u := range p.unset {
+		left = append(left, fmt.Sprintf("MCP server %s reads %s, which no file sets (%s)", u.Name, strings.Join(u.vars, ", "), c.tilde(u.Config)))
 	}
 	for _, config := range agents.Linked(c.Home) {
 		left = append(left, c.tilde(config)+" still mentions keyward.md")

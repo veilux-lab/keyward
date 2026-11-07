@@ -135,3 +135,31 @@ func TestAgentsLinkWithoutATerminalOnlyPrints(t *testing.T) {
 		t.Errorf("output lacks the command:\n%s", h.out())
 	}
 }
+
+// An agent linked with the line an earlier keyward wrote stays linked, and unlink
+// removes that line by the text the ledger recorded.
+func TestAgentsLinkedWithAnEarlierLineStayLinkedAndUnlink(t *testing.T) {
+	const earlier = "Before running a command that needs credentials, read ~/.agents/keyward.md."
+	h := newHarness(t, "yes\n", nil, nil)
+	home := homed(t, h)
+	h.cli.Interactive = true
+	codex := filepath.Join(home, ".codex", "AGENTS.md")
+	os.MkdirAll(filepath.Dir(codex), 0o755)
+	os.WriteFile(codex, []byte("# my rules\n"+earlier+"\n"), 0o644)
+	if err := h.cli.Ledger.Add(ledger.Record{Kind: ledger.Link, Path: codex, Text: earlier}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := agents.Linked(home); len(got) != 1 || got[0] != codex {
+		t.Errorf("Linked = %v, want Codex", got)
+	}
+	if code := h.cli.Run([]string{"agents", "link"}); code != 0 || !strings.Contains(h.out(), "Every installed agent already reads") {
+		t.Errorf("link exit %d, want 0 and every agent linked:\n%s", code, h.out())
+	}
+	if code := h.cli.Run([]string{"agents", "unlink"}); code != 0 {
+		t.Fatalf("unlink exit %d: %s", code, h.err())
+	}
+	if data, _ := os.ReadFile(codex); string(data) != "# my rules\n" {
+		t.Errorf("AGENTS.md after unlink = %q", data)
+	}
+}

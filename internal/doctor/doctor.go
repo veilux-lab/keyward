@@ -1,10 +1,11 @@
 // Package doctor reports on the health of a keyward setup.
 //
-// It answers two questions. Does anything reference a secret that is not there —
-// which breaks a command the moment it runs. And is anything stored that nothing
-// references any more.
+// It answers three questions. Does anything reference a secret that is not there —
+// which breaks a command the moment it runs. Is a credential still in plaintext
+// where an agent can read it. And is anything stored that nothing references any
+// more.
 //
-// The second question cannot be answered by looking at files alone. A secret might
+// The last question cannot be answered by looking at files alone. A secret might
 // be referenced somewhere doctor never read, or added by hand and referenced by
 // nothing on purpose. So doctor only calls something orphaned when provenance names
 // a file it actually scanned and that file no longer mentions it. Everything else
@@ -15,12 +16,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/mcpconfig"
+	"github.com/veilux-lab/keyward/internal/migrate"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
@@ -29,6 +33,22 @@ type Reference struct {
 	Name string
 	File string
 	Line int
+}
+
+// Plaintext is an assignment in a scanned file whose value looks like a
+// credential, located by file, line and variable.
+type Plaintext struct {
+	File string
+	Line int
+	Name string
+	migrate.Detection
+}
+
+// Unmovable is text in a scanned file that looks like a credential and that
+// migrate cannot move, such as a comment, located by file, line and kind.
+type Unmovable struct {
+	File string
+	migrate.UnmovableLine
 }
 
 // Finding is a stored secret that nothing scanned refers to, with an explanation
@@ -53,6 +73,13 @@ type Report struct {
 	Malformed []Reference
 	Dangling  []Reference
 
+	// Plaintext, Unmovable and Literals look like credentials: values in the
+	// files, other text in them, and values in MCP server definitions. Those of a
+	// known shape are problems; the rest only may be credentials.
+	Plaintext []Plaintext
+	Unmovable []Unmovable
+	Literals  []mcpconfig.Literal
+
 	// Orphaned is verifiably unused: provenance names a scanned file that no longer
 	// references it.
 	Orphaned []Finding
@@ -64,26 +91,65 @@ type Report struct {
 	Referenced []string
 }
 
-// HasProblems reports whether anything found will break a command. Orphans and
-// unknowns do not count: they cost a line of output, not a failure.
-func (r *Report) HasProblems() bool {
-	return len(r.Dangling) > 0 || len(r.Malformed) > 0
+// Problems names each kind of problem found, with its count. A dangling or
+// malformed reference breaks a command; a credential in plaintext is open to any
+// agent. Orphans, unknowns and values that only may be credentials do not count:
+// they cost a line of output, not a failure.
+func (r *Report) Problems() []string {
+	var problems []string
+	if n := len(r.Dangling); n > 0 {
+		problems = append(problems, fmt.Sprintf("%d reference(s) to secrets that are not in the vault", n))
+	}
+	if n := len(r.Malformed); n > 0 {
+		problems = append(problems, fmt.Sprintf("%d malformed reference(s)", n))
+	}
+	if certain, _ := r.plaintextEntries(); len(certain) > 0 {
+		problems = append(problems, fmt.Sprintf("%d credential(s) in plaintext", len(certain)))
+	}
+	return problems
 }
 
-// Run scans paths and compares what they reference against what is stored.
+// Run scans paths and the configs servers were read from, compares what they
+// reference against what is stored, and looks for credentials still in plaintext
+// in those files and in servers.
 //
 // A path that does not exist is recorded in Absent rather than failing: the default
 // set includes files many machines will not have.
-func Run(store vault.Store, paths []string) (*Report, error) {
-	r := &Report{}
+func Run(store vault.Store, paths []string, servers []mcpconfig.Server) (*Report, error) {
+	r := &Report{Literals: mcpconfig.Literals(servers)}
 
-	// refs maps a name to every place it is referenced.
+	// refs maps a name, lowercased as keyward run reads it, to every place it is
+	// referenced.
 	refs := make(map[string][]Reference)
 	// scanned lets provenance be judged: a file absent from this set was never
 	// looked at, so it can prove nothing.
 	scanned := make(map[string]bool)
+	// seen keeps a file named twice, perhaps by a relative path, from being
+	// counted twice.
+	seen := make(map[string]bool)
+	// configs names the MCP configs whose servers were read, such as a
+	// project's .mcp.json, beyond those IsMCPConfig names. Each is scanned for
+	// references too: keyward run resolves one in a server's env, so a secret
+	// only a server's config names is still in use.
+	configs := make(map[string]bool)
+	files := slices.Clone(paths)
+	for _, s := range servers {
+		file, _, _ := strings.Cut(s.Config, " (project ")
+		if !configs[file] {
+			configs[file] = true
+			files = append(files, file)
+		}
+	}
 
-	for _, path := range paths {
+	for _, path := range files {
+		key := path
+		if abs, err := filepath.Abs(path); err == nil {
+			key = abs
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		content, err := os.ReadFile(path)
 		if err != nil {
 			// Unreadable and missing are the same thing here: no evidence either way.
@@ -95,9 +161,17 @@ func Run(store vault.Store, paths []string) (*Report, error) {
 
 		valid, malformed := scanReferences(path, content)
 		for _, ref := range valid {
-			refs[ref.Name] = append(refs[ref.Name], ref)
+			name, _ := handle.Normalize(ref.Name)
+			refs[name] = append(refs[name], ref)
 		}
 		r.Malformed = append(r.Malformed, malformed...)
+		// MCP configs are checked through their servers: read as shell, they
+		// would count a token twice.
+		if !IsMCPConfig(path) && !configs[key] {
+			plaintext, unmovable := scanPlaintext(path, content)
+			r.Plaintext = append(r.Plaintext, plaintext...)
+			r.Unmovable = append(r.Unmovable, unmovable...)
+		}
 	}
 
 	entries, err := store.Entries()
@@ -200,6 +274,28 @@ func scanReferences(path string, content []byte) (valid, malformed []Reference) 
 	return valid, malformed
 }
 
+// scanPlaintext finds assignments whose value still looks like a credential, and
+// the credential-shaped text migrate cannot move. It calls Detect itself rather
+// than building a migration plan, which refuses a whole file when two names
+// collide. A line whose comment holds migrate.IgnoreMarker is left out.
+func scanPlaintext(path string, content []byte) ([]Plaintext, []Unmovable) {
+	f := migrate.Scan(content)
+	var found []Plaintext
+	for _, a := range f.Assignments {
+		if strings.Contains(a.Trailer, migrate.IgnoreMarker) {
+			continue
+		}
+		if d := migrate.Detect(a.Name, a.Value); d.Secret || d.Possible {
+			found = append(found, Plaintext{File: path, Line: a.Line, Name: a.Name, Detection: d})
+		}
+	}
+	var unmovable []Unmovable
+	for _, u := range f.Unmovable() {
+		unmovable = append(unmovable, Unmovable{File: path, UnmovableLine: u})
+	}
+	return found, unmovable
+}
+
 // InUse counts, per file, the references to secrets that are stored. It reads
 // paths plus every file a stored secret was migrated from, so a file outside the
 // defaults is still found. Missing and unreadable files are skipped.
@@ -286,8 +382,86 @@ func sortFindings(f []Finding) {
 	sort.Slice(f, func(i, j int) bool { return f[i].Name < f[j].Name })
 }
 
+// plaintextEntries renders each value that looks like a credential, with how to
+// move it out: those of a known shape, and those that only may be credentials.
+func (r *Report) plaintextEntries() (certain, possible []string) {
+	add := func(known bool, where, reason, fix string) {
+		if !known {
+			fix = "if it is one, " + fix
+		}
+		entry := fmt.Sprintf("  %s\n      %s\n      %s\n", where, reason, fix)
+		if known {
+			certain = append(certain, entry)
+		} else {
+			possible = append(possible, entry)
+		}
+	}
+	for _, p := range r.Plaintext {
+		ref, err := migrate.RefName(p.Name)
+		if err != nil {
+			ref = "NAME"
+		}
+		// keyward add only stores a copy, so the variable is set to the reference too.
+		fix := fmt.Sprintf("store it with keyward add %s and set %s to 'cap://%s'", ref, p.Name, ref)
+		if p.Secret {
+			fix = "move it with keyward migrate " + p.File + " (preview with --dry-run), or " + fix
+		} else {
+			fix += "; migrate moves only values it is sure of"
+		}
+		add(p.KnownShape, fmt.Sprintf("%s:%d  %s", p.File, p.Line, p.Name), p.Reason, fix)
+	}
+	for _, u := range r.Unmovable {
+		add(u.KnownShape, fmt.Sprintf("%s:%d  (%s)", u.File, u.Line, u.Kind), "credential-shaped text keyward cannot move", "remove it by hand in an editor")
+	}
+	// keyward run resolves only its environment, so a field outside env reads a
+	// reference through a variable. One in env does too, of its own name: unwrap
+	// and uninstall read it from that, which restoring ~/.zshrc then sets. wrap
+	// changes a project's server in its folder, which must still exist.
+	for _, l := range r.Literals {
+		field, _, _ := strings.Cut(l.Field, " (")
+		fix := "store it with keyward add NAME, write ${VAR} in its place, add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"
+		key, inEnv := strings.CutPrefix(field, "env.")
+		switch name, inHTTPHeaders := strings.CutPrefix(field, "http_headers."); {
+		case inEnv && l.Client == "Codex":
+			// Codex fills no variable in env, but passes on those env_vars names.
+			fix = "store it with keyward add NAME, remove it and add " + strconv.Quote(key) + " to env_vars, add export " + key + "='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"
+		case inEnv:
+			placeholder := "${" + key + "}"
+			if l.Client == "Cursor" {
+				placeholder = "${env:" + key + "}"
+			}
+			fix = "store it with keyward add NAME, write " + placeholder + " in its place, add export " + key + "='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"
+		case inHTTPHeaders:
+			// Codex fills a variable only in the headers env_http_headers names.
+			fix = "store it with keyward add NAME, move it to env_http_headers = { " + strconv.Quote(name) + " = \"VAR\" }, "
+			if strings.EqualFold(name, "Authorization") {
+				fix += "or for a Bearer token, store the token alone and use bearer_token_env_var = \"VAR\"; "
+			}
+			fix += "add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"
+		case field == "url" || strings.HasSuffix(l.Field, "(its mcp-remote URL)"):
+			// mcp-remote puts the URL in its command line, so wrap puts a migrated
+			// secret there only if given --allow-command-line.
+			header := "as ${VAR}"
+			if l.Client == "Codex" {
+				header = "with env_http_headers = { \"HEADER\" = \"VAR\" }"
+			}
+			fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header " + header + ", if the server takes it there, " +
+				"or else write ${VAR} in its place, which wrap puts in mcp-remote's command line and log only if given --allow-command-line; then run keyward mcp wrap"
+		}
+		switch config, _, _ := strings.Cut(l.Config, " (project "); {
+		case mcpconfig.Gone(l.Project):
+			fix = "remove the server from " + config + " by hand, with Claude Code closed, as its project's folder no longer exists"
+		case l.Project != "":
+			fix += " in " + l.Project
+		}
+		add(l.KnownShape, fmt.Sprintf("%s  %s server %s, %s", l.Config, l.Client, l.Server, l.Field), l.Reason, fix)
+	}
+	return certain, possible
+}
+
 // String renders the report. Problems come first, because a dangling reference
-// breaks a command now while an orphan costs a line of output.
+// breaks a command now while an orphan costs a line of output. The verdict is
+// left to the caller, which has checks of its own to print first.
 func (r *Report) String() string {
 	var b strings.Builder
 
@@ -316,6 +490,23 @@ func (r *Report) String() string {
 		}
 	}
 
+	certain, possible := r.plaintextEntries()
+	if len(certain) > 0 {
+		fmt.Fprintf(&b, "\n%d credential(s) in plaintext:\n%s", len(certain), strings.Join(certain, ""))
+		// Rotating leaves the vault with the old value. The user makes these changes;
+		// an agent that opens a line reads the secret.
+		b.WriteString("Then rotate each one, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to fix them.\n")
+		// A value of a known shape can still be an example or a test fixture.
+		if slices.ContainsFunc(r.Plaintext, func(p Plaintext) bool { return p.KnownShape }) || slices.ContainsFunc(r.Unmovable, func(u Unmovable) bool { return u.KnownShape }) {
+			b.WriteString("If one of these lines holds no secret, end it with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n")
+		}
+	}
+	if len(possible) > 0 {
+		fmt.Fprintf(&b, "\n%d value(s) that may be credentials:\n%s", len(possible), strings.Join(possible, ""))
+		b.WriteString("Rotate each one that is a credential, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to judge them.\n" +
+			"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n")
+	}
+
 	if len(r.Orphaned) > 0 {
 		fmt.Fprintf(&b, "\n%d secret(s) whose source no longer references them:\n", len(r.Orphaned))
 		for _, f := range r.Orphaned {
@@ -331,9 +522,6 @@ func (r *Report) String() string {
 	}
 
 	fmt.Fprintf(&b, "\n%d secret(s) stored and referenced.\n", len(r.Referenced))
-	if !r.HasProblems() {
-		b.WriteString("No problems found.\n")
-	}
 	return b.String()
 }
 
@@ -358,4 +546,11 @@ func DefaultPaths(home, workdir string) []string {
 		paths = append(paths, filepath.Join(workdir, ".env"))
 	}
 	return paths
+}
+
+// IsMCPConfig reports whether path is the Claude Code or Codex config among the
+// default paths. keyward reads the MCP servers in those, not their lines.
+func IsMCPConfig(path string) bool {
+	return filepath.Base(path) == ".claude.json" ||
+		filepath.Base(path) == "config.toml" && filepath.Base(filepath.Dir(path)) == ".codex"
 }

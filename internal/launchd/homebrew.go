@@ -100,7 +100,7 @@ func (h Homebrew) Run(action string) (string, error) {
 		}
 		return runningMessage + "\n  After an upgrade, macOS asks once to let it read the vault key.", nil
 	default:
-		return "", errors.New("usage: keyward start|start|stop|status|uninstall")
+		return "", errors.New("usage: keyward service install|start|stop|status|uninstall")
 	}
 }
 

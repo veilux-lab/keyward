@@ -54,10 +54,38 @@ func TestSetupSkipsADeclinedStep(t *testing.T) {
 	}
 }
 
+// When step 4 does not show the code itself, it names Terminal.app and sends an
+// agent to the user, as the refusals do.
+func TestSetupPointsRecoveryShowAtTerminalApp(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		shown bool
+	}{{"no daemon", false}, {"already shown", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, "", nil, nil)
+			dir := homed(t, h)
+			h.cli.Interactive = true
+			if tc.shown {
+				h.cli.RecoveryMarker = filepath.Join(dir, "recovery-shown")
+				os.WriteFile(h.cli.RecoveryMarker, nil, 0o600)
+			}
+			h.cli.Run([]string{"setup"})
+			_, step4, _ := strings.Cut(h.out(), "Step 4 of 4")
+			for _, want := range []string{"keyward recovery show", "Terminal.app", "ask the user"} {
+				if !strings.Contains(step4, want) {
+					t.Errorf("step 4 lacks %q:\n%s", want, h.out())
+				}
+			}
+		})
+	}
+}
+
+// Without a terminal the caller is most likely an agent, which could open one and
+// see the recovery code, so the refusal sends it to the user.
 func TestSetupNeedsATerminal(t *testing.T) {
 	h := newHarness(t, "yes\n", nil, nil)
 	homed(t, h)
-	if code := h.cli.Run([]string{"setup"}); code != 1 || !strings.Contains(h.err(), "terminal") {
+	if code := h.cli.Run([]string{"setup"}); code != 1 || !strings.Contains(h.err(), "Terminal.app") || !strings.Contains(h.err(), "ask the user") {
 		t.Errorf("exit %d: %s", code, h.err())
 	}
 }

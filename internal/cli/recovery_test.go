@@ -30,7 +30,7 @@ func TestRecoveryShowNeedsATerminal(t *testing.T) {
 	if code := h.cli.Run([]string{"recovery", "show"}); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
 	}
-	if strings.Contains(h.out(), "KWR1-") || !strings.Contains(h.err(), "terminal") {
+	if strings.Contains(h.out(), "KWR1-") || !strings.Contains(h.err(), "Terminal.app") || !strings.Contains(h.err(), "ask the user") {
 		t.Errorf("printed a code, or did not say why:\n%s%s", h.out(), h.err())
 	}
 }
@@ -89,14 +89,18 @@ func TestRecoveryRestoreRejectsAMistypedCode(t *testing.T) {
 	}
 }
 
+// The reminder names Terminal.app and sends an agent to the user, since following
+// it in an editor's terminal shows the code where agents can read it.
 func TestMigrateRemindsUntilARecoveryCodeIsShown(t *testing.T) {
 	h := newHarness(t, "yes\n", nil, nil)
 	withVault(t, h)
 	if code := h.cli.Run([]string{"migrate", writeFixture(t, rcFixture)}); code != 0 {
 		t.Fatalf("migrate: %d %s", code, h.err())
 	}
-	if !strings.Contains(h.out(), "keyward recovery show") {
-		t.Errorf("no reminder to save a recovery code:\n%s", h.out())
+	for _, want := range []string{"keyward recovery show", "Terminal.app", "ask the user"} {
+		if !strings.Contains(h.out(), want) {
+			t.Errorf("the reminder to save a recovery code lacks %q:\n%s", want, h.out())
+		}
 	}
 	os.WriteFile(h.cli.RecoveryMarker, nil, 0o600)
 	h.stdout.Reset()

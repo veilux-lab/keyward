@@ -25,11 +25,11 @@ func (c *CLI) recovery(args []string) int {
 	return c.restoreRecovery()
 }
 
-// showRecovery needs a terminal on both ends, so the code cannot be captured by a
-// pipe or reach an AI agent's context.
+// showRecovery needs a terminal on both ends, so a pipe cannot capture the code.
+// An agent could open a terminal itself, so the refusal sends it to the user.
 func (c *CLI) showRecovery() int {
 	if !c.Interactive {
-		return c.fail("keyward recovery show: run it in a terminal, so the code is not captured by a pipe or an AI agent")
+		return c.fail("keyward recovery show: run it in Terminal.app, so the code is not captured by a pipe or an AI agent. An AI agent must ask the user to run it.")
 	}
 	if _, err := fmt.Fprintf(c.Stderr, "\nShow the code that decrypts every stored secret?\n"+
 		"  Anyone with it and a copy of your vault can read them all.\n"+
@@ -89,6 +89,6 @@ func (c *CLI) remindRecovery() {
 		return
 	}
 	if _, err := os.Stat(c.RecoveryMarker); errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintln(c.Stdout, c.out(yellow, "\nSave a recovery code for your vault, in case its key is ever lost: keyward recovery show"))
+		fmt.Fprintln(c.Stdout, c.out(yellow, "\nSave a recovery code for your vault, in case its key is ever lost: run keyward recovery show in Terminal.app. An AI agent must ask the user to run it."))
 	}
 }

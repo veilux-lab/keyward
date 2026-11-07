@@ -21,6 +21,12 @@ type Detection struct {
 	// can be complete. The user decides instead.
 	Possible bool
 
+	// KnownShape marks a secret recognised by the value alone, from a known
+	// credential prefix or credentials in a URL, at a credential's length, and in
+	// the shape of its kind where its prefix also starts words. A name only
+	// suggests one: AUTH is in GIT_AUTHOR_EMAIL.
+	KnownShape bool
+
 	Reason string
 }
 
@@ -37,6 +43,10 @@ const (
 	// and hex tokens sit above 4 bits per character; words and versions below.
 	minEntropyLen  = 24
 	minEntropyBits = 4.0
+
+	// minShapeLen is how long a value with a credential's shape must be to count
+	// as one: an AWS key id is 20 characters, while sk-SK and ASIA are words.
+	minShapeLen = 20
 )
 
 // credentialPrefixes are issuer-specific markers. A value starting with one of
@@ -127,7 +137,7 @@ func Detect(name, value string) Detection {
 	// both URL-shaped and a credential. This is the only way DATABASE_URL gets
 	// caught: nothing in the name suggests a secret.
 	if hasURLCredentials(value) {
-		return Detection{Secret: true, Reason: "the value is a URL containing credentials"}
+		return Detection{Secret: true, KnownShape: len(value) >= minShapeLen, Reason: "the value is a URL containing credentials"}
 	}
 
 	switch {
@@ -138,7 +148,7 @@ func Detect(name, value string) Detection {
 	}
 
 	if p := matchPrefix(value); p != "" {
-		return Detection{Secret: true, Reason: fmt.Sprintf("the value begins with %q, a known credential prefix", p)}
+		return Detection{Secret: true, KnownShape: knownShape(p, value), Reason: fmt.Sprintf("the value begins with %q, a known credential prefix", p)}
 	}
 
 	if hasNameHint(name) {
@@ -160,6 +170,13 @@ func Detect(name, value string) Detection {
 	return Detection{Reason: "nothing about the name or value suggests a secret"}
 }
 
+// NamesCredential reports whether a variable, or an option, called name suggests
+// a credential, as Detect reads a name. Printing hides any value given after such
+// an option, whatever its length or what it holds, though doctor does not report it.
+func NamesCredential(name string) bool {
+	return !safeNames[strings.ToUpper(name)] && hasNameHint(name)
+}
+
 // RefName converts a variable name into a reference name: lowercase, with
 // underscores as hyphens, which is what makes a migrated file readable.
 //
@@ -174,6 +191,29 @@ func RefName(varName string) (string, error) {
 	return name, nil
 }
 
+// knownShape reports whether value, which starts with the credential prefix p, is
+// shaped like the credential p marks. sk-, AKIA and ASIA also start words, as in
+// sk-SK and ASIA_PACIFIC, and a PEM block may hold a public key or a certificate,
+// so each needs its kind's shape: an AWS key id's 16 capitals and digits, an
+// OpenAI key's random token, or a private key.
+func knownShape(p, value string) bool {
+	rest := value[len(p):]
+	switch p {
+	case "AKIA", "ASIA":
+		return len(rest) == 16 && strings.Trim(rest, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") == ""
+	case "sk-":
+		token := tokenAt(rest)
+		return len(p)+len(token) >= minShapeLen && (charClasses(token) == 3 || hexRun(token))
+	case "-----BEGIN ":
+		header, _, _ := strings.Cut(rest, "-----")
+		return strings.Contains(header, "PRIVATE KEY")
+	}
+	return len(value) >= minShapeLen
+}
+
+// CredentialPrefix returns the known credential prefix value starts with, or "".
+func CredentialPrefix(value string) string { return matchPrefix(value) }
+
 func matchPrefix(value string) string {
 	// Longest match wins, so sk-ant- is reported rather than sk-.
 	best := ""
@@ -183,6 +223,153 @@ func matchPrefix(value string) string {
 		}
 	}
 	return best
+}
+
+// Thresholds for credentialShaped. What it finds is reported or hidden, never
+// moved, so it can afford to be broad.
+const (
+	// minHexLen hex digits in a row make a key or UUID, as Datadog, Twilio and
+	// Heroku issue. A commit hash qualifies too; IgnoreMarker exempts its line.
+	minHexLen = 32
+
+	// minSlashedLen is an AWS secret key's length. A / often splits one into
+	// pieces shorter than minEntropyLen.
+	minSlashedLen = 40
+
+	// A random key that long has more than maxKeySlashes slashes one time in 300.
+	// A path that long usually does.
+	maxKeySlashes = 3
+)
+
+// credentialShaped reports whether text, such as a comment, holds something
+// shaped like a credential: an assignment Detect calls a secret, a URL with a
+// literal password, a known prefix starting a word and followed by a token, or a
+// long token. A long token mixes upper case, lower case and digits, is a run of
+// hex digits, or is base64 that / splits. Words rarely do any of these, and paths
+// and URLs break into short pieces, so ordinary comments stay readable.
+//
+// known reports whether any of it has a known shape, as Detection.KnownShape does
+// for a value: a prefix or URL credentials at a credential's length, or an
+// assignment Detect gives one. A name or randomness alone only suggests one.
+func credentialShaped(text string) (shaped, known bool) {
+	shaped, known = namedSecret(text)
+	shaped = shaped || slashedKey(text)
+	for _, field := range strings.Fields(text) {
+		if hasURLCredentials(field) {
+			// Measured from its scheme, as Detect measures the value after NAME=.
+			start := strings.Index(field, "://")
+			for start > 0 && isTokenByte(field[start-1]) {
+				start--
+			}
+			shaped, known = true, known || len(field)-start >= minShapeLen
+		}
+	}
+	for i := 0; i < len(text); i++ {
+		if i > 0 && isTokenByte(text[i-1]) {
+			continue // not where a word starts
+		}
+		// A prefix is evidence like a credential's name, so it needs as long a
+		// value. Two classes after its first letter keep out a capitalised word,
+		// as in "Bearer Authentication".
+		if p := matchPrefix(text[i:]); p != "" {
+			if tail := tokenAt(text[i+len(p):]); len(tail) >= minNamedLen && charClasses(tail[1:]) >= 2 {
+				shaped, known = true, known || knownShape(p, p+tail)
+			}
+		}
+		if KeyShaped(text[i:]) > 0 {
+			shaped = true
+		}
+	}
+	return shaped, known
+}
+
+// KeyShaped returns the length of the token s begins with if it is shaped like a
+// random key, or 0: long and mixing upper case, lower case and digits, or holding
+// a run of hex digits.
+func KeyShaped(s string) int {
+	if word := tokenAt(s); len(word) >= minEntropyLen && charClasses(word) == 3 || hexRun(word) {
+		return len(word)
+	}
+	return 0
+}
+
+// hexRun reports whether s holds minHexLen hex digits in a row, dashes allowed as
+// in a UUID. It needs both letters and digits, which placeholders such as
+// 00000000-0000-0000-0000-000000000000 lack.
+func hexRun(s string) bool {
+	var n, letter, digit int
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= '0' && c <= '9':
+			n, digit = n+1, 1
+		case c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+			n, letter = n+1, 1
+		case c != '-':
+			n, letter, digit = 0, 0, 0
+		}
+		if n >= minHexLen && letter+digit == 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// slashedKey reports whether text holds a run of base64 characters, / included,
+// of minSlashedLen or more that mixes upper case, lower case and digits. Paths and
+// URLs are left out: their runs start with / or follow . or $, or have more than
+// maxKeySlashes.
+func slashedKey(text string) bool {
+	for i := 0; i < len(text); {
+		n := 0
+		for i+n < len(text) && isBase64Byte(text[i+n]) {
+			n++
+		}
+		run := text[i : i+n]
+		path := strings.HasPrefix(run, "/") || i > 0 && strings.IndexByte(".$", text[i-1]) >= 0 ||
+			strings.Count(run, "/") > maxKeySlashes
+		if n >= minSlashedLen && !path && charClasses(run) == 3 {
+			return true
+		}
+		i += max(n, 1)
+	}
+	return false
+}
+
+// isBase64Byte reports whether c is in the base64 alphabet, padding aside.
+func isBase64Byte(c byte) bool {
+	return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '+' || c == '/'
+}
+
+// isTokenByte reports whether c can be part of a token: a letter, digit, _, -
+// or +. Base64's / and = are left out, since they also join paths and
+// assignments.
+func isTokenByte(c byte) bool {
+	return isNameByte(c) || c == '-' || c == '+'
+}
+
+// tokenAt returns the token s begins with, or "".
+func tokenAt(s string) string {
+	n := 0
+	for n < len(s) && isTokenByte(s[n]) {
+		n++
+	}
+	return s[:n]
+}
+
+// charClasses counts which of upper case, lower case and digits s contains.
+func charClasses(s string) int {
+	var upper, lower, digit int
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= 'A' && c <= 'Z':
+			upper = 1
+		case c >= 'a' && c <= 'z':
+			lower = 1
+		case c >= '0' && c <= '9':
+			digit = 1
+		}
+	}
+	return upper + lower + digit
 }
 
 func hasNameHint(name string) bool {
@@ -227,7 +414,7 @@ func looksLikeURL(value string) bool {
 }
 
 // hasURLCredentials reports whether value is a URL with a user:password userinfo
-// section, as in postgresql://user:pass@host/db.
+// section, as in postgresql://user:pass@host/db, whose password is literal.
 func hasURLCredentials(value string) bool {
 	i := strings.Index(value, "://")
 	if i < 0 {
@@ -245,10 +432,10 @@ func hasURLCredentials(value string) bool {
 	}
 
 	// A colon separating a user from a password is what makes it a credential
-	// rather than a bare username.
+	// rather than a bare username. A password the shell expands is stored elsewhere.
 	userinfo := rest[:at]
 	colon := strings.IndexByte(userinfo, ':')
-	return colon > 0 && colon < len(userinfo)-1
+	return colon > 0 && colon < len(userinfo)-1 && !hasExpansion(userinfo[colon+1:])
 }
 
 // entropyBits returns the Shannon entropy of value in bits per character.

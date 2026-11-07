@@ -1,6 +1,7 @@
 package mcpconfig
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -34,7 +35,8 @@ func FindClaude(path string, run func(string, ...string) ([]byte, error)) (Claud
 	return Claude{Path: path, Run: run}, true
 }
 
-// Commands shows what Apply will run.
+// Commands shows what Apply will run, with literal env and header values hidden,
+// and what may be a secret in its args.
 func (c Claude) Commands(f Finding) []string {
 	def, _, err := c.definitions(f)
 	if err != nil {
@@ -42,7 +44,7 @@ func (c Claude) Commands(f Finding) []string {
 	}
 	return []string{
 		fmt.Sprintf("claude mcp remove %s -s %s", f.Name, f.Scope),
-		fmt.Sprintf("claude mcp add-json %s %s -s %s", f.Name, singleQuoted(string(def)), f.Scope),
+		fmt.Sprintf("claude mcp add-json %s %s -s %s", f.Name, singleQuoted(printable(def)), f.Scope),
 	}
 }
 
@@ -53,18 +55,49 @@ func (c Claude) Apply(f Finding) error {
 	if err != nil {
 		return err
 	}
-	if out, err := c.Run(c.Workdir, c.Path, "mcp", "remove", f.Name, "-s", f.Scope); err != nil {
+	dir := c.dir(f)
+	if out, err := c.Run(dir, c.Path, "mcp", "remove", f.Name, "-s", f.Scope); err != nil {
 		return fmt.Errorf("claude mcp remove %s: %v: %s", f.Name, err, strings.TrimSpace(string(out)))
 	}
-	if out, err := c.Run(c.Workdir, c.Path, "mcp", "add-json", f.Name, string(def), "-s", f.Scope); err != nil {
+	if out, err := c.Run(dir, c.Path, "mcp", "add-json", f.Name, string(def), "-s", f.Scope); err != nil {
 		failure := fmt.Errorf("claude mcp add-json %s: %v: %s", f.Name, err, strings.TrimSpace(string(out)))
-		if out, err := c.Run(c.Workdir, c.Path, "mcp", "add-json", f.Name, string(original), "-s", f.Scope); err != nil {
-			return fmt.Errorf("%w; putting the original back also failed, so add it yourself: claude mcp add-json %s %s -s %s (%s)",
-				failure, f.Name, singleQuoted(string(original)), f.Scope, strings.TrimSpace(string(out)))
+		if out, err := c.Run(dir, c.Path, "mcp", "add-json", f.Name, string(original), "-s", f.Scope); err != nil {
+			// Typed into claude mcp add-json, the values would stay in shell history.
+			// With Claude Code closed, it cannot write its old copy over the edit.
+			return fmt.Errorf("%w; putting the original back also failed (%s), and removing it deleted the values shown as hidden. "+
+				"With Claude Code closed, put it back in the mcpServers of %s, with those values filled in: %s: %s",
+				failure, strings.TrimSpace(string(out)), f.Config, quoteJSON(f.Name), printable(original))
 		}
 		return fmt.Errorf("%w; the original definition was put back", failure)
 	}
 	return c.check(f)
+}
+
+// Credentials names the fields of f that hold a credential doctor reports in env
+// or headers, in its current definition or, failing that, the one Apply would add.
+// claude mcp add-json gets either in its command line, which any process can
+// read, so Apply must not be run for f while there is one.
+func (c Claude) Credentials(f Finding) []string {
+	updated, original, err := c.definitions(f)
+	if err != nil {
+		return nil
+	}
+	for _, def := range [][]byte{original, updated} {
+		var s jsonServer
+		if json.Unmarshal(def, &s) != nil {
+			continue
+		}
+		var fields []string
+		for _, l := range Literals(fromJSON("Claude Code", "", "", map[string]jsonServer{f.Name: s})) {
+			if l.Secret && (strings.HasPrefix(l.Field, "env.") || strings.HasPrefix(l.Field, "headers.")) {
+				fields = append(fields, l.Field)
+			}
+		}
+		if len(fields) > 0 {
+			return fields
+		}
+	}
+	return nil
 }
 
 // definitions returns the new definition and the current one, as JSON. Fields
@@ -106,11 +139,20 @@ func (c Claude) command(name string) string {
 	return name
 }
 
+// dir is where claude changes f: the folder of the project a local or project
+// server is in, as Claude Code's CLI changes such a server only when run there.
+func (c Claude) dir(f Finding) string {
+	if f.Scope != "user" && f.Project != "" {
+		return f.Project
+	}
+	return c.Workdir
+}
+
 // current reads the server's definition exactly as Claude Code stores it.
 func (c Claude) current(f Finding) (map[string]any, error) {
 	path := filepath.Join(c.Home, ".claude.json")
 	if f.Scope == "project" {
-		path = filepath.Join(c.Workdir, ".mcp.json")
+		path = filepath.Join(c.dir(f), ".mcp.json")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -127,7 +169,7 @@ func (c Claude) current(f Finding) (map[string]any, error) {
 	}
 	servers := doc.MCPServers
 	if f.Scope == "local" {
-		servers = doc.Projects[c.Workdir].MCPServers
+		servers = doc.Projects[c.dir(f)].MCPServers
 	}
 	def, ok := servers[f.Name]
 	if !ok {
@@ -137,7 +179,7 @@ func (c Claude) current(f Finding) (map[string]any, error) {
 }
 
 func (c Claude) check(f Finding) error {
-	servers, _ := Load(c.Home, c.Workdir)
+	servers, _ := Load(c.Home, c.dir(f))
 	i := slices.IndexFunc(servers, func(s Server) bool {
 		return s.Client == "Claude Code" && s.Scope == f.Scope && s.Name == f.Name
 	})
@@ -145,9 +187,42 @@ func (c Claude) check(f Finding) error {
 		return fmt.Errorf("claude reported success, but %s is no longer configured", f.Name)
 	}
 	if got := servers[i]; got.Command != c.command(f.Want.Command) || !slices.Equal(got.Args, f.Want.Args) {
-		return fmt.Errorf("claude reported success, but %s starts with %s %v", f.Name, got.Command, got.Args)
+		return fmt.Errorf("claude reported success, but %s starts with %s %v", f.Name, got.Command, shownArgs(got.Args))
 	}
 	return nil
+}
+
+// printable is a JSON definition for the user to read, with each literal env and
+// header value hidden, and what may be a secret in its url and args.
+func printable(def []byte) string {
+	var printed map[string]any
+	json.Unmarshal(def, &printed)
+	for _, field := range []string{"env", "headers"} {
+		values, _ := printed[field].(map[string]any)
+		for k, v := range values {
+			if s, ok := v.(string); ok {
+				values[k] = shown(s)
+			}
+		}
+	}
+	if url, ok := printed["url"].(string); ok {
+		printed["url"] = shownArg(url)
+	}
+	args, _ := printed["args"].([]any)
+	words := make([]string, len(args))
+	for i, a := range args {
+		words[i], _ = a.(string)
+	}
+	for i, w := range shownArgs(words) {
+		if w != words[i] {
+			args[i] = w
+		}
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.Encode(printed)
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // singleQuoted is s as one literal shell word, so a ${VAR} in it is not expanded.

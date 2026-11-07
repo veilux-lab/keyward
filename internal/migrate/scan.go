@@ -141,6 +141,128 @@ func (f *File) Replace(line int, text string) {
 	f.lines[line-1] = text
 }
 
+// IgnoreMarker, in a line's comment, says the line holds no secret, so keyward
+// leaves it alone: it is neither reported nor moved.
+const IgnoreMarker = "keyward:ignore"
+
+// UnmovableLine is a line holding credential-shaped text keyward cannot move.
+// It keeps where the text is, never the text.
+type UnmovableLine struct {
+	Line int
+
+	// Kind is what holds the text: comment, trailer, alias, launchctl, or
+	// unsupported syntax.
+	Kind string
+
+	// KnownShape marks text holding a credential of a known shape, as it marks a
+	// value in Detection. The rest only may be credentials.
+	KnownShape bool
+}
+
+// Unmovable finds credential-shaped text that no assignment's value accounts
+// for: in comments, in trailers, and on lines the scanner does not parse.
+func (f *File) Unmovable() []UnmovableLine {
+	trailers := make(map[int]string, len(f.Assignments))
+	for _, a := range f.Assignments {
+		trailers[a.Line] = a.Trailer
+	}
+	var found []UnmovableLine
+	for i, line := range f.lines {
+		text, kind := line, unparsedKind(line)
+		if trailer, ok := trailers[i+1]; ok {
+			text, kind = trailer, "trailer"
+		}
+		// An assignment is marked only in its trailer, as NewPlan and doctor read it.
+		if shaped, known := credentialShaped(text); shaped && !marked(text) {
+			found = append(found, UnmovableLine{Line: i + 1, Kind: kind, KnownShape: known})
+		}
+	}
+	return found
+}
+
+// unparsedKind names what holds the text of a line that is not an assignment.
+func unparsedKind(line string) string {
+	rest := strings.TrimLeft(line, " \t")
+	if strings.HasPrefix(rest, "#") {
+		return "comment"
+	}
+	for _, word := range []string{"alias", "launchctl"} {
+		if _, ok := cutWord(rest, word); ok {
+			return word
+		}
+	}
+	return "unsupported syntax"
+}
+
+// namedSecret reports whether text, a comment or a line the scanner does not
+// parse, sets a variable Detect calls a secret: NAME=VALUE commented out, after
+// declare -x, or several to a line, or the NAME VALUE of launchctl setenv, fish's
+// set, and spaced INI. A secret too plain to look like one is found by its name.
+// known reports whether Detect gave one a known shape.
+func namedSecret(text string) (secret, known bool) {
+	fields := strings.Fields(strings.TrimLeft(text, "# \t"))
+	var found []Detection
+	for _, field := range fields {
+		if a, ok := parseAssignment(field); ok {
+			found = append(found, Detect(a.Name, a.Value))
+		}
+	}
+	if name, value := spacedPair(fields); name != "" {
+		found = append(found, Detect(name, strings.Trim(value, `'"`)))
+	}
+	for _, d := range found {
+		secret, known = secret || d.Secret, known || d.KnownShape
+	}
+	return secret, known
+}
+
+// spacedPair returns the name and value that launchctl setenv, fish's set, and
+// spaced INI separate with spaces, if fields are one of those.
+func spacedPair(fields []string) (name, value string) {
+	switch {
+	case len(fields) >= 4 && fields[0] == "launchctl" && fields[1] == "setenv":
+		return fields[2], fields[3]
+	case len(fields) >= 3 && fields[1] == "=":
+		return fields[0], fields[2]
+	case len(fields) >= 3 && fields[0] == "set":
+		for i := 1; i+1 < len(fields); i++ {
+			if !strings.HasPrefix(fields[i], "-") {
+				return fields[i], fields[i+1]
+			}
+		}
+	}
+	return "", ""
+}
+
+// marked reports whether a comment in text, a line or a trailer, carries
+// IgnoreMarker. As in the shell, a comment starts only at an unquoted # that
+// begins a word.
+func marked(text string) bool {
+	var quote byte
+	wordStart := true
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		switch {
+		case quote == '\'':
+			if c == '\'' {
+				quote = 0
+			}
+		case c == '\\':
+			i++
+		case quote == '"':
+			if c == '"' {
+				quote = 0
+			}
+		case c == '#' && wordStart:
+			return strings.Contains(text[i:], IgnoreMarker)
+		case c == '\'' || c == '"':
+			quote = c
+		}
+		wordStart = quote == 0 && strings.IndexByte(" \t\r", c) >= 0
+	}
+	return false
+}
+
 // Rewritten returns the line that would replace a's, referencing refName.
 //
 // The value is always single quoted. Single quotes suppress every form of shell

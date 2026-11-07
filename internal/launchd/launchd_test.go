@@ -78,6 +78,20 @@ func (h *harness) plist() string {
 	return filepath.Join(h.m.Home, "Library", "LaunchAgents", "com.veilux-lab.keyward.dev.plist")
 }
 
+// An unknown action changes nothing and gets the usage line keyward service prints.
+func TestAnUnknownActionGetsTheServiceUsageLine(t *testing.T) {
+	const usage = "usage: keyward service install|start|stop|status|uninstall"
+	signed, brew := setup(t), brewSetup(t)
+	for name, run := range map[string]func(string) (string, error){"signed": signed.m.Run, "Homebrew": brew.m.Run} {
+		if _, err := run("instal"); err == nil || err.Error() != usage {
+			t.Errorf("%s: error %v, want %q", name, err, usage)
+		}
+	}
+	if len(signed.calls)+len(brew.calls) != 0 {
+		t.Errorf("ran %q and %q", signed.calls, brew.calls)
+	}
+}
+
 func TestInstallSignedCLIWithoutACompanion(t *testing.T) {
 	home := t.TempDir()
 	executable := filepath.Join(t.TempDir(), "keyward")

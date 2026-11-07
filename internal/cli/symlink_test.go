@@ -51,13 +51,16 @@ func TestMigrateRewritesASymlinkedDotfileInPlace(t *testing.T) {
 	}
 }
 
-// A dotfile kept in git still has its old values in history, so the user must rotate.
+// A dotfile kept in git may still have its old values in history, so the user must
+// rotate them, and store the new values. keyward does not run git to check, and a
+// gitignored .env never committed is common, so the warning says when it applies.
 func TestMigrateWarnsWhenTheFileIsInAGitRepository(t *testing.T) {
 	h := newHarness(t, "yes\n", nil, nil)
-	link, _ := dotfile(t, "export GITHUB_TOKEN=ghp_perfectlyFine0123456789\n", true)
+	link, target := dotfile(t, "export GITHUB_TOKEN=ghp_perfectlyFine0123456789\n", true)
 	h.cli.Run([]string{"migrate", link})
-	if all := strings.ToLower(h.out() + h.err()); !strings.Contains(all, "git repository") || !strings.Contains(all, "rotate") {
-		t.Errorf("no git warning:\n%s\n%s", h.out(), h.err())
+	if want := target + " is in a git repository. If it was ever committed, the values it held are still in its history, where anyone with a copy can read them: " +
+		"rotate them, then store each new value with keyward add --force NAME.\n"; !strings.Contains(h.err(), want) {
+		t.Errorf("stderr lacks %q:\n%s", want, h.err())
 	}
 }
 
