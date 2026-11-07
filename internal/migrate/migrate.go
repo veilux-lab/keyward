@@ -80,6 +80,11 @@ func NewPlan(path string, content []byte) (*Plan, error) {
 	refs := make(map[string]string)
 
 	for _, a := range f.Assignments {
+		// The user has said the line holds no secret; Detect only guesses.
+		if strings.Contains(a.Trailer, IgnoreMarker) {
+			p.Skips = append(p.Skips, Skip{Assignment: a, Reason: "marked " + IgnoreMarker})
+			continue
+		}
 		d := Detect(a.Name, a.Value)
 		if d.Possible {
 			p.Skips = append(p.Skips, possibleSkip(a, d))
@@ -230,10 +235,11 @@ func (p *Plan) Blocked() []Skip {
 
 // Diff describes the plan for a human to approve.
 //
-// Values are never shown, only their length. The diff is printed to a terminal,
-// lands in scrollback, and may be produced by an agent running keyward — printing
-// the old line verbatim would spill every secret in the file at once, which is
-// precisely what this tool exists to prevent.
+// Values are never shown, only their length, and neither is a trailing comment
+// shaped like a credential. The diff is printed to a terminal, lands in
+// scrollback, and may be produced by an agent running keyward — printing the old
+// line verbatim would spill every secret in the file at once, which is precisely
+// what this tool exists to prevent.
 func (p *Plan) Diff() string {
 	var b strings.Builder
 
@@ -243,9 +249,11 @@ func (p *Plan) Diff() string {
 	fmt.Fprintf(&b, "%s: %d value(s) to move, %d left alone\n", p.Path, len(p.Changes), len(p.Skips))
 
 	for _, c := range p.Changes {
+		shown := c.Assignment
+		shown.Trailer = shownTrailer(c.Trailer)
 		fmt.Fprintf(&b, "\n@@ line %d @@ %s\n", c.Line, c.Reason)
-		fmt.Fprintf(&b, "-%s%s=<%d bytes hidden>%s\n", c.Prefix, c.Name, len(c.Value), c.Trailer)
-		fmt.Fprintf(&b, "+%s\n", c.Rewritten(c.RefName))
+		fmt.Fprintf(&b, "-%s%s=<%d bytes hidden>%s\n", c.Prefix, c.Name, len(c.Value), shown.Trailer)
+		fmt.Fprintf(&b, "+%s\n", shown.Rewritten(c.RefName))
 	}
 
 	// Skips needing attention come first; among dozens of ordinary ones they would
@@ -264,6 +272,7 @@ func (p *Plan) Diff() string {
 			fmt.Fprintf(&b, "  line %d %s\n      %s\n", s.Line, s.Name, s.Reason)
 		}
 	}
+	b.WriteString(p.Unmovable())
 	if len(alone) > 0 {
 		b.WriteString("\nleft alone:\n")
 		width := 0
@@ -276,6 +285,47 @@ func (p *Plan) Diff() string {
 			fmt.Fprintf(&b, "  line %-4d %-*s  %s\n", s.Line, width, s.Name, s.Reason)
 		}
 	}
+	return b.String()
+}
+
+// shownTrailer is a trailer as the diff prints it: a comment shaped like a
+// credential, often the token the value replaced, becomes its length.
+func shownTrailer(trailer string) string {
+	i := strings.IndexByte(trailer, '#')
+	if i < 0 {
+		return trailer
+	}
+	if shaped, _ := credentialShaped(trailer[i:]); !shaped {
+		return trailer
+	}
+	return fmt.Sprintf("%s# <%d bytes hidden>", trailer[:i], len(trailer)-i-1)
+}
+
+// Unmovable describes the credential-shaped text the plan leaves in the file, by
+// line and kind but never the text, or is empty if there is none. It is shown
+// even when there is nothing to move, which would otherwise read as a clean file.
+func (p *Plan) Unmovable() string {
+	found := p.file.Unmovable()
+	if len(found) == 0 {
+		return ""
+	}
+	rewritten := make(map[int]bool, len(p.Changes))
+	for _, c := range p.Changes {
+		rewritten[c.Line] = true
+	}
+
+	var b strings.Builder
+	b.WriteString("\ncredential-shaped text keyward cannot move:\n")
+	for _, f := range found {
+		fmt.Fprintf(&b, "  line %d (%s)", f.Line, f.Kind)
+		if f.Kind == "trailer" && rewritten[f.Line] {
+			b.WriteString(": it stays in the rewritten line; remove it by hand")
+		}
+		b.WriteString("\n")
+	}
+	// The user removes or marks a line; an agent that opens one reads the secret.
+	b.WriteString("  Remove them by hand in an editor, then rotate any real credential. AI agents must not open or print these lines.\n")
+	fmt.Fprintf(&b, "  If a line holds no secret, end it with # %s yourself, and keyward leaves the line alone; an AI agent must not.\n", IgnoreMarker)
 	return b.String()
 }
 
@@ -363,8 +413,8 @@ func storeSecret(store vault.Store, name, value, note string) error {
 	return fmt.Errorf("%q already holds a different value; remove it with `keyward rm %s`, or store this one under another name", name, name)
 }
 
-// InGitRepository reports whether path is inside a git work tree, where the
-// values it held stay in the repository's history after migrating.
+// InGitRepository reports whether path is inside a git work tree, whose history
+// keeps the values it held after migrating if it was ever committed.
 func InGitRepository(path string) bool {
 	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
 		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {

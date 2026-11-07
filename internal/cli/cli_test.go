@@ -140,12 +140,13 @@ func TestServiceActions(t *testing.T) {
 	}
 }
 
+// The usage line names every action service takes, install among them.
 func TestServiceRejectsInvalidArgumentsBeforeChangingAnything(t *testing.T) {
 	for _, args := range [][]string{{"service"}, {"service", "unknown"}, {"service", "install", "extra"}} {
 		h := newHarness(t, "", nil, nil)
 		h.cli.Service = func(string) (string, error) { t.Fatal("invalid action reached service manager"); return "", nil }
-		if code := h.cli.Run(args); code != 2 {
-			t.Errorf("%v: code %d, want 2", args, code)
+		if code := h.cli.Run(args); code != 2 || h.err() != "usage: keyward service install|start|stop|status|uninstall\n" {
+			t.Errorf("%v: code %d, want 2 and the usage line; stderr %q", args, code, h.err())
 		}
 	}
 }
@@ -208,18 +209,33 @@ func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 	if commands < 0 || options < commands || examples < options {
 		t.Fatalf("help lacks commands, options, and examples sections in that order:\n%s", out)
 	}
-	for _, want := range []string{"migrate <file>", "run -- <command>", "mcp [wrap|unwrap]", "agents [link|unlink]", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run -- npm test", "--only VAR"} {
+	for _, want := range []string{"migrate <file>", "run -- <command>", "mcp [wrap|unwrap]", "agents [link|unlink]", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run --only GITHUB_TOKEN -- gh pr list", "--only VAR", "--allow-command-line"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q", want)
 		}
 	}
-	for _, unwanted := range []string{"advanced:", "service install", "service uninstall", "\n  daemon", "splunk", "Options may go"} {
+	// The example names what the command needs, as the README and guide do.
+	for _, unwanted := range []string{"advanced:", "service install", "service uninstall", "\n  daemon", "splunk", "Options may go", "keyward run -- "} {
 		if strings.Contains(out, unwanted) {
 			t.Errorf("help still shows %q", unwanted)
 		}
 	}
-	if lines := strings.Count(out, "\n"); lines > 33 {
-		t.Errorf("help is %d lines, want at most 33", lines)
+	if lines := strings.Count(out, "\n"); lines > 34 {
+		t.Errorf("help is %d lines, want at most 34", lines)
+	}
+}
+
+// setup and recovery show print the recovery code, so help says where to run
+// them, as the README and their own messages do.
+func TestHelpSaysToRunSetupAndRecoveryInTerminalApp(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	h.cli.Run([]string{"help"})
+	for _, command := range []string{"setup", "recovery"} {
+		_, rest, found := strings.Cut(h.out(), "\n  "+command+" ")
+		line, _, _ := strings.Cut(rest, "\n")
+		if !found || !strings.Contains(line, "in Terminal.app") {
+			t.Errorf("help's %s line does not say to run it in Terminal.app: %q", command, line)
+		}
 	}
 }
 
@@ -846,6 +862,62 @@ func TestMigrateDryRunPrintsNoSecrets(t *testing.T) {
 	}
 }
 
+// A comment can hold an old token, and keyward never moves one. The plan says
+// where such text is, never what it is.
+func TestMigrateDryRunReportsWhatItCannotMove(t *testing.T) {
+	const moved, old, commented = "ghp_exampleTokenValue0123456789", "ghp_oldTokenValue0123456789abcdef", "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+	path := writeFixture(t, "export EDITOR=vim\n"+
+		"export GITHUB_TOKEN="+moved+" # was "+old+"\n"+
+		"# export OPENAI_API_KEY="+commented+"\n")
+	h := newHarness(t, "", nil, nil)
+
+	code := h.cli.Run([]string{"migrate", "--dry-run", path})
+	// Checked first, so no failure below prints a token.
+	for _, value := range []string{moved, old, commented} {
+		if strings.Contains(h.out()+h.err(), value) {
+			t.Fatal("migrate printed a fake token that it should hide")
+		}
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	for _, want := range []string{
+		"credential-shaped text keyward cannot move:",
+		"line 2 (trailer): it stays in the rewritten line; remove it by hand",
+		"line 3 (comment)",
+	} {
+		if !strings.Contains(h.out(), want) {
+			t.Errorf("stdout lacks %q:\n%s", want, h.out())
+		}
+	}
+}
+
+// "Nothing to move" must not read as a clean file while a token sits in a comment,
+// whatever its shape.
+func TestMigrateNothingToMoveStillReportsTokensInComments(t *testing.T) {
+	commented := []string{"ghp_exampleTokenValue0123456789", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "0123456789abcdef0123456789abcdef"}
+	path := writeFixture(t, "export EDITOR=vim\n"+
+		"# export GITHUB_TOKEN="+commented[0]+"\n"+
+		"# export AWS_SECRET_ACCESS_KEY="+commented[1]+"\n"+
+		"# export METRICS_API_KEY="+commented[2]+"\n")
+	h := newHarness(t, "", nil, nil)
+
+	code := h.cli.Run([]string{"migrate", path})
+	for _, value := range commented {
+		if strings.Contains(h.out()+h.err(), value) {
+			t.Fatal("migrate printed a fake token that it should hide")
+		}
+	}
+	if code != 0 {
+		t.Fatalf("exit code = %d. stderr: %s", code, h.err())
+	}
+	for _, want := range []string{"nothing to move", "credential-shaped text keyward cannot move:", "line 2 (comment)", "line 3 (comment)", "line 4 (comment)"} {
+		if !strings.Contains(h.out(), want) {
+			t.Errorf("stdout lacks %q:\n%s", want, h.out())
+		}
+	}
+}
+
 // -auto-approve is for scripts: same as answering yes, without asking.
 func TestMigrateAutoApprove(t *testing.T) {
 	path := writeFixture(t, rcFixture)
@@ -1173,19 +1245,21 @@ func contains(haystack []string, needle string) bool {
 }
 
 // After migration, programs see cap:// references unless keyward run starts them.
+// Each step's example names the variables, as without --only keyward run hands
+// every reference's value to the command and all it starts.
 func TestMigrateExplainsKeywardRunAtEveryStep(t *testing.T) {
 	path := writeFixture(t, rcFixture)
 	h := newHarness(t, "", nil, nil)
 	h.cli.Run([]string{"migrate", "--dry-run", path})
-	if !strings.Contains(h.out(), "keyward run --") {
-		t.Errorf("dry run does not explain keyward run:\n%s", h.out())
+	if !strings.Contains(h.out(), "keyward run --only ") || strings.Contains(h.out(), "keyward run -- ") {
+		t.Errorf("dry run does not explain keyward run with --only:\n%s", h.out())
 	}
 
 	h = newHarness(t, "yes\n", nil, nil)
 	h.cli.Run([]string{"migrate", path})
 	prompt := h.err()[:strings.Index(h.err(), "Enter a value")]
-	if !strings.Contains(prompt, "keyward run --") {
-		t.Errorf("the confirmation does not explain keyward run:\n%s", h.err())
+	if !strings.Contains(prompt, "keyward run --only VAR -- <command>") || strings.Contains(prompt, "keyward run -- ") {
+		t.Errorf("the confirmation does not explain keyward run with --only:\n%s", h.err())
 	}
 	// Starting an editor through keyward would hand every agent in it the values.
 	if strings.Contains(h.out(), "code .") || !strings.Contains(h.out(), "keyward mcp") {

@@ -1,5 +1,6 @@
 // Package ledger records what keyward changed outside its own data, so uninstall
-// undoes exactly that instead of guessing where to look. It never holds a value.
+// undoes exactly that instead of guessing where to look, and what the user
+// allowed it to leave as it is. It never holds a value.
 package ledger
 
 import (
@@ -24,6 +25,10 @@ const (
 	Link Kind = "agent_link"
 	// Server is an MCP server keyward changed through its tool; Text is its scope.
 	Server Kind = "mcp_server"
+	// Allowed is an MCP server whose URL may put the variables in Text, joined
+	// by commas, in mcp-remote's command line, as allowed with --allow-command-line.
+	// Path is the config named as keyward mcp names it.
+	Allowed Kind = "mcp_command_line"
 	// Dir is a directory keyward created, removed once it is empty.
 	Dir Kind = "owned_dir"
 )

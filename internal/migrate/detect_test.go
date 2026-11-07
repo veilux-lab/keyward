@@ -182,6 +182,72 @@ func TestDetectPossibleOnlyWhenUncertain(t *testing.T) {
 	}
 }
 
+// Only the value's own form, at a credential's length, makes a verdict certain.
+// A name can mislead (AUTH is in GIT_AUTHOR_EMAIL), and so can a word that happens
+// to start like a key: sk-SK is a locale, ASIA a region, and a PEM block a public
+// key or a certificate. Those prefixes need their own kind's shape: an AWS key id's
+// 16 capitals and digits, an OpenAI key's random token, a private key's block.
+func TestDetectKnownShapeComesFromTheValueAlone(t *testing.T) {
+	for _, c := range []struct {
+		name, value string
+		want        bool
+	}{
+		{"GITHUB_TOKEN", "ghp_1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVwXyZ", true},
+		{"ANY_NAME", "ghp_1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVwXyZ", true},
+		{"AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE", true},
+		{"AWS_SESSION_KEY_ID", "ASIAIOSFODNN7EXAMPLE", true},
+		{"DATABASE_URL", "postgresql://dbuser:s3cretp4ss@db.internal:5432/dashweb", true},
+		{"OPENAI_API_KEY", "sk-proj-FakeOpenAIKey000000000000000000", true},
+		{"DEEPSEEK_API_KEY", "sk-" + "0123456789abcdef0123456789abcdef", true},
+		{"ANTHROPIC_API_KEY", "sk-ant-api03-FakeAnthropicKey00000000", true},
+		{"SSH_KEY", "-----BEGIN OPENSSH PRIVATE KEY-----\\nFakeKeyBody0000\\n-----END OPENSSH PRIVATE KEY-----", true},
+		{"TLS_KEY", "-----BEGIN RSA PRIVATE KEY-----\\nFakeKeyBody0000\\n-----END RSA PRIVATE KEY-----", true},
+		{"DB_PASSWORD", "correct-horse-battery-staple-9271", false},
+		{"GIT_AUTHOR_EMAIL", "someone@example.com", false},
+		{"MY_THING", "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i", false},
+		{"LOCALE", "sk-SK", false},
+		{"SUPPORTED_LOCALES", "sk-SK,cs-CZ,de-DE,en-US", false},
+		{"CLUSTER_NAME", "sk-production-cluster-01", false},
+		{"MARKET", "ASIA", false},
+		{"DEPLOY_REGIONS", "ASIA,EUROPE,AMERICAS,AFRICA", false},
+		{"MARKET", "ASIA_PACIFIC_SOUTHEAST", false},
+		{"JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A-----END PUBLIC KEY-----", false},
+		{"CA_CERT", "-----BEGIN CERTIFICATE-----\\nMIIDdzCCAl+gAwIBAgIEAgAAuTANBgkq\\n-----END CERTIFICATE-----", false},
+		{"EDITOR", "vim", false},
+	} {
+		if got := migrate.Detect(c.name, c.value).KnownShape; got != c.want {
+			t.Errorf("Detect(%q, %q).KnownShape = %v, want %v", c.name, c.value, got, c.want)
+		}
+	}
+}
+
+// A comment is judged as a value is: a word that only starts like a key is not
+// one of a known shape, though it may be a credential.
+func TestCommentsNeedAKnownShapeToo(t *testing.T) {
+	for line, want := range map[string]bool{
+		"# old key: AKIAIOSFODNN7EXAMPLE\n":        true,
+		"# old key: sk-proj-FakeOpenAIKey000000\n": true,
+		"# cluster: sk-production-cluster-01\n":    false,
+	} {
+		u := migrate.Scan([]byte(line)).Unmovable()
+		if len(u) != 1 || u[0].KnownShape != want {
+			t.Errorf("%q: unmovable = %+v, want one with KnownShape %v", line, u, want)
+		}
+	}
+}
+
+func TestCredentialPrefixPrefersTheLongestMatch(t *testing.T) {
+	for value, want := range map[string]string{
+		"sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx":   "sk-ant-",
+		"Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig": "Bearer ",
+		"task-runner": "",
+	} {
+		if got := migrate.CredentialPrefix(value); got != want {
+			t.Errorf("CredentialPrefix(%q) = %q, want %q", value, got, want)
+		}
+	}
+}
+
 // The reason is shown to a human deciding whether to approve a rewrite, so it has
 // to say something specific rather than restate the verdict.
 func TestDetectReasonsAreSpecific(t *testing.T) {

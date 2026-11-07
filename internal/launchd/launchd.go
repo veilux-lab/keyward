@@ -118,7 +118,7 @@ func (m Manager) Run(action string) (string, error) {
 		}
 		return uninstalledMessage, nil
 	default:
-		return "", errors.New("usage: keyward start|start|stop|status|uninstall")
+		return "", errors.New("usage: keyward service install|start|stop|status|uninstall")
 	}
 }
 

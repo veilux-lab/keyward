@@ -116,7 +116,7 @@ func TestFormulaCaveatsAreBrief(t *testing.T) {
 	if lines := strings.Count(caveats, "\n") - 1; lines > 4 {
 		t.Errorf("caveats are %d lines, want at most 4:\n%s", lines, caveats)
 	}
-	for _, want := range []string{"keyward setup", "keyward run --only", "keyward help", "keyward uninstall", "brew services"} {
+	for _, want := range []string{"keyward setup", "Terminal.app", "keyward run --only", "keyward help", "keyward uninstall", "brew services"} {
 		if !strings.Contains(caveats, want) {
 			t.Errorf("caveats lack %q:\n%s", want, caveats)
 		}
