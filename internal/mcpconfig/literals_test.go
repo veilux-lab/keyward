@@ -294,29 +294,38 @@ func TestLiteralsFindATokenInAURLThatEnvOrAHeaderHolds(t *testing.T) {
 // and unwrap each read every argument more than once, so reading one takes time
 // that grows only with its length. So does reading a script to rewrite it.
 func TestALongArgumentIsReadInTimeLinearInItsLength(t *testing.T) {
-	// 100 KB each, with a / every few bytes, as in base64 and a URL's path.
-	args := []string{"--config", strings.Repeat("QUJD/", 20_000), "--url", "https://mcp.example.com/" + strings.Repeat("seg/", 25_000)}
-	script := `exec tool --config "` + strings.Repeat("QUJD/", 20_000) + `${PD_KEY}"`
-	config, err := json.Marshal(map[string]any{"mcpServers": map[string]any{
-		"cfg":    map[string]any{"command": "tool", "args": args, "env": map[string]string{"PD_KEY": "${PD_KEY}"}},
-		"script": map[string]any{"command": "sh", "args": []string{"-c", script}},
-	}})
-	if err != nil {
-		t.Fatal(err)
+	read := func(size int) time.Duration {
+		// size bytes each, with a / every few bytes, as in base64 and a URL's path.
+		args := []string{"--config", strings.Repeat("QUJD/", size/5), "--url", "https://mcp.example.com/" + strings.Repeat("seg/", size/4)}
+		script := `exec tool --config "` + strings.Repeat("QUJD/", size/5) + `${PD_KEY}"`
+		config, err := json.Marshal(map[string]any{"mcpServers": map[string]any{
+			"cfg":    map[string]any{"command": "tool", "args": args, "env": map[string]string{"PD_KEY": "${PD_KEY}"}},
+			"script": map[string]any{"command": "sh", "args": []string{"-c", script}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		home := t.TempDir()
+		write(t, filepath.Join(home, ".claude.json"), string(config))
+		servers, errs := mcpconfig.Load(home, t.TempDir())
+		if len(errs) != 0 {
+			t.Fatal(errs)
+		}
+		start := time.Now()
+		mcpconfig.Literals(servers)
+		if findings := mcpconfig.Check(servers, map[string]string{"PD_KEY": "pagerduty-key"}); len(findings) != 2 {
+			t.Fatalf("findings = %+v", findings)
+		}
+		return time.Since(start)
 	}
-	home := t.TempDir()
-	write(t, filepath.Join(home, ".claude.json"), string(config))
-	servers, errs := mcpconfig.Load(home, t.TempDir())
-	if len(errs) != 0 {
-		t.Fatal(errs)
+	// However fast the machine, the arguments take as long to read whole as in
+	// eighths; scanning back over the word at every byte took over seven times as long.
+	var eighths time.Duration
+	for range 8 {
+		eighths += read(100_000 / 8)
 	}
-	start := time.Now()
-	mcpconfig.Literals(servers)
-	if findings := mcpconfig.Check(servers, map[string]string{"PD_KEY": "pagerduty-key"}); len(findings) != 2 {
-		t.Fatalf("findings = %+v", findings)
-	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Errorf("reading three 100 KB arguments took %v", elapsed)
+	if whole := read(100_000); whole > 3*eighths || whole > time.Minute {
+		t.Errorf("reading three 100 KB arguments took %v whole and %v in eighths", whole, eighths)
 	}
 }
 
