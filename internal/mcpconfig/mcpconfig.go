@@ -559,12 +559,16 @@ func unresolved(s Server, refs map[string]string) (Finding, bool) {
 }
 
 // firstOnly is where the args of a keyward run that has an --only give the value
-// of the first, as keyward run's first option is one.
+// of the first, as keyward run's first option other than --no-mask is one.
 func firstOnly(args []string) int {
-	if args[1] == "--only" {
-		return 2
+	at := 1
+	for args[at] == "--no-mask" {
+		at++
 	}
-	return 1
+	if args[at] == "--only" {
+		return at + 1
+	}
+	return at
 }
 
 // referenced gives each of names that s's env does not set its reference there,
@@ -1036,7 +1040,7 @@ func Undo(servers []Server) []Finding {
 func wrappedCommand(s Server) []string {
 	inner := s.Args[1:]
 	for len(inner) > 0 {
-		if strings.HasPrefix(inner[0], "--only=") {
+		if inner[0] == "--no-mask" || strings.HasPrefix(inner[0], "--only=") {
 			inner = inner[1:]
 		} else if inner[0] == "--only" && len(inner) > 1 {
 			inner = inner[2:]
@@ -1055,6 +1059,9 @@ func wrappedCommand(s Server) []string {
 func onlyOf(args []string) []string {
 	var names []string
 	for args = args[1:]; len(args) > 0; args = args[1:] {
+		if args[0] == "--no-mask" {
+			continue
+		}
 		value, inline := strings.CutPrefix(args[0], "--only=")
 		if !inline {
 			if args[0] != "--only" || len(args) < 2 {

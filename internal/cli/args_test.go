@@ -82,13 +82,19 @@ func TestRunPassesOptionsThrough(t *testing.T) {
 	}
 }
 
+// run has options of its own, so the message says where they go.
 func TestOptionsBeforeRunAreRejected(t *testing.T) {
-	h := newHarness(t, "", nil, nil)
-	if code := h.cli.Run([]string{"--dry-run", "run", "echo"}); code != 2 {
-		t.Errorf("exit code = %d, want 2", code)
-	}
-	if h.exec.calls != 0 {
-		t.Error("the command ran")
+	for _, args := range [][]string{{"--dry-run", "run", "echo"}, {"--no-mask", "run", "echo"}} {
+		h := newHarness(t, "", nil, nil)
+		if code := h.cli.Run(args); code != 2 {
+			t.Errorf("%v: exit code = %d, want 2", args, code)
+		}
+		if h.exec.calls != 0 {
+			t.Errorf("%v: the command ran", args)
+		}
+		if want := "keyward run's options go right after run: keyward run --only VAR -- <command>\n"; h.err() != want {
+			t.Errorf("%v: stderr = %q, want %q", args, h.err(), want)
+		}
 	}
 }
 

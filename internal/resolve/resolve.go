@@ -34,6 +34,10 @@ type Result struct {
 	// Resolved names the secrets that were used, canonical and sorted. It holds
 	// no values and is safe to log — this is what an audit record is built from.
 	Resolved []string
+
+	// Values maps each name in Resolved to its value, so keyward run can hide the
+	// values in the command's output. Plaintext, like Env.
+	Values map[string]string
 }
 
 // Failure describes one reference that could not be resolved.
@@ -137,9 +141,10 @@ func (r *Resolver) env(env []string, wanted func(key string) bool) (Result, erro
 			// Converting to a string makes the value unzeroable: Go strings are
 			// immutable, so vault.Secret.Destroy has nothing left to clear here.
 			// Accepted rather than worked around, because an environment for
-			// exec is []string at the OS boundary regardless. It costs little in
-			// practice: syscall.Exec replaces the process image, discarding this
-			// heap entirely.
+			// exec is []string at the OS boundary regardless. syscall.Exec then
+			// discards this heap; when keyward run stays to hide the values in the
+			// command's output, it holds them only as long as the command, which
+			// has them anyway.
 			resolved = string(secret.Bytes())
 			seen[h.Name] = resolved
 		}
@@ -156,5 +161,5 @@ func (r *Resolver) env(env []string, wanted func(key string) bool) (Result, erro
 	}
 	sort.Strings(names)
 
-	return Result{Env: out, Resolved: names}, nil
+	return Result{Env: out, Resolved: names, Values: seen}, nil
 }
