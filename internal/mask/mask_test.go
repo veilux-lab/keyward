@@ -855,24 +855,33 @@ func TestASelfOverlappingSecretIsNotHeldWhole(t *testing.T) {
 		{"aaaaaaaaaa", "", "a"},
 		{"aXyZqW7a", "a", "XyZqW7a"},
 	} {
-		f := newFilter(one("s", tc.value))
-		in := []byte(tc.first + strings.Repeat(tc.rest, 10<<20/len(tc.rest)))
-		var out []byte
-		start := time.Now()
-		for len(in) > 0 {
-			n := min(len(in), 32<<10)
-			out = append(out, f.write(in[:n])...)
-			if in = in[n:]; len(f.tail) >= f.longest {
-				t.Fatalf("%s: held %d bytes", tc.value, len(f.tail))
+		hide := func(size int) time.Duration {
+			f := newFilter(one("s", tc.value))
+			in := []byte(tc.first + strings.Repeat(tc.rest, size/len(tc.rest)))
+			var out []byte
+			start := time.Now()
+			for len(in) > 0 {
+				n := min(len(in), 32<<10)
+				out = append(out, f.write(in[:n])...)
+				if in = in[n:]; len(f.tail) >= f.longest {
+					t.Fatalf("%s: held %d bytes", tc.value, len(f.tail))
+				}
 			}
+			out = append(out, f.flush(true)...)
+			took := time.Since(start)
+			if string(out) != Placeholder("s") {
+				t.Errorf("%s: output = %.80q", tc.value, out)
+			}
+			return took
 		}
-		out = append(out, f.flush(true)...)
-		// Well under a second a megabyte, even under the race detector.
-		if took := time.Since(start); took > 5*time.Second {
-			t.Errorf("%s: 10 MB took %v", tc.value, took)
+		// However fast the machine, 10 MB takes as long whole as in eighths; a filter
+		// that held the whole run took over seven times as long.
+		var eighths time.Duration
+		for range 8 {
+			eighths += hide(10 << 20 / 8)
 		}
-		if string(out) != Placeholder("s") {
-			t.Errorf("%s: output = %.80q", tc.value, out)
+		if whole := hide(10 << 20); whole > 3*eighths || whole > time.Minute {
+			t.Errorf("%s: 10 MB took %v whole and %v in eighths", tc.value, whole, eighths)
 		}
 	}
 }
