@@ -1,14 +1,14 @@
 class Keyward < Formula
   desc "Move shell secrets into a Keychain-keyed vault, resolved by a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v1.1.7/keyward-1.1.7.tar.gz"
-  version "1.1.7"
-  sha256 "27513558f2b3a3f6a6a25c07bafeba59df6f7cb5b679d4a223e43133c84d4750"
+  url "https://github.com/veilux-lab/keyward/releases/download/v1.2.0/keyward-1.2.0.tar.gz"
+  version "1.2.0"
+  sha256 "a67869729a0db32fe3bc0c21c73ca1db3f80e77e88c6c5eae543e5448693dc18"
   license "MIT"
 
   bottle do
-    root_url "https://github.com/veilux-lab/keyward/releases/download/v1.1.7"
-    sha256 arm64_sequoia: "eaafc47e38d884d69d3dc4209062706e5c1b99912f9a6d82f9afe4eb3bae39f0"
+    root_url "https://github.com/veilux-lab/keyward/releases/download/v1.2.0"
+    sha256 arm64_sequoia: "56fd0c448b70a9a98da4d880238e152122a1d843ae45b8fd91238c992dc9368f"
   end
 
   depends_on "go" => :build
@@ -33,7 +33,7 @@ class Keyward < Formula
 
   def caveats
     <<~EOS
-      Get started:   keyward setup
+      Get started:   keyward setup, in Terminal.app
       Then use:      keyward run --only VAR -- <command>
       More:          keyward help. Remove with keyward uninstall, not brew uninstall.
       Ignore the brew services lines below; keyward starts its own daemon.
