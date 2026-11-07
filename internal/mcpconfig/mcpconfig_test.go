@@ -1634,6 +1634,57 @@ func TestUndoStartsEachServerWithoutKeyward(t *testing.T) {
 	}
 }
 
+// A server wrapped by hand may turn off keyward run's output masking.
+func TestUndoReadsAServerWrappedWithNoMask(t *testing.T) {
+	for _, args := range [][]string{
+		{"run", "--no-mask", "--only", "PD_KEY", "--", "uvx", "pagerduty-mcp"},
+		{"run", "--only=PD_KEY", "--no-mask", "uvx", "pagerduty-mcp"},
+	} {
+		def := mcpconfig.Definition{Command: "keyward", Args: args, Env: map[string]string{"PD_KEY": "cap://pagerduty-key"}}
+		findings := mcpconfig.Undo(load(t, "pagerduty", def))
+		if len(findings) != 1 {
+			t.Fatalf("%v: findings = %+v", args, findings)
+		}
+		if s := parseJSON(t, findings[0]); s.Command != "uvx" || strings.Join(s.Args, " ") != "pagerduty-mcp" {
+			t.Errorf("%v: command = %s %v", args, s.Command, s.Args)
+		}
+	}
+}
+
+// keyward run reads --no-mask among its --only options, and so does Check: a
+// reference that a server's --only leaves out, or that it reads in its args,
+// is added to its first --only, and one a later --only names is not reported.
+func TestCheckReadsTheOnlyOfAServerWrappedWithNoMask(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".claude.json"), `{"mcpServers": {
+    "before": {"command": "keyward", "args": ["run", "--no-mask", "--only", "PD_KEY", "--", "uvx", "x"], "env": {"PD_KEY": "cap://pagerduty-key", "OTHER_KEY": "cap://other-key"}},
+    "inline": {"command": "keyward", "args": ["run", "--no-mask", "--only=PD_KEY", "--", "uvx", "x"], "env": {"PD_KEY": "cap://pagerduty-key", "OTHER_KEY": "cap://other-key"}},
+    "between": {"command": "keyward", "args": ["run", "--only", "PD_KEY", "--no-mask", "--only", "JIRA", "--", "uvx", "x"], "env": {"PD_KEY": "cap://pagerduty-key", "JIRA": "cap://jira-token"}},
+    "args": {"command": "keyward", "args": ["run", "--no-mask", "--only", "PD_KEY", "--", "printf", "[%s]", "--token", "${GITHUB_TOKEN}"], "env": {"PD_KEY": "cap://pagerduty-key"}}
+  }}`)
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	want := map[string]string{
+		"before": "run --no-mask --only PD_KEY,OTHER_KEY -- uvx x",
+		"inline": "run --no-mask --only=PD_KEY,OTHER_KEY -- uvx x",
+		"args":   `run --no-mask --only GITHUB_TOKEN,PD_KEY -- sh -c exec printf "[%s]" --token "$GITHUB_TOKEN"`,
+	}
+	findings := mcpconfig.Check(servers, refs)
+	if len(findings) != len(want) {
+		t.Fatalf("findings = %+v", findings)
+	}
+	for _, f := range findings {
+		if got := strings.Join(f.Want.Args, " "); got != want[f.Name] {
+			t.Errorf("%s: applied args = %q, want %q", f.Name, got, want[f.Name])
+		}
+		if again := mcpconfig.Check(load(t, f.Name, f.Want), refs); len(again) != 0 {
+			t.Errorf("%s is reported again once applied: %+v", f.Name, again)
+		}
+	}
+}
+
 // The mcp-remote bridge needs no keyward: sh fills the header from the environment.
 func TestUndoKeepsTheShellBridgeForARemoteServer(t *testing.T) {
 	s := parseJSON(t, undone(t, "Claude Code", "github"))

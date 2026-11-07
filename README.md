@@ -42,6 +42,39 @@ keyward doctor                            # check your setup
   it gets the values.
 - `keyward run` resolves every reference in its environment. Name just the ones a
   command needs with `--only`: `keyward run --only GITHUB_TOKEN -- gh pr list`.
+- If the command prints a value it was given, to an agent, a pipe or a file rather
+  than a terminal, `keyward run` shows `cap://name#masked` in its place, also when
+  the value is JSON-, URL- or base64-encoded (base64 only on one line), and says
+  so. A program that runs `keyward run` to read a value, such as a credential
+  helper like git's `credential.helper` or Claude Code's `apiKeyHelper`, gets the
+  placeholder instead, so such a command needs `--no-mask`. A multi-line value,
+  such as a private key or a credentials file, is hidden only when the command
+  prints it whole, as stored or in one of those encodings; a line of it printed
+  on its own, or the value re-indented, is not, though output that ends or pauses
+  right after its first lines can show the placeholder in their place. Masking
+  misses values under 8 characters or also in another environment variable, part
+  of a value, such as `${TOKEN:0:8}`, a value quoted for a shell or HTML, and
+  output that goes straight to a terminal, such as an agent tool's own terminal.
+- `--no-mask` turns masking off. Masking gives the command a pipe in place of a
+  file you redirect its output to, so for a tool that needs to seek in its output,
+  like `pg_dump -Fc`, use `--no-mask` or put the redirect inside the command:
+  `keyward run --only PGPASSWORD -- sh -c 'pg_dump -Fc db > db.dump'`. If the
+  output's destination fails, as on a full disk, the command's next write fails,
+  which ends most commands, and `keyward run` exits 1, or with the command's own
+  failure code, saying why; to keep a long-running process going, redirect inside
+  the command too. A command that moves to a process group of its own, as
+  `timeout` does, cannot read from the terminal while masked: use
+  `timeout --foreground`. A SIGINT or SIGQUIT that pexpect, node-pty or a shell in
+  another terminal sends to a masked `keyward run` in a terminal's foreground does
+  not reach the command: send SIGTERM instead, or use `--no-mask`. A SIGTSTP sent
+  to a masked `keyward run` alone, not to its process group as a terminal sends
+  it, stops `keyward run` but not the command.
+- Masked, `keyward run` also waits for anything the command leaves running with its
+  output, like the server in `sh -c 'server &'`. Once `keyward run` is stopped,
+  the server's later output is lost, and most servers die at their next write, but
+  some, like those using Python's logging, run on: stop it with kill. Redirect the
+  job's output inside the command, `sh -c 'server > server.log 2>&1 &'`, run all
+  of `keyward run` in the background instead, or use `--no-mask`.
 - Migration keeps an encrypted backup. Remove it with `keyward backups rm ~/.zshrc`
   once everything works.
 - `keyward doctor` also finds tokens still in plaintext in your shell files, the
@@ -127,8 +160,9 @@ If that happens, the daemon unregisters itself, and reinstalling then running
 ## What it protects
 
 Keyward prevents accidental exposure, not deliberate theft: any process running as
-you can ask for a value. It makes no network connections and logs names, never
-values.
+you can ask for a value. `keyward run` hides values in a command's output, within
+the limits under [Use](#use), but not in what it writes to its own files or sends
+over the network. It makes no network connections and logs names, never values.
 
 Report vulnerabilities privately ([SECURITY.md](SECURITY.md)). MIT licensed
 ([LICENSE](LICENSE)).

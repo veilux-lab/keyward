@@ -24,6 +24,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/launchd"
 	"github.com/veilux-lab/keyward/internal/ledger"
+	"github.com/veilux-lab/keyward/internal/mask"
 	"github.com/veilux-lab/keyward/internal/vault"
 	"golang.org/x/term"
 )
@@ -89,6 +90,10 @@ func main() {
 		Environ:        os.Environ,
 		ReadSecret:     cli.StdinSecretReader(os.Stdin, os.Stderr),
 		Exec:           syscall.Exec,
+		RunMasked:      runMasked,
+		Die:            mask.Die,
+		TerminalOut:    term.IsTerminal(int(os.Stdout.Fd())),
+		TerminalErr:    term.IsTerminal(int(os.Stderr.Fd())),
 		Home:           home,
 		Workdir:        workdir,
 		LookPath:       exec.LookPath,
@@ -163,6 +168,12 @@ func main() {
 		}
 	}
 	os.Exit(c.Run(os.Args[1:]))
+}
+
+// runMasked runs a command for keyward run with its secrets hidden in the output
+// that does not go to a terminal.
+func runMasked(path string, argv, env []string, secrets []mask.Secret) (mask.Exit, error) {
+	return mask.Run(mask.Command{Path: path, Args: argv, Env: env, Secrets: secrets, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr})
 }
 
 // stablePath is the keyward path that survives upgrades, for configs keyward

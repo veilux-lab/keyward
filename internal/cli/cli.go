@@ -13,9 +13,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/veilux-lab/keyward/internal/activity"
@@ -26,6 +30,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/ledger"
+	"github.com/veilux-lab/keyward/internal/mask"
 	"github.com/veilux-lab/keyward/internal/mcpconfig"
 	"github.com/veilux-lab/keyward/internal/migrate"
 	"github.com/veilux-lab/keyward/internal/resolve"
@@ -64,6 +69,18 @@ type CLI struct {
 	// Exec replaces the current process, normally syscall.Exec. Injected because
 	// the real thing cannot return, and therefore cannot be tested.
 	Exec func(path string, argv []string, env []string) error
+
+	// RunMasked runs a command with these values hidden in its output, normally
+	// mask.Run. run uses it when stdout or stderr is not a terminal and a value it
+	// resolved is worth hiding, unless --no-mask; nil runs every command through
+	// Exec.
+	RunMasked func(path string, argv, env []string, secrets []mask.Secret) (mask.Exit, error)
+	// Die ends keyward for the signal that ended a command RunMasked ran,
+	// normally mask.Die.
+	Die func(syscall.Signal)
+	// TerminalOut and TerminalErr say whether stdout and stderr are terminals,
+	// whose output run leaves as it is.
+	TerminalOut, TerminalErr bool
 
 	// Home and Workdir locate the files doctor reads by default. Fields rather than
 	// calls to os.UserHomeDir and os.Getwd so a test can point them at a temp
@@ -119,6 +136,10 @@ type CLI struct {
 
 	Record    func(activity.Event)
 	cancelled bool
+	// ranCommand is set once run has run a command and is returning its exit code.
+	ranCommand bool
+	// endedBy is the signal that ended that command, if one did.
+	endedBy syscall.Signal
 }
 
 const usage = `usage: keyward <command> [options]
@@ -149,6 +170,7 @@ options:
   --all                  backups rm: remove every backup
   --purge                uninstall: also delete the vault and its Keychain key
   --only VAR,...         run: resolve only these variables
+  --no-mask              run: do not hide the values in the command's output
   --allow-command-line   mcp wrap: also wrap a server whose URL reads a migrated secret
 
 examples:
@@ -159,10 +181,18 @@ examples:
 
 // Run dispatches a command and returns a process exit code.
 func (c *CLI) Run(args []string) int {
+	c.endedBy = 0
+	// Ending as the command did waits until the command is recorded, since Die
+	// does not return.
+	defer func() {
+		if c.endedBy != 0 && c.Die != nil {
+			c.Die(c.endedBy)
+		}
+	}()
 	args, hoisted := hoist(args)
 	if hoisted && args[0] == "run" {
-		// Options after run belong to the child command, so none can go before it.
-		fmt.Fprint(c.Stderr, "keyward run takes no options; put the command's own options after it\n")
+		// Moved after run, an option run does not know would be taken for the command.
+		fmt.Fprint(c.Stderr, "keyward run's options go right after run: keyward run --only VAR -- <command>\n")
 		return exitUsage
 	}
 	if c.Record == nil || len(args) == 0 {
@@ -179,14 +209,19 @@ func (c *CLI) Run(args []string) int {
 	}
 	start := time.Now()
 	store := c.Store
-	c.cancelled = false
+	c.cancelled, c.ranCommand = false, false
 	if store != nil {
 		c.Store = &activity.Store{Store: store, Command: command, Record: c.Record}
 	}
 	defer func() { c.Store = store }()
 	code := c.dispatch(args)
 	outcome := "ok"
-	if code == exitUsage {
+	if c.ranCommand {
+		// The code is the command's own; a 2 from it is not a keyward usage error.
+		if code != exitOK {
+			outcome = "error"
+		}
+	} else if code == exitUsage {
 		outcome = "usage"
 	} else if c.cancelled {
 		outcome = "cancelled"
@@ -401,16 +436,24 @@ func (c *CLI) daemon(args []string) int {
 }
 
 // run resolves every cap:// reference in the environment, or with --only just the
-// named variables, and replaces this process with the requested command.
+// named variables, and replaces this process with the requested command. When
+// the command's stdout or stderr is not a terminal, keyward instead stays as its
+// parent and hides the resolved values in that output, unless --no-mask, or no
+// value it resolved is worth hiding.
 //
 // Resolution happens before anything is executed. If any reference fails, nothing
 // runs — a command started with a literal cap:// value where a credential belongs
 // fails in a way that looks like a bad token rather than a missing one.
 func (c *CLI) run(args []string) int {
-	const runUsage = "usage: keyward run [--only VAR,...] [--] <command> [arguments]\n"
-	// --only is read only before the command; after it, options are the command's.
+	const runUsage = "usage: keyward run [--only VAR,...] [--no-mask] [--] <command> [arguments]\n"
+	// Options are read only before the command; after it, they are the command's.
 	var only []string
-	for len(args) > 0 && (args[0] == "--only" || strings.HasPrefix(args[0], "--only=")) {
+	noMask := false
+	for len(args) > 0 && (args[0] == "--no-mask" || args[0] == "--only" || strings.HasPrefix(args[0], "--only=")) {
+		if args[0] == "--no-mask" {
+			noMask, args = true, args[1:]
+			continue
+		}
 		value, inline := strings.CutPrefix(args[0], "--only=")
 		if !inline {
 			if len(args) < 2 {
@@ -467,11 +510,84 @@ func (c *CLI) run(args []string) int {
 	if c.Record != nil {
 		c.Record(activity.Event{Command: "run", Operation: "exec", Outcome: "started"})
 	}
+	if c.RunMasked != nil && !noMask && !(c.TerminalOut && c.TerminalErr) {
+		if secrets := mask.Select(result.Values, plainValues(env)); len(secrets) > 0 {
+			return c.runMasked(path, args, result.Env, secrets)
+		}
+	}
 	if err := c.Exec(path, args, result.Env); err != nil {
 		return c.fail("keyward run: executing %s: %v", args[0], err)
 	}
 	// Reached only when Exec is a test double; the real one does not return.
 	return exitOK
+}
+
+// runMasked runs a command with the values it was given hidden in its output,
+// says which values it hid, and returns how the command ended; Run then ends
+// the same way.
+func (c *CLI) runMasked(path string, args, env []string, secrets []mask.Secret) int {
+	exit, err := c.RunMasked(path, args, env, secrets)
+	if err != nil {
+		return c.fail("keyward run: executing %s: %v", args[0], err)
+	}
+	if exit.Err != nil && exit.Signal == syscall.SIGPIPE {
+		// keyward closed the pipe when the destination failed, which ended the
+		// command: fail with the cause, not by SIGPIPE, which says a reader went.
+		exit.Code, exit.Signal = exitFailure, 0
+	}
+	c.ranCommand, c.endedBy = true, exit.Signal
+	// Recorded before the notice, which a stderr that blocks may never let finish.
+	if c.Record != nil {
+		for _, name := range exit.Masked {
+			c.Record(activity.Event{Command: "run", Operation: "mask", Name: name, Outcome: "ok"})
+		}
+	}
+	// The stalled destination may be stderr, where writing more would block.
+	if !exit.Stalled {
+		c.maskNotice(args[0], exit)
+	}
+	if (exit.Err != nil || exit.Stalled) && exit.Code == exitOK {
+		// The command succeeded, but not all of its output arrived.
+		return exitFailure
+	}
+	return exit.Code
+}
+
+// maskNotice says on stderr what could not be passed on of a command's output,
+// and which values were hidden in it.
+func (c *CLI) maskNotice(command string, exit mask.Exit) {
+	// A reader that has gone away must fail these writes, not end keyward before it
+	// records the command. Caught, not ignored: signal.Reset cannot undo Ignore.
+	pipe := make(chan os.Signal, 1)
+	signal.Notify(pipe, syscall.SIGPIPE)
+	defer signal.Stop(pipe)
+	if exit.MidLine && (exit.Err != nil || len(exit.Masked) > 0) {
+		fmt.Fprintln(c.Stderr)
+	}
+	if exit.Err != nil {
+		fmt.Fprintf(c.Stderr, "keyward run: passing on the output of %s: %v\n", command, exit.Err)
+	}
+	if len(exit.Masked) == 0 {
+		return
+	}
+	for _, name := range exit.Masked {
+		fmt.Fprintf(c.Stderr, "keyward run: %s printed the value of %s, masked in the output\n", filepath.Base(command), name)
+	}
+	fmt.Fprint(c.Stderr, "  A command prints a secret when it gets it the wrong way, such as a curl user with no\n"+
+		"  password, or is told to show it. If it was not meant to print it, change the command;\n"+
+		"  do not look for the value. Output meant to carry the value, like a credential helper's,\n"+
+		"  needs keyward run --no-mask, which an AI agent must not add unless the user asks.\n")
+}
+
+// plainValues returns the values in env that are not references.
+func plainValues(env []string) []string {
+	var plain []string
+	for _, e := range env {
+		if _, value, ok := strings.Cut(e, "="); ok && !handle.IsRef(value) {
+			plain = append(plain, value)
+		}
+	}
+	return plain
 }
 
 // migrate moves the secrets in a file into the vault and leaves references.

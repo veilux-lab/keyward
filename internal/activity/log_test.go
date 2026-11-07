@@ -254,6 +254,16 @@ func TestConfigurationDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestAHiddenSecretCanBeRecordedByName(t *testing.T) {
+	l, err := activity.New(config(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Record(activity.Event{Command: "run", Operation: "mask", Name: "github-token", Outcome: "ok"}); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestEveryCLICommandCanBeRecorded(t *testing.T) {
 	l, err := activity.New(config(t))
 	if err != nil {
