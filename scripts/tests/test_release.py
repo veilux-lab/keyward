@@ -4,12 +4,42 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 BOTTLES = ["keyward-0.1.2.arm64_sequoia.bottle.tar.gz"]
+
+
+def setUpModule():
+    # make verify can run under git rebase --exec or a hook, which export GIT_DIR and others.
+    # Hiding them and the developer's git config keeps the tests' git on their fixtures.
+    environment = mock.patch.dict(os.environ)
+    environment.start()
+    unittest.addModuleCleanup(environment.stop)
+    for name in [name for name in os.environ if name.startswith("GIT_")]:
+        del os.environ[name]
+    os.environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    # Every script starts in an empty folder, so none can fall back on the checkout's repository.
+    folder = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(folder.cleanup)
+    unittest.addModuleCleanup(os.chdir, os.getcwd())
+    os.chdir(folder.name)
+
+
+def snapshot(*roots):
+    # Digests every file and directory under roots, so any change git makes shows.
+    paths = {}
+    for root in roots:
+        for directory, _, files in os.walk(root):
+            paths[directory] = os.stat(directory).st_mode
+            for name in files:
+                path = Path(directory, name)
+                paths[str(path)] = path.stat().st_mode, hashlib.sha256(path.read_bytes()).hexdigest()
+    return paths
 
 
 class ReleaseTests(unittest.TestCase):
@@ -30,7 +60,7 @@ class ReleaseTests(unittest.TestCase):
 
     def run_script(self, name, *args):
         return subprocess.run(["bash", str(SCRIPTS / name), *map(str, args)],
-                              env=self.env, text=True, capture_output=True)
+                              cwd=self.root, env=self.env, text=True, capture_output=True)
 
     def test_signing_requires_credentials_before_running_tools(self):
         for key in list(self.env):
@@ -67,6 +97,8 @@ class ReleaseTests(unittest.TestCase):
         self.tool("spctl", 'printf "spctl %s\\n" "$*" >> "$EVENTS"\n')
         self.tool("xcrun", 'printf "xcrun %s\\n" "$*" >> "$EVENTS"\n' +
                   f'if [ "$1" = notarytool ]; then printf \'{{"status":"{status}"}}\\n\'; fi\n')
+        # sign-release.sh packages LICENSE from its working directory, the checkout in CI.
+        (self.root / "LICENSE").write_text("fixture license\n")
         out = self.root / "release"
         for arch in ("arm64", "amd64"):
             directory = out / "unsigned" / arch
@@ -105,7 +137,12 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("keyward-signing.*")))
 
     def publishing_fixture(self, existing="missing", remote_sha=None, release_type="signed"):
-        self.env.update(GH_REPO="veilux-lab/keyward", GITHUB_SHA="a" * 40)
+        # If the gh fake were bypassed, gh would still find no login and no real repository.
+        for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+            self.env.pop(name, None)
+        (self.root / "gh-config").mkdir()
+        self.env.update(GH_REPO="example-owner/keyward-fixture", GH_CONFIG_DIR=str(self.root / "gh-config"),
+                        GITHUB_SHA="a" * 40)
         self.tool("git", f'printf "{remote_sha or "a" * 40}\\trefs/tags/v0.1.2\\n"\n')
         out = self.root / "release"
         out.mkdir()
@@ -128,6 +165,14 @@ class ReleaseTests(unittest.TestCase):
                    'if [ "$1 $2" = "release view" ]; then cat "$PUBLISH_STATE"; fi\n') +
                   'if [ "$1 $2" = "release download" ]; then\n while [ "$#" -gt 0 ]; do\n case "$1" in\n --pattern) pattern="$2"; shift;;\n --dir) directory="$2"; shift;;\n esac\n shift\n done\n cp "$PUBLISH_SOURCE/$pattern" "$directory/"\nfi\n')
         return out
+
+    def test_publishing_gives_gh_no_login_and_no_real_repository(self):
+        tokens = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+        self.env.update(dict.fromkeys(tokens, "developer-token"))
+        self.publishing_fixture()
+        self.assertEqual([name for name in tokens if name in self.env], [])
+        self.assertEqual(self.env["GH_REPO"], "example-owner/keyward-fixture")
+        self.assertEqual(list(Path(self.env["GH_CONFIG_DIR"]).iterdir()), [])
 
     def test_release_tag_is_pinned_to_tested_commit(self):
         out = self.publishing_fixture(remote_sha="b" * 40)
@@ -542,7 +587,11 @@ class FormulaUpdateTests(unittest.TestCase):
         hooks.mkdir()
         marker = self.root / "pushed"
         hook = hooks / "pre-push"
-        hook.write_text(f'#!/bin/bash\nset -eu\nif [ ! -f "{marker}" ]; then\n touch "{marker}"\n env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX git -C "{other}" push origin main\nfi\n')
+        # git exports its GIT_DIR to hooks; drop every GIT_* but the test's git config, so this
+        # push comes from the other clone.
+        hook.write_text(f'#!/bin/bash\nset -eu\nif [ ! -f "{marker}" ]; then\n touch "{marker}"\n'
+                        ' for name in "${!GIT_@}"; do [[ $name == GIT_CONFIG_* ]] || unset "$name"; done\n'
+                        f' git -C "{other}" push origin main\nfi\n')
         hook.chmod(0o755)
         self.git("-C", self.repo, "config", "core.hooksPath", hooks)
         result = self.update()
@@ -550,6 +599,43 @@ class FormulaUpdateTests(unittest.TestCase):
         self.assertIn("rejected", result.stderr)
         self.assertEqual(self.git("--git-dir", self.remote, "show", "HEAD:concurrent.txt"), "keep this change")
         self.assertEqual(self.git("--git-dir", self.remote, "show", "HEAD:Formula/keyward.rb"), self.formula.read_text().strip())
+
+
+class GitEnvironmentTests(unittest.TestCase):
+    # Runs the git tests as make verify would under git rebase --exec or a hook, with the
+    # GIT_* that locate a repository naming a scratch one and outside git config adding a hook.
+    def test_fixture_git_ignores_inherited_git_variables_and_global_config(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        scratch, home, hooks = root / "scratch", root / "home", root / "home/hooks"
+        scratch.mkdir()
+        hooks.mkdir(parents=True)
+        (scratch / "README.md").write_text("scratch\n")
+        for args in (["init", "-q"], ["add", "README.md"],
+                     ["-c", "user.name=Scratch", "-c", "user.email=scratch@example.invalid", "commit", "-qm", "scratch"]):
+            subprocess.run(["git", *args], cwd=scratch, capture_output=True, check=True)
+        # The hook leaves a file beside itself if git runs it.
+        hook = hooks / "reference-transaction"
+        hook.write_text('#!/bin/sh\ntouch "$0.ran"\n')
+        hook.chmod(0o755)
+        (home / ".gitconfig").write_text(f"[core]\n\thooksPath = {hooks}\n")
+        git_dir = scratch / ".git"
+        before = snapshot(scratch, home)
+        result = subprocess.run([sys.executable, __file__, "FormulaUpdateTests", "BottleTests"], text=True, capture_output=True,
+                                env=dict(os.environ, HOME=str(home), GIT_DIR=str(git_dir), GIT_WORK_TREE=str(scratch),
+                                         GIT_INDEX_FILE=str(git_dir / "index"), GIT_COMMON_DIR=str(git_dir),
+                                         GIT_OBJECT_DIRECTORY=str(git_dir / "objects"),
+                                         GIT_CONFIG_PARAMETERS=f"'core.hooksPath'='{hooks}'"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = snapshot(scratch, home)
+        self.assertEqual({path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}, set())
+
+    # A script that uses its working directory's repository, such as update-homebrew.sh,
+    # must reach only a fixture, never the checkout.
+    def test_scripts_start_outside_any_repository(self):
+        result = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
 
 
 if __name__ == "__main__":
