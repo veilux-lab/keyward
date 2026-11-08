@@ -22,7 +22,13 @@ def setUpModule():
     unittest.addModuleCleanup(environment.stop)
     for name in [name for name in os.environ if name.startswith("GIT_")]:
         del os.environ[name]
-    os.environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    # The tests' only git config turns off background maintenance, which outlives the
+    # command that starts it and can change a fixture after a test has looked at it.
+    config = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(config.cleanup)
+    gitconfig = Path(config.name, "gitconfig")
+    gitconfig.write_text("[maintenance]\n\tauto = false\n")
+    os.environ.update(GIT_CONFIG_GLOBAL=str(gitconfig), GIT_CONFIG_NOSYSTEM="1")
     # Every script starts in an empty folder, so none can fall back on the checkout's repository.
     folder = tempfile.TemporaryDirectory()
     unittest.addModuleCleanup(folder.cleanup)
@@ -630,6 +636,20 @@ class GitEnvironmentTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         after = snapshot(scratch, home)
         self.assertEqual({path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}, set())
+
+    # No fixture commit or push may leave git maintenance running in the background.
+    def test_fixture_git_starts_no_background_maintenance(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        work, remote = Path(temp.name, "work"), Path(temp.name, "remote.git")
+        trace = ""
+        for args in (["init", "-q", "--bare", str(remote)], ["init", "-q", str(work)],
+                     ["-C", str(work), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                      "commit", "-q", "--allow-empty", "-m", "fixture"],
+                     ["-C", str(work), "push", "-q", str(remote), "HEAD:refs/heads/main"]):
+            result = subprocess.run(["git", *args], text=True, capture_output=True, check=True, env=dict(os.environ, GIT_TRACE="1"))
+            trace += result.stderr
+        self.assertNotIn("maintenance run", trace)
 
     # A script that uses its working directory's repository, such as update-homebrew.sh,
     # must reach only a fixture, never the checkout.

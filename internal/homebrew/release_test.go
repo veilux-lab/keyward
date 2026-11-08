@@ -24,9 +24,21 @@ func TestMain(m *testing.M) {
 			os.Unsetenv(name)
 		}
 	}
-	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	// The tests' only git config turns off background maintenance, which outlives the
+	// command that starts it and can change a fixture after a test has looked at it.
+	dir, err := os.MkdirTemp("", "keyward-gitconfig")
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, "gitconfig"), []byte("[maintenance]\n\tauto = false\n"), 0o644)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(dir, "gitconfig"))
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 func repository(t *testing.T) string {
@@ -109,6 +121,26 @@ func TestFixtureGitIgnoresInheritedGitVariablesAndGlobalConfig(t *testing.T) {
 		if _, ok := after[path]; !ok {
 			t.Errorf("%s was removed", path)
 		}
+	}
+}
+
+// No fixture commit or push may leave git maintenance running in the background.
+func TestFixtureGitStartsNoBackgroundMaintenance(t *testing.T) {
+	repo, remote := repository(t), filepath.Join(t.TempDir(), "remote.git")
+	var trace strings.Builder
+	for _, args := range [][]string{{"init", "-q", "--bare", remote},
+		{"-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "--allow-empty", "-m", "again"},
+		{"-C", repo, "push", "-q", remote, "HEAD:refs/heads/main"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(os.Environ(), "GIT_TRACE=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		trace.Write(out)
+	}
+	if strings.Contains(trace.String(), "maintenance run") {
+		t.Errorf("fixture git started background maintenance:\n%s", trace.String())
 	}
 }
 

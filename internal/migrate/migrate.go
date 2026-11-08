@@ -295,7 +295,7 @@ func shownTrailer(trailer string) string {
 	if i < 0 {
 		return trailer
 	}
-	if shaped, _ := credentialShaped(trailer[i:]); !shaped {
+	if !credentialShaped(trailer[i:]) {
 		return trailer
 	}
 	return fmt.Sprintf("%s# <%d bytes hidden>", trailer[:i], len(trailer)-i-1)

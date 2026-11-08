@@ -78,10 +78,12 @@ keyward doctor                            # check your setup
 - Migration keeps an encrypted backup. Remove it with `keyward backups rm ~/.zshrc`
   once everything works.
 - `keyward doctor` also finds tokens still in plaintext in your shell files, the
-  current folder's `.env`, and MCP configs, and says where each one is without
-  printing it. Name another file to check it too: `keyward doctor .env.local`. If
-  a line it lists in a shell or `.env` file holds no secret, end it with
-  `# keyward:ignore`, and keyward leaves the line alone.
+  current folder's `.env`, and MCP configs, and says where each one is and what it
+  looks like, such as "a GitHub token" or "32 hex characters", without printing
+  it. Nearby lines of one kind are listed as one range. Name another file to check
+  it too: `keyward doctor .env.local`. If a line it lists in a shell or `.env`
+  file holds no secret, end it with `# keyward:ignore`, marking each line of a
+  range of values that may be credentials, and keyward leaves the line alone.
 - Keyward writes `~/.agents/keyward.md`, instructions for AI agents; `keyward agents
   link` points your agents at it, and `unlink` reverses that.
 - `keyward help` lists every command.

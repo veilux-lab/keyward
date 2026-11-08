@@ -249,8 +249,9 @@ func TestDiffShowsLineNumbersAndReasons(t *testing.T) {
 	if !strings.Contains(diff, "line 8") {
 		t.Errorf("diff does not give a line number:\n%s", diff)
 	}
-	if !strings.Contains(diff, "eyJ") {
-		t.Errorf("diff does not explain why the line was picked:\n%s", diff)
+	// It names the kind, as the prefix is part of the value.
+	if !strings.Contains(diff, "base64-encoded JSON") || strings.Contains(diff, "eyJ") {
+		t.Errorf("diff does not explain why the line was picked without its value:\n%s", diff)
 	}
 	if !strings.Contains(diff, "hidden") {
 		t.Errorf("diff does not indicate the value was withheld:\n%s", diff)
@@ -316,6 +317,8 @@ func TestDiffHidesATrailerShapedLikeACredential(t *testing.T) {
 		{"UUID", "123e4567-e89b-12d3-a456-426614174000"},
 		{"split by slashes", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
 		{"named", "PGPASSWORD=s3cretpassw0rd"},
+		// doctor leaves a placeholder out, but printing hides it all the same.
+		{"placeholder", "DATABASE_URL=postgres://app:<password>@localhost:5432/app"},
 	} {
 		t.Run(tt.shape, func(t *testing.T) {
 			diff := mustPlan(t, "/tmp/.zshrc", "export GITHUB_TOKEN="+value+"  # was "+tt.old+"\n").Diff()
@@ -483,6 +486,24 @@ func TestUnmovableFindsSecretsByName(t *testing.T) {
 	}
 }
 
+// A value Detect only may call a credential counts too, commented out or not
+// parsed, judged as a plain one is: a password does, and so does a single flag, but
+// a list of flags does not.
+func TestUnmovableFindsValuesThatMayBeCredentials(t *testing.T) {
+	content := "# export DB_CONN='Xk9#mZ2!vLp7@wRt4%yNb8&cFj1^qD'\n" +
+		"export A=1 DB_CONN='Xk9#mZ2!vLp7@wRt4%yNb8&cFj1^qD'\n" +
+		`# export CPPFLAGS="-I/Library/Developer/CommandLineTools/SDKs/MacOSX14.sdk/usr/include"` + "\n" +
+		`# export CPPFLAGS="-I/opt/homebrew/opt/libpq/include -I/opt/homebrew/opt/openssl@3/include"` + "\n"
+
+	var got []string
+	for _, u := range migrate.Scan([]byte(content)).Unmovable() {
+		got = append(got, fmt.Sprintf("%d %s %v", u.Line, u.Kind, u.KnownShape))
+	}
+	if want := "1 comment false, 2 unsupported syntax false, 3 comment false"; strings.Join(got, ", ") != want {
+		t.Errorf("Unmovable() = %v, want %s", got, want)
+	}
+}
+
 // Ordinary rc lines stay out of the report, including URLs, paths, versions, long
 // identifiers, credentials the shell expands, and commented-out settings.
 func TestUnmovableLeavesOrdinaryLinesAlone(t *testing.T) {
@@ -497,7 +518,7 @@ func TestUnmovableLeavesOrdinaryLinesAlone(t *testing.T) {
 		"alias proj='cd $HOME/Projects2024/SomeVeryLongProjectName'",
 		"alias ext='cd /Volumes/ExternalDrive2024/SomeVeryLongFolderName'",
 		"# placeholders: 00000000-0000-0000-0000-000000000000, ffffffff-ffff-ffff-ffff-ffffffffffff",
-		`# export CPPFLAGS="-I/Library/Developer/CommandLineTools/SDKs/MacOSX14.sdk/usr/include"`,
+		`# export CPPFLAGS="-I/Library/Developer/CommandLineTools/SDKs/MacOSX14.sdk/usr/include -I/opt/homebrew/include"`,
 		"# Uses Bearer authentication; sk-SK is the Slovak locale",
 		"# Basic Authentication for the proxy, Bearer Authentication upstream",
 		"# git clone https://oauth2:$GITLAB_TOKEN@gitlab.com/group/repo.git",
@@ -519,6 +540,180 @@ func TestUnmovableLeavesOrdinaryLinesAlone(t *testing.T) {
 	p := mustPlan(t, "/tmp/.zshrc", strings.Join(ordinary, "\n")+"\n")
 	if out := p.Unmovable(); out != "" {
 		t.Errorf("ordinary lines were reported:\n%s", out)
+	}
+}
+
+// Hashes for the tests of what a comment shows to be no token.
+const (
+	sha256Hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	commitHex = "3f9a2b7c1d8e4f6a0b5c9d2e7f1a4b8c3d6e9f02"
+)
+
+// In a comment, hex written after its algorithm, at that algorithm's length, or as
+// a commit in a link's path is a hash, not a token.
+func TestUnmovableLeavesHashesInCommentsAlone(t *testing.T) {
+	ordinary := []string{
+		"# pinned to nginx@sha256:" + sha256Hex,
+		"# SHA256:" + sha256Hex + " is the release tarball's",
+		"# was sha1:" + commitHex,
+		"# lockfile sha512-" + sha256Hex + sha256Hex,
+		"# https://github.com/example-org/payments/commit/" + commitHex,
+		"# https://github.com/example-org/payments/blob/" + commitHex + "/deploy.sh",
+		"# https://github.com/example-org/payments/tree/" + commitHex + "?tab=readme",
+		"export EDITOR=vim # fixed in https://github.com/example-org/payments/commit/" + commitHex,
+	}
+	p := mustPlan(t, "/tmp/.zshrc", strings.Join(ordinary, "\n")+"\n")
+	if out := p.Unmovable(); out != "" {
+		t.Errorf("hashes were reported:\n%s", out)
+	}
+}
+
+// Only those forms say so. Another word for a hash on the line, a digest without
+// its colon or at another length, and hex in an alias are no proof.
+func TestUnmovableStillFindsHexBesideWordsForAHash(t *testing.T) {
+	shapes := []string{
+		"# commit " + commitHex + " fixed the deploy script",
+		"# md5 9e107d9d372bb6826bd81d3542a419d6 of the release tarball",
+		"# sha256 " + sha256Hex,
+		"# sha256:" + sha256Hex[:60],
+		"# https://github.com/example-org/payments/commits/" + commitHex,
+		"# sha256:" + sha256Hex + "Zx9kQm2vLp7wRt4yNb8cFj1h",
+		"alias pin='docker pull nginx@sha256:" + sha256Hex + "'",
+	}
+	out := mustPlan(t, "/tmp/.zshrc", strings.Join(shapes, "\n")+"\n").Unmovable()
+	for i := range shapes {
+		if !strings.Contains(out, fmt.Sprintf("  line %d (", i+1)) {
+			t.Errorf("line %d holds hex that may be a key but was not reported:\n%s", i+1, out)
+		}
+	}
+}
+
+// In a comment, the path of a link to a host that keeps documents holds a
+// document's ID, which looks random but is no token. Beside one, a commit's hash,
+// an identifier, another document's ID and a query's short values are none either.
+func TestUnmovableLeavesDocumentIDsInCommentsAlone(t *testing.T) {
+	ordinary := []string{
+		"# see https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit",
+		"# https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+		"# runbook https://www.notion.so/example/Payments-Runbook-9f8e7d6c5b4a39281706fedcba098765",
+		"# https://example.notion.site/Onboarding-9f8e7d6c5b4a39281706fedcba098765",
+		"# https://gist.github.com/someone/9f8e7d6c5b4a39281706fedcba098765",
+		"# demo https://www.loom.com/share/9f8e7d6c5b4a39281706fedcba098765",
+		"export EDITOR=vim # design https://www.figma.com/design/AbCdEf1234GhIjKl5678MnOpQr/Checkout",
+		"# https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit,https://github.com/example-org/payments/commit/" + commitHex,
+		"# see https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit for ReactiveOAuth2AuthorizedClientManagerConfigurer",
+		"# https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit https://www.notion.so/acme/Payments-Runbook-9f8e7d6c5b4a39281706fedcba098765",
+		"# https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit?usp=sharing&ouid=103906482216797654321&rtpof=true&sd=true",
+	}
+	p := mustPlan(t, "/tmp/.zshrc", strings.Join(ordinary, "\n")+"\n")
+	if out := p.Unmovable(); out != "" {
+		t.Errorf("documents' IDs were reported:\n%s", out)
+	}
+}
+
+// Only the path holds a document's ID: a token in a link's query or fragment, in a
+// link to another host, or beside the link is listed as any is, and beside a
+// document's ID, one of 30 characters or more is listed whatever it mixes.
+func TestUnmovableStillFindsTokensBesideDocumentLinks(t *testing.T) {
+	shapes := []string{
+		"# https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/export?format=txt&access_token=ya29." + "a0AfB_byCxK9mZ2vLp7wRt4yNb8cFj1hGd5sAe3u",
+		"# https://docs.google.com/oauth/callback#access_token=ya29." + "a0AfB_byCxK9mZ2vLp7wRt4yNb8cFj1hGd5sAe3u",
+		"# https://www.notion.so/example/Runbook?token=0123456789abcdef0123456789abcdef01234567",
+		"# https://docs.google.com.example.net/d/Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://mcp.example.com/Ab3dEf6hIj9lMn2pQr5tUv8xYz01/mcp",
+		"# https://www.loom.com/share/x Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"alias doc='open https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit'",
+		// A path ends at what a document's ID is never written with, or where
+		// another URL's scheme starts.
+		"# links: https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit,https://hooks.slack." +
+			"com/services/T0ABCDEFG/B0ABCDEFG/Ab3dEf6hIj9lMn2pQr5tUv8x",
+		"# runbook https://www.notion.so/acme/Runbook-9f8e7d6c5b4a39281706fedcba098765|key=Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://docs.google.com/document/d/abc/edit;Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# (https://docs.google.com/document/d/abc/edit)Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# [https://docs.google.com/document/d/abc/edit]Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# <https://docs.google.com/document/d/abc/edit>Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://docs.google.com/document/d/abc/edithttps://api.example.com/v1/Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"export EDITOR=vim # https://docs.google.com/document/d/abc/edit,Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://docs.google.com/document/d/abc/edit&Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://docs.google.com/document/d/abc/edit=Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://www.notion.so/acme/Runbook-9f8e7d6c5b4a39281706fedcba098765+Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://www.figma.com/design/AbCdEf1234GhIjKl5678MnOpQr/Checkout@Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://www.figma.com/design/AbCdEf1234GhIjKl5678MnOpQr/Checkout!Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://docs.google.com/document/d/abc/edit*Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://www.notion.so/acme/Runbook-9f8e7d6c5b4a39281706fedcba098765~Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://docs.google.com/document/d/abc/edit$Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://docs.google.com/document/d/abc/edit%20Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://www.figma.com/design/AbCdEf1234GhIjKl5678MnOpQr/Checkout%0AAb3dEf6hIj9lMn2pQr5tUv8xYz01",
+		"# https://www.notion.so/acme/Runbook-9f8e7d6c5b4a39281706fedcba098765^Ab3dEf6hIj9lMn2pQr5tUv8xYz01",
+		`# https://docs.google.com/document/d/abc/edit\nAb3dEf6hIj9lMn2pQr5tUv8xYz01`,
+		"# https://docs.google.com/document/d/abc/editAb3dEf6hIj9lMn2pQr5tUv8xYz01https://example.com/next",
+		"# https://www.figma.com/design/AbCdEf1234GhIjKl5678MnOpQr/Checkout-Ab3dEf6hIj9lMn2pQr5tUv8xYz01s3://bucket/next",
+		"# https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit,k3j9x2m1q8w7e6r5t4y3u2i1o0p9a8s7",
+		"# https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345|key=K3J9X2M1Q8W7E6R5T4Y3U2I1O0P9A8S7",
+		"# https://www.notion.so/acme/Runbook-9f8e7d6c5b4a39281706fedcba098765,https://api.example.com/v1/k3j9x2m1q8w7e6r5t4y3u2i1o0p9a8s7",
+		"# https://gist.github.com/someone/9f8e7d6c5b4a39281706fedcba098765 K3J9X2M1Q8W7E6R5T4Y3U2I1O0P9A8S7",
+		"# https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/editk3j9x2m1q8w7e6r5t4y3u2i1o0p9a8s7https://example.com/next",
+		"export EDITOR=vim # https://www.loom.com/share/9f8e7d6c5b4a39281706fedcba098765;k3j9x2m1q8w7e6r5t4y3u2i1o0p9a8s7",
+	}
+	out := mustPlan(t, "/tmp/.zshrc", strings.Join(shapes, "\n")+"\n").Unmovable()
+	for i := range shapes {
+		if !strings.Contains(out, fmt.Sprintf("  line %d (", i+1)) {
+			t.Errorf("line %d holds a token but was not reported:\n%s", i+1, out)
+		}
+	}
+}
+
+// In a comment, a CamelCase identifier, such as a class's name, mixes upper case,
+// lower case and digits as a key does, but is made of words and acronyms, so it is
+// no token.
+func TestUnmovableLeavesCamelCaseIdentifiersInCommentsAlone(t *testing.T) {
+	ordinary := []string{
+		"# Client: OAuth2AuthorizedClientManager and ReactiveOAuth2AuthorizedClientManager",
+		"# Spring Security: OAuth2TokenRelayGatewayFilterFactory, ReactiveOAuth2CredentialsProviderManager",
+		"export EDITOR=vim # see ReactiveOAuth2AuthorizedClientManagerConfigurer",
+		"# see HTTPServerConnectionFactory2Builder and EC2InstanceMetadataServiceClient",
+		"# AWSCredentialsProvider2Chain reads the profile",
+	}
+	p := mustPlan(t, "/tmp/.zshrc", strings.Join(ordinary, "\n")+"\n")
+	if out := p.Unmovable(); out != "" {
+		t.Errorf("identifiers were reported:\n%s", out)
+	}
+}
+
+// A passphrase can read as CamelCase, but its capitalised words hold no acronym an
+// identifier is written with, as OAuth is, so one is listed wherever its digits
+// are, and where a short word such as I, A, OK, TV or USA runs its capitals into
+// the next word's, as are one right after a word for a credential, one with more
+// than two digits, one whose digits end it, and one outside a comment.
+func TestUnmovableStillFindsCamelCasePassphrases(t *testing.T) {
+	shapes := []string{
+		"# CorrectHorseOKBattery42Staple",
+		"# WatchingTVTonight7Together",
+		"# TravellingUSAThisSummer24Again",
+		"# RememberingWhatIAteYesterday4Lunch",
+		"# WaitingForAPassphrase7Tonight",
+		"# vpn password: CorrectHorseBatteryStaple1",
+		"# api key: PurpleElephantDancingMoon42",
+		"# apiKey=TerribleMondayCoffeeMachine7",
+		"# pwd CorrectHorseBatteryStaple1",
+		"# old creds: CorrectHorseBatteryStaple1",
+		"# root pw: PurpleMonkeyDishwasher42",
+		"# wifi password is PurpleMonkeyDishwasher42",
+		"# export WIFI_PHRASE=GlacierIrisLotusVortexHarbor9",
+		"# PurpleMonkey42DishwasherBlue",
+		"# 42PurpleMonkeyDishwasherBlue",
+		"# Purple4Monkey7DishwasherBlue",
+		"# Lamp42KettleDishwasherBlue",
+		"export EDITOR=vim # PurpleMonkeyDishwasher42",
+		"# OAuth2Authorized3Client4Manager",
+		"# OAuth2AuthorizedClientManagerV2",
+		"alias show='echo OAuth2AuthorizedClientManagerConfig'",
+	}
+	out := mustPlan(t, "/tmp/.zshrc", strings.Join(shapes, "\n")+"\n").Unmovable()
+	for i := range shapes {
+		if !strings.Contains(out, fmt.Sprintf("  line %d (", i+1)) {
+			t.Errorf("line %d holds a token but was not reported:\n%s", i+1, out)
+		}
 	}
 }
 
@@ -585,7 +780,7 @@ func TestUnmovableSaysWhichTextHasAKnownShape(t *testing.T) {
 		"export EDITOR=vim # AKIAIOSFODNN7EXAMPLE\n" +
 		"alias db='psql postgres://admin:hunter2@db.internal/prod'\n" +
 		// Too plain to look like a token in text, but Detect knows its shape.
-		"declare -x GITHUB_TOKEN=ghp_aaaaaaaaaaaaaaaaaaaaaaaa\n" +
+		"declare -x GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwx\n" +
 		"# export PGPASSWORD=s3cretpassw0rd\n" +
 		"# export GIT_AUTHOR_EMAIL=someone@example.com\n" +
 		"# old: 0123456789abcdef0123456789abcdef\n" +

@@ -134,7 +134,7 @@ func TestDoctorFailsOnACredentialMigrateCannotMove(t *testing.T) {
 			}
 			for _, want := range []string{
 				rc + ":2  (" + tc.kind + ")",
-				rc + ":2  (" + tc.kind + ")\n      credential-shaped text keyward cannot move\n      remove it by hand in an editor\n",
+				rc + ":2  (" + tc.kind + ")\n      a GitHub token\n      remove it by hand in an editor\n",
 			} {
 				if !strings.Contains(h.out(), want) {
 					t.Errorf("stdout lacks %q:\n%s", want, h.out())
@@ -706,6 +706,23 @@ func TestDoctorListsPossibleCredentialsWithoutFailing(t *testing.T) {
 	}
 	if got := lastLine(h.out()); got != "No problems found." {
 		t.Errorf("last line = %q", got)
+	}
+}
+
+// doctor says what each line it lists holds, and lists nearby lines as one range,
+// which it advises marking only where the range holds no credential of a known
+// shape, as the README says.
+func TestTheReadmeSaysWhatDoctorsListShows(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(data)), " ")
+	for _, want := range []string{"says where each one is and what it looks like, such as \"a GitHub token\"", "Nearby lines of one kind are listed as one range.",
+		"end it with `# keyward:ignore`, marking each line of a range of values that may be credentials,"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("README lacks %q", want)
+		}
 	}
 }
 
