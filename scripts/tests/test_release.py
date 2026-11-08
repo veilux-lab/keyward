@@ -23,6 +23,11 @@ def setUpModule():
     for name in [name for name in os.environ if name.startswith("GIT_")]:
         del os.environ[name]
     os.environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    # Every script starts in an empty folder, so none can fall back on the checkout's repository.
+    folder = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(folder.cleanup)
+    unittest.addModuleCleanup(os.chdir, os.getcwd())
+    os.chdir(folder.name)
 
 
 def snapshot(*roots):
@@ -55,7 +60,7 @@ class ReleaseTests(unittest.TestCase):
 
     def run_script(self, name, *args):
         return subprocess.run(["bash", str(SCRIPTS / name), *map(str, args)],
-                              env=self.env, text=True, capture_output=True)
+                              cwd=self.root, env=self.env, text=True, capture_output=True)
 
     def test_signing_requires_credentials_before_running_tools(self):
         for key in list(self.env):
@@ -92,6 +97,8 @@ class ReleaseTests(unittest.TestCase):
         self.tool("spctl", 'printf "spctl %s\\n" "$*" >> "$EVENTS"\n')
         self.tool("xcrun", 'printf "xcrun %s\\n" "$*" >> "$EVENTS"\n' +
                   f'if [ "$1" = notarytool ]; then printf \'{{"status":"{status}"}}\\n\'; fi\n')
+        # sign-release.sh packages LICENSE from its working directory, the checkout in CI.
+        (self.root / "LICENSE").write_text("fixture license\n")
         out = self.root / "release"
         for arch in ("arm64", "amd64"):
             directory = out / "unsigned" / arch
@@ -130,7 +137,12 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob("keyward-signing.*")))
 
     def publishing_fixture(self, existing="missing", remote_sha=None, release_type="signed"):
-        self.env.update(GH_REPO="veilux-lab/keyward", GITHUB_SHA="a" * 40)
+        # If the gh fake were bypassed, gh would still find no login and no real repository.
+        for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+            self.env.pop(name, None)
+        (self.root / "gh-config").mkdir()
+        self.env.update(GH_REPO="example-owner/keyward-fixture", GH_CONFIG_DIR=str(self.root / "gh-config"),
+                        GITHUB_SHA="a" * 40)
         self.tool("git", f'printf "{remote_sha or "a" * 40}\\trefs/tags/v0.1.2\\n"\n')
         out = self.root / "release"
         out.mkdir()
@@ -153,6 +165,14 @@ class ReleaseTests(unittest.TestCase):
                    'if [ "$1 $2" = "release view" ]; then cat "$PUBLISH_STATE"; fi\n') +
                   'if [ "$1 $2" = "release download" ]; then\n while [ "$#" -gt 0 ]; do\n case "$1" in\n --pattern) pattern="$2"; shift;;\n --dir) directory="$2"; shift;;\n esac\n shift\n done\n cp "$PUBLISH_SOURCE/$pattern" "$directory/"\nfi\n')
         return out
+
+    def test_publishing_gives_gh_no_login_and_no_real_repository(self):
+        tokens = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+        self.env.update(dict.fromkeys(tokens, "developer-token"))
+        self.publishing_fixture()
+        self.assertEqual([name for name in tokens if name in self.env], [])
+        self.assertEqual(self.env["GH_REPO"], "example-owner/keyward-fixture")
+        self.assertEqual(list(Path(self.env["GH_CONFIG_DIR"]).iterdir()), [])
 
     def test_release_tag_is_pinned_to_tested_commit(self):
         out = self.publishing_fixture(remote_sha="b" * 40)
@@ -610,6 +630,12 @@ class GitEnvironmentTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         after = snapshot(scratch, home)
         self.assertEqual({path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}, set())
+
+    # A script that uses its working directory's repository, such as update-homebrew.sh,
+    # must reach only a fixture, never the checkout.
+    def test_scripts_start_outside_any_repository(self):
+        result = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
 
 
 if __name__ == "__main__":
