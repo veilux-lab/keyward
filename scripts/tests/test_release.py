@@ -6,14 +6,24 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 BOTTLES = ["keyward-0.1.2.arm64_sequoia.bottle.tar.gz"]
 
 
-class ReleaseTests(unittest.TestCase):
+class GitIsolatedTestCase(unittest.TestCase):
+    # Hides every GIT_* variable for the test, so neither fixture git nor the scripts
+    # under test follow a GIT_DIR that git rebase --exec exported.
     def setUp(self):
+        hidden = {name: os.environ.pop(name) for name in list(os.environ) if name.startswith("GIT_")}
+        self.addCleanup(os.environ.update, hidden)
+
+
+class ReleaseTests(GitIsolatedTestCase):
+    def setUp(self):
+        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -269,8 +279,9 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(self.events.exists())
 
 
-class ReleaseMetadataTests(unittest.TestCase):
+class ReleaseMetadataTests(GitIsolatedTestCase):
     def setUp(self):
+        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.output = Path(self.temp.name)
@@ -324,8 +335,9 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("keyward-0.1.2-darwin-universal.dmg", (self.output / "SHA256SUMS").read_text())
 
 
-class BottleTests(unittest.TestCase):
+class BottleTests(GitIsolatedTestCase):
     def setUp(self):
+        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -475,8 +487,9 @@ class BottleTests(unittest.TestCase):
         self.assertNotIn("untap", events)
 
 
-class FormulaUpdateTests(unittest.TestCase):
+class FormulaUpdateTests(GitIsolatedTestCase):
     def setUp(self):
+        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -542,7 +555,8 @@ class FormulaUpdateTests(unittest.TestCase):
         hooks.mkdir()
         marker = self.root / "pushed"
         hook = hooks / "pre-push"
-        hook.write_text(f'#!/bin/bash\nset -eu\nif [ ! -f "{marker}" ]; then\n touch "{marker}"\n env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX git -C "{other}" push origin main\nfi\n')
+        # git exports its GIT_DIR to hooks; drop every GIT_* so this push comes from the other clone.
+        hook.write_text(f'#!/bin/bash\nset -eu\nif [ ! -f "{marker}" ]; then\n touch "{marker}"\n unset "${{!GIT_@}}"\n git -C "{other}" push origin main\nfi\n')
         hook.chmod(0o755)
         self.git("-C", self.repo, "config", "core.hooksPath", hooks)
         result = self.update()
@@ -550,6 +564,29 @@ class FormulaUpdateTests(unittest.TestCase):
         self.assertIn("rejected", result.stderr)
         self.assertEqual(self.git("--git-dir", self.remote, "show", "HEAD:concurrent.txt"), "keep this change")
         self.assertEqual(self.git("--git-dir", self.remote, "show", "HEAD:Formula/keyward.rb"), self.formula.read_text().strip())
+
+
+class GitEnvironmentTests(GitIsolatedTestCase):
+    # make verify can run under git rebase --exec, and the tests must leave the
+    # repository its GIT_DIR names alone.
+    def test_fixture_git_ignores_an_inherited_git_dir(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        scratch = Path(temp.name)
+        subprocess.run(["git", "init", "-q", "--bare"], cwd=scratch, capture_output=True, check=True)
+
+        def state():
+            refs = subprocess.run(["git", "--git-dir", str(scratch), "for-each-ref"],
+                                  text=True, capture_output=True, check=True).stdout
+            return refs + (scratch / "HEAD").read_text() + (scratch / "config").read_text()
+
+        before = state()
+        result = unittest.TestResult()
+        with mock.patch.dict(os.environ, GIT_DIR=str(scratch)):
+            unittest.TestSuite([FormulaUpdateTests("test_update_publishes_only_the_formula_commit"),
+                                BottleTests("test_merge_writes_the_bottle_into_the_release_formula")]).run(result)
+        self.assertEqual(state(), before)
+        self.assertTrue(result.wasSuccessful(), "".join(trace for _, trace in result.errors + result.failures))
 
 
 if __name__ == "__main__":

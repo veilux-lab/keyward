@@ -17,18 +17,65 @@ import (
 
 func repository(t *testing.T) string {
 	t.Helper()
+	unsetGitEnvironment(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("release fixture\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "README.md"}, {"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("fixture git: %v: %s", err, out)
-		}
+		git(t, dir, args...)
 	}
 	return dir
+}
+
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fixture git: %v: %s", err, out)
+	}
+	return string(out)
+}
+
+// unsetGitEnvironment hides every GIT_* variable until the test ends, so neither
+// fixture git nor Prepare follows a GIT_DIR that git rebase --exec exported.
+func unsetGitEnvironment(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "GIT_") {
+			t.Setenv(name, "") // restores the caller's value afterwards
+			os.Unsetenv(name)
+		}
+	}
+}
+
+// make verify can run under git rebase --exec, and the tests must leave the
+// repository its GIT_DIR names alone.
+func TestFixtureGitIgnoresAnInheritedGitDir(t *testing.T) {
+	unsetGitEnvironment(t)
+	scratch := t.TempDir()
+	git(t, scratch, "init", "-q", "--bare")
+	state := func() string {
+		s := git(t, scratch, "--git-dir", scratch, "for-each-ref")
+		for _, name := range []string{"HEAD", "config"} {
+			b, err := os.ReadFile(filepath.Join(scratch, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			s += string(b)
+		}
+		return s
+	}
+	before := state()
+	t.Setenv("GIT_DIR", scratch)
+	if _, err := homebrew.Prepare(repository(t), "0.1.0", t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if after := state(); after != before {
+		t.Errorf("the repository GIT_DIR names changed to:\n%s\nfrom:\n%s", after, before)
+	}
 }
 
 func TestReleaseArchivesOnlyCommittedFilesAndPinsFormula(t *testing.T) {
