@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -13,17 +14,31 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 BOTTLES = ["keyward-0.1.2.arm64_sequoia.bottle.tar.gz"]
 
 
-class GitIsolatedTestCase(unittest.TestCase):
-    # Hides every GIT_* variable for the test, so neither fixture git nor the scripts
-    # under test follow a GIT_DIR that git rebase --exec exported.
-    def setUp(self):
-        hidden = {name: os.environ.pop(name) for name in list(os.environ) if name.startswith("GIT_")}
-        self.addCleanup(os.environ.update, hidden)
+def setUpModule():
+    # make verify can run under git rebase --exec or a hook, which export GIT_DIR and others.
+    # Hiding them and the developer's git config keeps the tests' git on their fixtures.
+    environment = mock.patch.dict(os.environ)
+    environment.start()
+    unittest.addModuleCleanup(environment.stop)
+    for name in [name for name in os.environ if name.startswith("GIT_")]:
+        del os.environ[name]
+    os.environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
 
 
-class ReleaseTests(GitIsolatedTestCase):
+def snapshot(*roots):
+    # Digests every file and directory under roots, so any change git makes shows.
+    paths = {}
+    for root in roots:
+        for directory, _, files in os.walk(root):
+            paths[directory] = os.stat(directory).st_mode
+            for name in files:
+                path = Path(directory, name)
+                paths[str(path)] = path.stat().st_mode, hashlib.sha256(path.read_bytes()).hexdigest()
+    return paths
+
+
+class ReleaseTests(unittest.TestCase):
     def setUp(self):
-        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -279,9 +294,8 @@ class ReleaseTests(GitIsolatedTestCase):
         self.assertFalse(self.events.exists())
 
 
-class ReleaseMetadataTests(GitIsolatedTestCase):
+class ReleaseMetadataTests(unittest.TestCase):
     def setUp(self):
-        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.output = Path(self.temp.name)
@@ -335,9 +349,8 @@ class ReleaseMetadataTests(GitIsolatedTestCase):
         self.assertIn("keyward-0.1.2-darwin-universal.dmg", (self.output / "SHA256SUMS").read_text())
 
 
-class BottleTests(GitIsolatedTestCase):
+class BottleTests(unittest.TestCase):
     def setUp(self):
-        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -487,9 +500,8 @@ class BottleTests(GitIsolatedTestCase):
         self.assertNotIn("untap", events)
 
 
-class FormulaUpdateTests(GitIsolatedTestCase):
+class FormulaUpdateTests(unittest.TestCase):
     def setUp(self):
-        super().setUp()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -555,8 +567,11 @@ class FormulaUpdateTests(GitIsolatedTestCase):
         hooks.mkdir()
         marker = self.root / "pushed"
         hook = hooks / "pre-push"
-        # git exports its GIT_DIR to hooks; drop every GIT_* so this push comes from the other clone.
-        hook.write_text(f'#!/bin/bash\nset -eu\nif [ ! -f "{marker}" ]; then\n touch "{marker}"\n unset "${{!GIT_@}}"\n git -C "{other}" push origin main\nfi\n')
+        # git exports its GIT_DIR to hooks; drop every GIT_* but the test's git config, so this
+        # push comes from the other clone.
+        hook.write_text(f'#!/bin/bash\nset -eu\nif [ ! -f "{marker}" ]; then\n touch "{marker}"\n'
+                        ' for name in "${!GIT_@}"; do [[ $name == GIT_CONFIG_* ]] || unset "$name"; done\n'
+                        f' git -C "{other}" push origin main\nfi\n')
         hook.chmod(0o755)
         self.git("-C", self.repo, "config", "core.hooksPath", hooks)
         result = self.update()
@@ -566,27 +581,35 @@ class FormulaUpdateTests(GitIsolatedTestCase):
         self.assertEqual(self.git("--git-dir", self.remote, "show", "HEAD:Formula/keyward.rb"), self.formula.read_text().strip())
 
 
-class GitEnvironmentTests(GitIsolatedTestCase):
-    # make verify can run under git rebase --exec, and the tests must leave the
-    # repository its GIT_DIR names alone.
-    def test_fixture_git_ignores_an_inherited_git_dir(self):
+class GitEnvironmentTests(unittest.TestCase):
+    # Runs the git tests as make verify would under git rebase --exec or a hook, with the
+    # GIT_* that locate a repository naming a scratch one and outside git config adding a hook.
+    def test_fixture_git_ignores_inherited_git_variables_and_global_config(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        scratch = Path(temp.name)
-        subprocess.run(["git", "init", "-q", "--bare"], cwd=scratch, capture_output=True, check=True)
-
-        def state():
-            refs = subprocess.run(["git", "--git-dir", str(scratch), "for-each-ref"],
-                                  text=True, capture_output=True, check=True).stdout
-            return refs + (scratch / "HEAD").read_text() + (scratch / "config").read_text()
-
-        before = state()
-        result = unittest.TestResult()
-        with mock.patch.dict(os.environ, GIT_DIR=str(scratch)):
-            unittest.TestSuite([FormulaUpdateTests("test_update_publishes_only_the_formula_commit"),
-                                BottleTests("test_merge_writes_the_bottle_into_the_release_formula")]).run(result)
-        self.assertEqual(state(), before)
-        self.assertTrue(result.wasSuccessful(), "".join(trace for _, trace in result.errors + result.failures))
+        root = Path(temp.name)
+        scratch, home, hooks = root / "scratch", root / "home", root / "home/hooks"
+        scratch.mkdir()
+        hooks.mkdir(parents=True)
+        (scratch / "README.md").write_text("scratch\n")
+        for args in (["init", "-q"], ["add", "README.md"],
+                     ["-c", "user.name=Scratch", "-c", "user.email=scratch@example.invalid", "commit", "-qm", "scratch"]):
+            subprocess.run(["git", *args], cwd=scratch, capture_output=True, check=True)
+        # The hook leaves a file beside itself if git runs it.
+        hook = hooks / "reference-transaction"
+        hook.write_text('#!/bin/sh\ntouch "$0.ran"\n')
+        hook.chmod(0o755)
+        (home / ".gitconfig").write_text(f"[core]\n\thooksPath = {hooks}\n")
+        git_dir = scratch / ".git"
+        before = snapshot(scratch, home)
+        result = subprocess.run([sys.executable, __file__, "FormulaUpdateTests", "BottleTests"], text=True, capture_output=True,
+                                env=dict(os.environ, HOME=str(home), GIT_DIR=str(git_dir), GIT_WORK_TREE=str(scratch),
+                                         GIT_INDEX_FILE=str(git_dir / "index"), GIT_COMMON_DIR=str(git_dir),
+                                         GIT_OBJECT_DIRECTORY=str(git_dir / "objects"),
+                                         GIT_CONFIG_PARAMETERS=f"'core.hooksPath'='{hooks}'"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = snapshot(scratch, home)
+        self.assertEqual({path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}, set())
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,66 +16,99 @@ import (
 	"github.com/veilux-lab/keyward/internal/homebrew"
 )
 
+// make verify can run under git rebase --exec or a hook, which export GIT_DIR and others.
+// Hiding them and the developer's git config keeps every test's git on its fixtures.
+func TestMain(m *testing.M) {
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "GIT_") {
+			os.Unsetenv(name)
+		}
+	}
+	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	os.Exit(m.Run())
+}
+
 func repository(t *testing.T) string {
 	t.Helper()
-	unsetGitEnvironment(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("release fixture\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "README.md"}, {"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"}} {
-		git(t, dir, args...)
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fixture git: %v: %s", err, out)
+		}
 	}
 	return dir
 }
 
-func git(t *testing.T, dir string, args ...string) string {
+// snapshot digests every file and directory under roots, so any change git makes shows.
+func snapshot(t *testing.T, roots ...string) map[string]string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("fixture git: %v: %s", err, out)
-	}
-	return string(out)
-}
-
-// unsetGitEnvironment hides every GIT_* variable until the test ends, so neither
-// fixture git nor Prepare follows a GIT_DIR that git rebase --exec exported.
-func unsetGitEnvironment(t *testing.T) {
-	t.Helper()
-	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "GIT_") {
-			t.Setenv(name, "") // restores the caller's value afterwards
-			os.Unsetenv(name)
-		}
-	}
-}
-
-// make verify can run under git rebase --exec, and the tests must leave the
-// repository its GIT_DIR names alone.
-func TestFixtureGitIgnoresAnInheritedGitDir(t *testing.T) {
-	unsetGitEnvironment(t)
-	scratch := t.TempDir()
-	git(t, scratch, "init", "-q", "--bare")
-	state := func() string {
-		s := git(t, scratch, "--git-dir", scratch, "for-each-ref")
-		for _, name := range []string{"HEAD", "config"} {
-			b, err := os.ReadFile(filepath.Join(scratch, name))
+	paths := map[string]string{}
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				t.Fatal(err)
+				return err
 			}
-			s += string(b)
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			paths[path] = info.Mode().String()
+			if info.Mode().IsRegular() {
+				b, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				paths[path] += fmt.Sprintf(" %x", sha256.Sum256(b))
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		return s
 	}
-	before := state()
-	t.Setenv("GIT_DIR", scratch)
-	if _, err := homebrew.Prepare(repository(t), "0.1.0", t.TempDir()); err != nil {
+	return paths
+}
+
+// Runs the other tests as make verify would under git rebase --exec or a hook, with the
+// GIT_* that locate a repository naming a scratch one and outside git config adding a hook.
+func TestFixtureGitIgnoresInheritedGitVariablesAndGlobalConfig(t *testing.T) {
+	scratch, home := repository(t), t.TempDir()
+	gitDir, hooks := filepath.Join(scratch, ".git"), filepath.Join(home, "hooks")
+	if err := os.Mkdir(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if after := state(); after != before {
-		t.Errorf("the repository GIT_DIR names changed to:\n%s\nfrom:\n%s", after, before)
+	// The hook leaves a file beside itself if git runs it.
+	if err := os.WriteFile(filepath.Join(hooks, "reference-transaction"), []byte("#!/bin/sh\ntouch \"$0.ran\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[core]\n\thooksPath = "+hooks+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, scratch, home)
+	cmd := exec.Command(os.Args[0], "-test.v", "-test.skip=^"+t.Name()+"$")
+	cmd.Env = append(os.Environ(), "HOME="+home, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+scratch,
+		"GIT_INDEX_FILE="+filepath.Join(gitDir, "index"), "GIT_COMMON_DIR="+gitDir,
+		"GIT_OBJECT_DIRECTORY="+filepath.Join(gitDir, "objects"), "GIT_CONFIG_PARAMETERS='core.hooksPath'='"+hooks+"'")
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestReleaseArchivesOnlyCommittedFilesAndPinsFormula") {
+		t.Fatalf("the package's tests under an inherited git environment: %v\n%s", err, out)
+	}
+	after := snapshot(t, scratch, home)
+	for path, entry := range after {
+		if before[path] != entry {
+			t.Errorf("%s was added or changed", path)
+		}
+	}
+	for path := range before {
+		if _, ok := after[path]; !ok {
+			t.Errorf("%s was removed", path)
+		}
 	}
 }
 
