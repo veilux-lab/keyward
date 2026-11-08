@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -154,8 +156,8 @@ const (
 )
 
 // A token that migrate skipped, or that was added since, is as readable as before
-// keyward. Its own form says what it is, so it fails doctor. A line that holds no
-// secret all the same can be marked, so the report says how.
+// keyward. Its own form says what it is, so it fails doctor, and its line is not
+// advised to be marked as holding no secret.
 func TestACredentialInPlaintextIsAProblem(t *testing.T) {
 	dir := t.TempDir()
 	rc := write(t, dir, ".zshrc", "export A='cap://alpha'\nexport GITHUB_TOKEN="+githubToken+"\n")
@@ -181,11 +183,13 @@ func TestACredentialInPlaintextIsAProblem(t *testing.T) {
 		"move it with keyward migrate " + rc + " (preview with --dry-run), or store it with keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'\n",
 		env + ":1  DATABASE_URL",
 		"Then rotate each one, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to fix them.\n",
-		"If one of these lines holds no secret, end it with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, migrate.IgnoreMarker) {
+		t.Errorf("the report advises marking a credential's line:\n%s", out)
 	}
 	for _, value := range []string{githubToken, dbPassword} {
 		if strings.Contains(out, value) {
@@ -258,7 +262,7 @@ func TestACredentialMigrateCannotMoveIsAProblem(t *testing.T) {
 	}
 	out := r.String()
 	for _, want := range []string{
-		rc + ":1  (trailer)\n      credential-shaped text keyward cannot move\n      remove it by hand in an editor\n",
+		rc + ":1  (trailer)\n      a GitHub token\n      remove it by hand in an editor\n",
 		rc + ":2  (comment)",
 		rc + ":3  (alias)",
 		env + ":1  (unsupported syntax)",
@@ -299,7 +303,7 @@ func TestTextMigrateCannotMoveIsListedWhenItOnlyMayBeACredential(t *testing.T) {
 		t.Errorf("Problems() = %v, want none", p)
 	}
 	out := r.String()
-	for _, want := range []string{"4 value(s) that may be credentials", rc + ":2  (alias)\n      credential-shaped text keyward cannot move\n      if it is one, remove it by hand in an editor\n",
+	for _, want := range []string{"4 value(s) that may be credentials", rc + ":2  (alias)\n      a random 36-character token\n      if it is one, remove it by hand in an editor\n",
 		"Rotate each one that is a credential, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to judge them.\n",
 		"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n"} {
 		if !strings.Contains(out, want) {
@@ -308,6 +312,411 @@ func TestTextMigrateCannotMoveIsListedWhenItOnlyMayBeACredential(t *testing.T) {
 	}
 	if strings.Contains(out, "in plaintext") {
 		t.Errorf("the report calls them credentials:\n%s", out)
+	}
+}
+
+// Fake values of the shapes doctor labels. Each one shaped like a provider's key
+// is split, so secret scanners do not report it.
+const (
+	hex32        = "9f8e7d6c5b4a39281706fedcba098765"
+	mixedToken   = "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i"
+	awsSecretKey = "wJalrXUtnFEMI/K7MDENG" + "/bPxRfiCYEXAMPLEKEY"
+)
+
+// doctor says what each line it lists holds, in plain words built from fixed text
+// and lengths, never from the line. A name in a comment can be a token itself, so
+// a label names none.
+func TestDoctorSaysWhatEachLineHoldsWithoutShowingIt(t *testing.T) {
+	for _, tc := range []struct{ line, value, label string }{
+		{"# old: %s", "ghp_" + "FakeLabelToken0000000000000000000000", "a GitHub token"},
+		{"# old: %s", "glpat-" + "FakeLabelGitLab00000", "a GitLab token"},
+		{"# old: %s", "sk-proj-" + "FakeLabelOpenAI0000000000", "an OpenAI-style API key"},
+		{"# old: %s", "sk-ant-api03-" + "FakeLabelAnthropic000000", "an Anthropic API key"},
+		{"# old: %s", "xoxb-" + "123456789012-FakeLabelSlack00", "a Slack token"},
+		{"# old: %s", "AKIA" + "IOSFODNN7EXAMPLE", "an AWS access key ID"},
+		{"# old: %s", "ASIA" + "IOSFODNN7EXAMPLE", "a temporary AWS access key ID"},
+		{"# old: %s", awsSecretKey, "an AWS secret key"},
+		{"# old: %s", "eyJhbGciOiJIUzI1NiJ9" + ".eyJzdWIiOiJsYWJlbCJ9.c2lnbmF0dXJl", "a JWT"},
+		{"# old: %s", "eyJraWQiOiJsYWJlbCIsImFsZyI6IkhTMjU2In0", "base64-encoded JSON"},
+		{"# old: %s", "AIza" + "SyFakeLabelGoogleKey0000000000000000", "a Google API key"},
+		{"# old: %s", "hvs." + "FakeLabelVaultToken0000", "a HashiCorp Vault token"},
+		{"# old: %s", "npm_" + "FakeLabelNpmToken0000000000000000000", "an npm token"},
+		{"# old: %s", "dop_v1_" + hex32 + hex32, "a DigitalOcean token"},
+		{"# old: %s", "shpat_" + hex32, "a Shopify token"},
+		{"# old: %s", "sq0atp-" + "FakeLabelSquare000000", "a Square token"},
+		{"# old: %s", "sk_live_" + "FakeLabelStripe000000000", "a Stripe secret key"},
+		{"# old: %s", "sk_test_" + "FakeLabelStripe000000000", "a Stripe test key"},
+		{"# old: %s", "rk_live_" + "FakeLabelStripe000000000", "a Stripe restricted key"},
+		{"# old: %s", "SG." + "FakeLabelSendGrid.FakeLabelSendGridKey00", "a SendGrid API key"},
+		{"# Authorization: %s", "Bearer FakeLabelBearerToken000", "a bearer token"},
+		{"# Authorization: %s", "Basic ZmFrZTpsYWJlbC1wYXNzd29yZA==", "a basic-auth credential"},
+		{"# %s", "postgres://app:FakeLabelPassw0rd@db.internal/app", "a URL with a password"},
+		{"# old: %s", hex32, "32 hex characters"},
+		{"# old: %s", "0123456789abcdef0123456789abcdef" + "-us12", "32 hex characters"},
+		{"# old: %s", "3f2a9c1e-7b4d-4e8f-9a6b-" + "2c1d0e5f7a8b", "a UUID"},
+		{"# old: %s", mixedToken, "a random 36-character token"},
+		{"# old: %s", "Ab3d/Ef6hIj9lMn2pQr5tUv8xYz01/AbCdEf6h+Ij9l", "a 43-character base64 key"},
+		{"# old: %s", "AKIA" + "IOSFODNN7EXAMPLE " + awsSecretKey, "an AWS access key ID and an AWS secret key"},
+		{"# old: %s", hex32 + " " + hex32, "runs of 32 hex characters"},
+		{"# export GITHUB_TOKEN=%s", "ghp_" + "FakeLabelCommented000000000000000000", "a GitHub token"},
+		{"# export API_TOKEN=%s", "correct-horse-battery-staple", "a value named like a credential"},
+		{"# export SESSION_TOKEN=%s", "0f1e2d3c4b5a69788796a5b4c3d2e1f0", "a value named like a credential: 32 hex characters"},
+		{"# export DATABASE_URL=%s", "postgres://app:FakeLabelPassw0rd@db.internal:5432/app", "a URL with a password"},
+		{"# %s=FakeLabelValue00", mixedToken + "_TOKEN", "a value named like a credential"},
+		{"# %s = FakeLabelValue00", "https://bot:FakeLabelPassw0rd@ini.example.com/token", "a value named like a credential"},
+		{"export A='cap://alpha' # was %s", "ghp_" + "FakeLabelTrailer00000000000000000000", "a GitHub token"},
+		{"alias deploy='DEPLOY_TOKEN=%s ./deploy.sh'", mixedToken, "a random 36-character token"},
+		{"export BUILD_ID=%s", mixedToken, "a random 36-character token"},
+		{"export BUILD_REF=%s", "a8f3k2m9x7q1w5e4r6t0y2u8i9o7p6", "a random 30-character token"},
+		{"export SIGNATURE=%s", awsSecretKey, "an AWS secret key"},
+		{"export UPLOAD_SIG=%s", "Ab3d/Ef6hIj9lMn2pQr5tUv8xYz01/AbCdEf6h+Ij9l", "a 43-character base64 key"},
+		{"export BLOB=%s", "c2VjcmV0LWtleS1nb2VzLWhlcmUtZm9yLXRoZS1kZW1vIQ==", "48 characters of base64 data"},
+		{"export DB_CONN='%s'", "Xk9#mZ2!vLp7@wRt4%yNb8&cFj1^qD", "30 characters mixing letters, digits and symbols"},
+		{"export OTEL_EXPORTER_OTLP_HEADERS='%s'", "x-honeycomb-dataset=checkout-service,x-honeycomb-environment=production",
+			"71 characters mixing letters and symbols"},
+	} {
+		rc := write(t, t.TempDir(), ".zshrc", fmt.Sprintf(tc.line, tc.value)+"\n")
+		r, err := doctor.Run(store(t, map[string]string{"alpha": ""}), []string{rc}, nil)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		out := r.String()
+		if strings.Contains(out, tc.value) {
+			t.Errorf("the report for %s printed its value", tc.label)
+			continue
+		}
+		if !strings.Contains(out, "\n      "+tc.label+"\n") {
+			t.Errorf("the report does not say %q:\n%s", tc.label, out)
+		}
+	}
+}
+
+// Nearby lines that hold text the same way are listed as one range, so a run of
+// old keys in comments reads as one entry. Each line still counts, and a range
+// spans no line listed apart, so marking each line of a range marks no line of
+// another entry. Only values that may be credentials are advised to be marked, a
+// range of them line by line: what holds a credential of a known shape is removed
+// by hand.
+func TestNearbyLinesOfOneKindAreListedAsOneRange(t *testing.T) {
+	const keyID = "AKIA" + "IOSFODNN7EXAMPLE"
+	rc := write(t, t.TempDir(), ".zshrc", "# prod: "+keyID+" "+awsSecretKey+"\n"+
+		"# rotated monthly\n"+
+		"# staging: "+keyID+" "+awsSecretKey+"\n"+
+		"# dev: "+keyID+" "+awsSecretKey+"\n"+
+		"alias gh='GITHUB_TOKEN="+githubToken+" gh'\n"+
+		"# "+hex32+"\n"+
+		"# was "+hex32+"\n"+
+		"\n\n\n"+
+		"# sandbox: "+keyID+" "+awsSecretKey+"\n")
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(r.Unmovable) != 7 {
+		t.Errorf("Unmovable = %+v, want each line", r.Unmovable)
+	}
+	if got := strings.Join(r.Problems(), "; "); got != "5 credential(s) in plaintext" {
+		t.Errorf("Problems() = %q", got)
+	}
+	out := r.String()
+	for _, want := range []string{
+		"5 credential(s) in plaintext:\n" +
+			"  " + rc + ":1-4  (3 comment lines)\n      AWS access key IDs and AWS secret keys\n      remove them by hand in an editor\n" +
+			"  " + rc + ":5  (alias)\n      a GitHub token\n      remove it by hand in an editor\n" +
+			"  " + rc + ":11  (comment)\n      an AWS access key ID and an AWS secret key\n      remove it by hand in an editor\n",
+		"2 value(s) that may be credentials:\n" +
+			"  " + rc + ":6-7  (2 comment lines)\n      runs of 32 hex characters\n      for each that is one, remove it by hand in an editor\n",
+		"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, marking each line of a range,",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report lacks %q:\n%s", want, out)
+		}
+	}
+	if n := strings.Count(out, "marking each line of a range"); n != 1 {
+		t.Errorf("the report advises marking each line of a range %d times, want once, for the values that may be credentials:\n%s", n, out)
+	}
+	if n := strings.Count(out, migrate.IgnoreMarker); n != 1 {
+		t.Errorf("the report advises marking lines %d times, want once, for the values that may be credentials:\n%s", n, out)
+	}
+	for _, value := range []string{keyID, awsSecretKey, hex32, githubToken} {
+		if strings.Contains(out, value) {
+			t.Errorf("the report printed a value:\n%s", out)
+		}
+	}
+}
+
+// Commented-out pairs of an AWS key ID, which has a known shape, and its secret
+// key, which only may be a credential, are one range, listed with the
+// credentials, and each of its lines counts as one, in the heading and in what
+// fails doctor alike. A range holding a credential of a known shape is removed by
+// hand and never marked, as marking each of its lines would hide the credential
+// too, and the advice to rotate follows the list once.
+func TestARangeHoldingACredentialIsListedWithTheCredentials(t *testing.T) {
+	const keyID = "AKIA" + "IOSFODNN7EXAMPLE"
+	var content strings.Builder
+	for range 3 {
+		content.WriteString("# export AWS_ACCESS_KEY_ID=" + keyID + "\n# export AWS_SECRET_ACCESS_KEY=" + awsSecretKey + "\n\n\n")
+	}
+	rc := write(t, t.TempDir(), ".zshrc", content.String())
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := strings.Join(r.Problems(), "; "); got != "6 credential(s) in plaintext" {
+		t.Errorf("Problems() = %q, want each line of the range, as the heading counts them", got)
+	}
+	out := r.String()
+	want := "\n6 credential(s) in plaintext:\n  " + rc + ":1-10  (6 comment lines)\n      AWS access key IDs and AWS secret keys\n" +
+		"      remove them by hand in an editor\nThen rotate "
+	if !strings.Contains(out, want) {
+		t.Errorf("the report does not list the pairs as one range of credentials:\n%s", out)
+	}
+	if n := strings.Count(out, "rotate"); n != 1 {
+		t.Errorf("the report advises rotating %d times, want once:\n%s", n, out)
+	}
+	if strings.Contains(out, "may be credentials") || strings.Contains(out, migrate.IgnoreMarker) {
+		t.Errorf("the report lists the secret keys apart, or advises marking the range:\n%s", out)
+	}
+	for _, value := range []string{keyID, awsSecretKey} {
+		if strings.Contains(out, value) {
+			t.Errorf("the report printed a value:\n%s", out)
+		}
+	}
+}
+
+// Nothing holding a credential of a known shape is advised to be marked as holding
+// no secret, a line alone or a range, so no such advice follows a range of them.
+func TestNothingHoldingACredentialIsAdvisedToBeMarked(t *testing.T) {
+	const keyID = "AKIA" + "IOSFODNN7EXAMPLE"
+	rc := write(t, t.TempDir(), ".zshrc", "export GITHUB_TOKEN="+githubToken+"\n\n\n\n"+
+		"# export AWS_ACCESS_KEY_ID="+keyID+"\n# export AWS_SECRET_ACCESS_KEY="+awsSecretKey+"\n")
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := r.String()
+	if !strings.Contains(out, "2 comment lines") {
+		t.Fatalf("the report does not list the pair as one range:\n%s", out)
+	}
+	if strings.Contains(out, migrate.IgnoreMarker) || strings.Contains(out, "marking") {
+		t.Errorf("the report advises marking a line holding a credential:\n%s", out)
+	}
+}
+
+// A range says what its lines hold by kind, each once, in the plural where it is
+// there more than once: a value named like a credential is the kind of what in it
+// looks random, and a kind that lists words of its own comes last, so the list's
+// and is the one before it.
+func TestARangeNamesEachKindItHoldsOnce(t *testing.T) {
+	rc := write(t, t.TempDir(), ".zshrc", "# export SESSION_TOKEN="+hex32+"\n"+
+		"# "+hex32+"\n"+
+		"# export API_TOKEN="+mixedToken+"\n"+
+		"# export DB_CONN='Xk9#mZ2!vLp7@wRt4%yNb8&cFj1^qD'\n"+
+		"# export GITHUB_TOKEN="+githubToken+"\n"+
+		"\n\n\n"+
+		"# export DB_PASSWORD=correct-horse-battery-staple\n"+
+		"# export REDIS_PASSWORD=correct-horse-battery-staple\n")
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := r.String()
+	for _, want := range []string{
+		rc + ":1-5  (5 comment lines)\n      runs of 32 hex characters, a random 36-character token, a GitHub token and " +
+			"30 characters mixing letters, digits and symbols\n",
+		rc + ":9-10  (2 comment lines)\n      values named like credentials\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// A kind a range holds in several lengths is named once, without them, so
+// passwords of different lengths read as one kind.
+func TestARangeNamesAKindOfSeveralLengthsWithoutThem(t *testing.T) {
+	rc := write(t, t.TempDir(), ".zshrc", "# export API_TOKEN="+mixedToken+"\n"+
+		"# export APP_TOKEN="+mixedToken[:30]+"\n"+
+		"# "+hex32+"\n"+
+		"# was "+hex32+"0a1b2c3d\n"+
+		"# export DB_CONN='Xk9#mZ2!vLp7@wRt4%yNb8&cFj1^qD'\n"+
+		"# export LEDGER_CONN='Xk9#mZ2!vLp7@wRt4%yNb8&c'\n")
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := rc + ":1-6  (6 comment lines)\n      random tokens, runs of hex characters and values mixing letters, digits and symbols\n"
+	if out := r.String(); !strings.Contains(out, want) {
+		t.Errorf("the report lacks %q:\n%s", want, out)
+	}
+}
+
+// Marking each line of a range, as the advice says, must not hide a line listed
+// apart: a range ends at a line held another way, or at an assignment.
+func TestARangeSpansNoLineListedApart(t *testing.T) {
+	rc := write(t, t.TempDir(), ".zshrc", "# export GITHUB_TOKEN="+githubToken+"\n"+
+		"# old key "+mixedToken+"\n"+
+		"alias gh='GITHUB_TOKEN="+githubToken+" gh'\n"+
+		"# backup "+mixedToken+"\n"+
+		"export GITHUB_TOKEN="+githubToken+"\n"+
+		"# spare "+mixedToken+"\n")
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := r.String()
+	entry := regexp.MustCompile(regexp.QuoteMeta(rc) + `:([0-9]+)(?:-([0-9]+))?  `)
+	var spans [][2]int
+	for _, m := range entry.FindAllStringSubmatch(out, -1) {
+		first, _ := strconv.Atoi(m[1])
+		last := first
+		if m[2] != "" {
+			last, _ = strconv.Atoi(m[2])
+		}
+		spans = append(spans, [2]int{first, last})
+	}
+	if len(spans) != 5 {
+		t.Errorf("entries %v, want lines 1-2 as one and each of the other 4 alone:\n%s", spans, out)
+	}
+	for i, a := range spans {
+		for j, b := range spans {
+			if i != j && b[0] >= a[0] && b[0] <= a[1] {
+				t.Errorf("the entry for lines %d-%d spans the one for line %d:\n%s", a[0], a[1], b[0], out)
+			}
+		}
+	}
+}
+
+// A comment beside a value that is listed is listed alone, in no range, and the
+// advice is to remove it whatever it holds: marking its line would leave the value
+// alone too. The value's advice says the same of the comment. Neither speaks of
+// marking where it holds a credential of a known shape.
+func TestACommentBesideAListedValueIsListedAlone(t *testing.T) {
+	rc := write(t, t.TempDir(), ".zshrc", "export A='cap://alpha' # was "+hex32+"\n"+
+		"export GITHUB_TOKEN="+githubToken+" # was "+hex32+"\n"+
+		"export C='cap://gamma' # was "+"ghp_"+"FakeRangeTrailer00000000000000000000\n"+
+		"export BUILD_ID="+mixedToken+" # was "+"ghp_"+"FakeRangeTrailer00000000000000000000\n"+
+		"export B='cap://beta' # was "+hex32+"\n")
+
+	r, err := doctor.Run(store(t, map[string]string{"alpha": "", "beta": "", "gamma": ""}), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := r.String()
+	const alone = "remove the comment by hand in an editor; marking the line would leave its value alone too\n"
+	for _, want := range []string{
+		rc + ":1  (trailer)\n      32 hex characters\n      if it is one, remove it by hand in an editor\n",
+		rc + ":2  (trailer)\n      32 hex characters\n      if it is one, " + alone,
+		rc + ":2  GITHUB_TOKEN\n      a GitHub token\n      move it with keyward migrate " + rc + " (preview with --dry-run), " +
+			"or store it with keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'\n",
+		rc + ":3  (trailer)\n      a GitHub token\n      remove it by hand in an editor\n",
+		rc + ":4  (trailer)\n      a GitHub token\n      remove the comment by hand in an editor\n",
+		rc + ":4  BUILD_ID\n      a random 36-character token\n      if it is one, store it with keyward add build-id and set BUILD_ID " +
+			"to 'cap://build-id'; migrate moves only values it is sure of" + commentFirst,
+		rc + ":5  (trailer)\n      32 hex characters\n      if it is one, remove it by hand in an editor\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report lacks %q:\n%s", want, out)
+		}
+	}
+	if sure, _, _ := strings.Cut(out, "may be credentials"); strings.Contains(sure, "marking") || strings.Contains(sure, migrate.IgnoreMarker) {
+		t.Errorf("the report advises marking a line that fails doctor:\n%s", out)
+	}
+}
+
+// commentFirst ends the advice for a value whose line's comment is listed too.
+const commentFirst = "; before marking its line as holding no secret, remove the comment beside it by hand, which marking would leave alone too\n"
+
+// Only a comment beside a listed value fails doctor here. Marking the line, for the
+// comment or the value, would hide both, so neither list advises it.
+func TestNothingAdvisesMarkingACommentBesideAListedValue(t *testing.T) {
+	rc := write(t, t.TempDir(), ".zshrc", "export BUILD_ID="+mixedToken+" # was "+githubToken+"\n")
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := r.String()
+	if !strings.Contains(out, "1 credential(s) in plaintext") || !strings.Contains(out, "BUILD_ID\n") {
+		t.Fatalf("the report does not list the line's comment and value:\n%s", out)
+	}
+	if strings.Contains(out, migrate.IgnoreMarker) {
+		t.Errorf("the report advises marking a line whose comment fails doctor:\n%s", out)
+	}
+	if !strings.Contains(out, "migrate moves only values it is sure of"+commentFirst) {
+		t.Errorf("the advice for the value does not say to remove the comment first:\n%s", out)
+	}
+}
+
+// Text written in place of a credential holds none: a known prefix followed by
+// one character over and over, or a template in angle brackets, whole or as a
+// URL's password. doctor leaves it out, in a value, a comment or an MCP server.
+func TestPlaceholdersAreLeftOut(t *testing.T) {
+	rc := write(t, t.TempDir(), ".zshrc", "export GITHUB_TOKEN="+"ghp_"+strings.Repeat("x", 36)+"\n"+
+		"export STRIPE_SECRET_KEY="+"sk_test_"+strings.Repeat("x", 24)+"\n"+
+		"export AWS_ACCESS_KEY_ID="+"AKIA"+strings.Repeat("X", 16)+"\n"+
+		`export OPENAI_API_KEY="<your-openai-api-key>"`+"\n"+
+		"export LINEAR_API_KEY='<YOUR_LINEAR_API_KEY>'\n"+
+		"export ANALYTICS_DB_URL=postgres://app:<password>@db.internal:5432/analytics\n"+
+		"# export SLACK_BOT_TOKEN="+"xoxb-"+strings.Repeat("x", 24)+"\n"+
+		"# export DATABASE_URL='postgres://app:<password>@localhost:5432/app'\n"+
+		"# postgres://app:<password>@localhost:5432/app\n")
+	servers := []mcpconfig.Server{{Client: "Claude Code", Config: "/home/someone/.claude.json", Name: "linear", Command: "linear-mcp",
+		Env: map[string]string{"LINEAR_API_KEY": "<your-linear-api-key>"}, Headers: map[string]string{"X-Api-Key": "<your-api-key>"}}}
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, servers)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(r.Plaintext) != 0 || len(r.Unmovable) != 0 || len(r.Literals) != 0 {
+		t.Errorf("Plaintext %+v, Unmovable %+v, Literals %+v: want no placeholder listed", r.Plaintext, r.Unmovable, r.Literals)
+	}
+}
+
+// Only those forms make a placeholder. Words can be a password, a URL's other
+// parts can hold a key, and a scheme before a template leaves a value that can be
+// a real one, so each of these is listed as before.
+func TestAPlaceholdersWordsAreNoPlaceholder(t *testing.T) {
+	rc := write(t, t.TempDir(), ".zshrc", "export DB_PASSWORD=changeme-before-prod\n"+
+		"export LINEAR_API_KEY=your-linear-api-key-here\n"+
+		`export API_TOKEN="paste-your-token-here"`+"\n"+
+		"export DATABASE_URL=postgres://app:password@localhost:5432/app\n"+
+		"export BILLING_URL='postgres://app:<password>@db.internal:5432/billing?api_key=Kq7pL2xV9mN4wRt5'\n"+
+		"export LEDGER_URL='postgres://app:<password>@ledger-db.internal:5432,orders-db.internal:5432/ledger'\n"+
+		`export AUTH_HEADER="Bearer <your-token>"`+"\n"+
+		"export GITHUB_TOKEN="+"ghp_"+strings.Repeat("x", 35)+"y\n")
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(r.Plaintext) != 8 {
+		t.Errorf("Plaintext = %+v, want each line", r.Plaintext)
+	}
+}
+
+// eyJ starts any JSON in base64, so only a JWT's three parts fail doctor. migrate
+// moves either, as it moves any value that starts with a credential's prefix.
+func TestOnlyAJWTOfTheValuesStartingEyJFailsDoctor(t *testing.T) {
+	rc := write(t, t.TempDir(), ".zshrc", "export ID_TOKEN=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJl\n"+
+		"export SPLUNK_MCP_TOKEN=eyJraWQiOiJzcGx1bmsiLCJhbGciOiJIUzI1NiJ9\n")
+
+	r, err := doctor.Run(vault.NewMemory(), []string{rc}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := strings.Join(r.Problems(), "; "); got != "1 credential(s) in plaintext" {
+		t.Errorf("Problems() = %q", got)
+	}
+	if want := "1 value(s) that may be credentials:\n  " + rc + ":2  SPLUNK_MCP_TOKEN\n      base64-encoded JSON\n" +
+		"      if it is one, move it with keyward migrate " + rc; !strings.Contains(r.String(), want) {
+		t.Errorf("the report lacks %q:\n%s", want, r.String())
 	}
 }
 
@@ -460,7 +869,7 @@ func TestTheAdviceForACredentialInAProjectsServerNamesWhereToChangeIt(t *testing
 	out := r.String()
 	for _, want := range []string{
 		"add export GITHUB_PERSONAL_ACCESS_TOKEN='cap://NAME' to ~/.zshrc, and run keyward mcp wrap in " + project + "\n",
-		"server removed-worktree, env.GITHUB_PERSONAL_ACCESS_TOKEN\n      the value begins with \"ghp_\", a known credential prefix\n" +
+		"server removed-worktree, env.GITHUB_PERSONAL_ACCESS_TOKEN\n      a GitHub token\n" +
 			"      remove the server from " + config + " by hand, with Claude Code closed, as its project's folder no longer exists\n",
 	} {
 		if !strings.Contains(out, want) {

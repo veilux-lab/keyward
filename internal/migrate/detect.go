@@ -3,6 +3,7 @@ package migrate
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/veilux-lab/keyward/internal/handle"
@@ -28,6 +29,10 @@ type Detection struct {
 	KnownShape bool
 
 	Reason string
+
+	// label says what the value looks like, as a value keyward cannot move is
+	// described.
+	label Label
 }
 
 // Thresholds. Deliberately cautious: this is a detector whose findings a human
@@ -49,26 +54,34 @@ const (
 	minShapeLen = 20
 )
 
-// credentialPrefixes are issuer-specific markers. A value starting with one of
-// these is a credential regardless of what the variable is called.
-var credentialPrefixes = []string{
-	"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", // GitHub
-	"glpat-",         // GitLab
-	"sk-", "sk-ant-", // OpenAI, Anthropic
-	"xoxb-", "xoxp-", "xoxa-", "xoxs-", "xapp-", // Slack
-	"AKIA", "ASIA", // AWS access key id
-	"eyJ",          // JWT: base64 of {"
-	"AIza",         // Google
-	"hvs.", "hvb.", // HashiCorp Vault
-	"npm_",                          // npm
-	"dop_v1_", "doo_v1_", "dor_v1_", // DigitalOcean
-	"shpat_", "shpss_", // Shopify
-	"sq0atp-", "sq0csp-", // Square
-	"sk_live_", "sk_test_", "rk_live_", // Stripe
-	"SG.",         // SendGrid
-	"Bearer ",     // Authorization header
-	"Basic ",      // Authorization header
-	"-----BEGIN ", // PEM block
+// credentialPrefixes are issuer-specific markers, with the kind of credential
+// they mark. A value starting with one of these is a credential regardless of
+// what the variable is called.
+var credentialPrefixes = []struct {
+	kind     string
+	prefixes []string
+}{
+	{"a GitHub token", []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"}},
+	{"a GitLab token", []string{"glpat-"}},
+	{"an OpenAI-style API key", []string{"sk-"}},
+	{"an Anthropic API key", []string{"sk-ant-"}},
+	{"a Slack token", []string{"xoxb-", "xoxp-", "xoxa-", "xoxs-", "xapp-"}},
+	{"an AWS access key ID", []string{"AKIA"}},
+	{"a temporary AWS access key ID", []string{"ASIA"}},
+	{"a JWT", []string{"eyJ"}}, // base64 of {"
+	{"a Google API key", []string{"AIza"}},
+	{"a HashiCorp Vault token", []string{"hvs.", "hvb."}},
+	{"an npm token", []string{"npm_"}},
+	{"a DigitalOcean token", []string{"dop_v1_", "doo_v1_", "dor_v1_"}},
+	{"a Shopify token", []string{"shpat_", "shpss_"}},
+	{"a Square token", []string{"sq0atp-", "sq0csp-"}},
+	{"a Stripe secret key", []string{"sk_live_"}},
+	{"a Stripe test key", []string{"sk_test_"}},
+	{"a Stripe restricted key", []string{"rk_live_"}},
+	{"a SendGrid API key", []string{"SG."}},
+	{"a bearer token", []string{"Bearer "}},         // Authorization header
+	{"a basic-auth credential", []string{"Basic "}}, // Authorization header
+	{"a private key", []string{"-----BEGIN "}},      // PEM block
 }
 
 // nameHints are substrings that mark a variable as credential-carrying. Matched
@@ -137,7 +150,7 @@ func Detect(name, value string) Detection {
 	// both URL-shaped and a credential. This is the only way DATABASE_URL gets
 	// caught: nothing in the name suggests a secret.
 	if hasURLCredentials(value) {
-		return Detection{Secret: true, KnownShape: len(value) >= minShapeLen, Reason: "the value is a URL containing credentials"}
+		return Detection{Secret: true, KnownShape: len(value) >= minShapeLen, Reason: "the value is a URL containing credentials", label: urlLabel}
 	}
 
 	switch {
@@ -147,24 +160,28 @@ func Detect(name, value string) Detection {
 		return Detection{Reason: "the value is a URL with no credentials in it"}
 	}
 
+	// The prefix is part of the value, so the reason names its kind instead.
 	if p := matchPrefix(value); p != "" {
-		return Detection{Secret: true, KnownShape: knownShape(p, value), Reason: fmt.Sprintf("the value begins with %q, a known credential prefix", p)}
+		label := prefixLabel(p, value)
+		return Detection{Secret: true, KnownShape: knownShape(p, value), Reason: label.One, label: label}
 	}
 
 	if hasNameHint(name) {
 		if len(value) >= minNamedLen {
-			return Detection{Secret: true, Reason: "the variable name suggests a credential"}
+			return Detection{Secret: true, Reason: "the variable name suggests a credential", label: namedLabel(value)}
 		}
 		return Detection{Reason: fmt.Sprintf("the name suggests a credential but the value is under %d characters", minNamedLen)}
 	}
 
-	if len(value) >= minEntropyLen {
-		if bits := entropyBits(value); bits >= minEntropyBits {
-			return Detection{
-				Possible: true,
-				Reason:   fmt.Sprintf("%d characters at %.1f bits of entropy per character", len(value), bits),
-			}
+	if len(value) >= minEntropyLen && entropyBits(value) >= minEntropyBits {
+		if reason := harmless(name, value); reason != "" {
+			return Detection{Reason: reason}
 		}
+		label := tokenLabel(value)
+		if label == (Label{}) {
+			label = mixing(value)
+		}
+		return Detection{Possible: true, Reason: label.One, label: label}
 	}
 
 	return Detection{Reason: "nothing about the name or value suggests a secret"}
@@ -193,9 +210,10 @@ func RefName(varName string) (string, error) {
 
 // knownShape reports whether value, which starts with the credential prefix p, is
 // shaped like the credential p marks. sk-, AKIA and ASIA also start words, as in
-// sk-SK and ASIA_PACIFIC, and a PEM block may hold a public key or a certificate,
-// so each needs its kind's shape: an AWS key id's 16 capitals and digits, an
-// OpenAI key's random token, or a private key.
+// sk-SK and ASIA_PACIFIC, eyJ starts any JSON in base64, and a PEM block may hold
+// a public key or a certificate, so each needs its kind's shape: an AWS key id's
+// 16 capitals and digits, an OpenAI key's random token, a JWT's three parts, or a
+// private key. A JWT is measured by its header, as a token in text is.
 func knownShape(p, value string) bool {
 	rest := value[len(p):]
 	switch p {
@@ -204,11 +222,27 @@ func knownShape(p, value string) bool {
 	case "sk-":
 		token := tokenAt(rest)
 		return len(p)+len(token) >= minShapeLen && (charClasses(token) == 3 || hexRun(token))
+	case "eyJ":
+		return len(tokenAt(value)) >= minShapeLen && jwtLen(value) > 0
 	case "-----BEGIN ":
 		header, _, _ := strings.Cut(rest, "-----")
 		return strings.Contains(header, "PRIVATE KEY")
 	}
 	return len(value) >= minShapeLen
+}
+
+// jwtLen returns the length of the JWT s begins with, or 0: a header, payload and
+// signature in base64url, joined by dots. A full stop can end a sentence after it.
+func jwtLen(s string) int {
+	end := 0
+	for end < len(s) && (isNameByte(s[end]) || s[end] == '-' || s[end] == '.') {
+		end++
+	}
+	token := strings.TrimSuffix(s[:end], ".")
+	if parts := strings.Split(token, "."); len(parts) != 3 || slices.Contains(parts, "") {
+		return 0
+	}
+	return len(token)
 }
 
 // CredentialPrefix returns the known credential prefix value starts with, or "".
@@ -217,9 +251,11 @@ func CredentialPrefix(value string) string { return matchPrefix(value) }
 func matchPrefix(value string) string {
 	// Longest match wins, so sk-ant- is reported rather than sk-.
 	best := ""
-	for _, p := range credentialPrefixes {
-		if strings.HasPrefix(value, p) && len(p) > len(best) {
-			best = p
+	for _, issuer := range credentialPrefixes {
+		for _, p := range issuer.prefixes {
+			if strings.HasPrefix(value, p) && len(p) > len(best) {
+				best = p
+			}
 		}
 	}
 	return best
@@ -242,28 +278,53 @@ const (
 )
 
 // credentialShaped reports whether text, such as a comment, holds something
-// shaped like a credential: an assignment Detect calls a secret, a URL with a
-// literal password, a known prefix starting a word and followed by a token, or a
-// long token. A long token mixes upper case, lower case and digits, is a run of
-// hex digits, or is base64 that / splits. Words rarely do any of these, and paths
-// and URLs break into short pieces, so ordinary comments stay readable.
+// shaped like a credential, as clues finds it, placeholders included.
+func credentialShaped(text string) bool { return len(clues(text)) > 0 }
+
+// A clue is text shaped like a credential, at [start, end) of the text it is in.
+type clue struct {
+	start, end int
+
+	// known marks a credential of a known shape, as Detection.KnownShape does.
+	known bool
+
+	// label says what the text looks like.
+	label Label
+
+	// placeholder marks text written in place of a credential, which printing
+	// hides all the same.
+	placeholder bool
+
+	// random marks a token found by its randomness alone, which the comment it is
+	// in can show to be none.
+	random bool
+}
+
+// clues finds what in text, such as a comment, is shaped like a credential: an
+// assignment Detect calls a secret or a possible one, a URL with a literal
+// password, a known prefix starting a word and followed by a token, or a long
+// token. A long token mixes upper case, lower case and digits, is a run of hex
+// digits, or is base64 that / splits. Words rarely do any of these, and paths and
+// URLs break into short pieces, so ordinary comments stay readable. They are found
+// in that order, so what is found twice is labelled as it was found first.
 //
-// known reports whether any of it has a known shape, as Detection.KnownShape does
-// for a value: a prefix or URL credentials at a credential's length, or an
-// assignment Detect gives one. A name or randomness alone only suggests one.
-func credentialShaped(text string) (shaped, known bool) {
-	shaped, known = namedSecret(text)
-	shaped = shaped || slashedKey(text)
-	for _, field := range strings.Fields(text) {
-		if hasURLCredentials(field) {
+// A clue has a known shape as a value does in Detection.KnownShape: a prefix or
+// URL credentials at a credential's length, or an assignment Detect gives one. A
+// name or randomness alone only suggests one.
+func clues(text string) []clue {
+	found := assignments(text)
+	for _, f := range fieldsAt(text) {
+		if field := text[f[0]:f[1]]; hasURLCredentials(field) {
 			// Measured from its scheme, as Detect measures the value after NAME=.
 			start := strings.Index(field, "://")
 			for start > 0 && isTokenByte(field[start-1]) {
 				start--
 			}
-			shaped, known = true, known || len(field)-start >= minShapeLen
+			url := strings.TrimRight(field[start:], `'")]}.,;:!?`)
+			found = append(found, clue{start: f[0], end: f[1], known: len(field)-start >= minShapeLen, label: urlLabel, placeholder: Placeholder(url)})
 		}
 	}
+	var tokens []clue
 	for i := 0; i < len(text); i++ {
 		if i > 0 && isTokenByte(text[i-1]) {
 			continue // not where a word starts
@@ -273,14 +334,26 @@ func credentialShaped(text string) (shaped, known bool) {
 		// as in "Bearer Authentication".
 		if p := matchPrefix(text[i:]); p != "" {
 			if tail := tokenAt(text[i+len(p):]); len(tail) >= minNamedLen && charClasses(tail[1:]) >= 2 {
-				shaped, known = true, known || knownShape(p, p+tail)
+				word := p + tail
+				if p == "eyJ" {
+					// A JWT's parts go on past the dots that end a token.
+					word = text[i : i+max(jwtLen(text[i:]), len(word))]
+				}
+				found = append(found, clue{start: i, end: i + len(word), known: knownShape(p, word), label: prefixLabel(p, word)})
 			}
 		}
-		if KeyShaped(text[i:]) > 0 {
-			shaped = true
+		if n := KeyShaped(text[i:]); n > 0 {
+			label := randomLabel(n)
+			if word := text[i : i+n]; hexRun(word) {
+				label = hexLabel(word)
+			}
+			tokens = append(tokens, clue{start: i, end: i + n, label: label, random: true})
 		}
 	}
-	return shaped, known
+	for _, r := range slashedRuns(text, minSlashedLen) {
+		found = append(found, clue{start: r[0], end: r[1], label: base64Label(text[r[0]:r[1]]), random: true})
+	}
+	return append(found, tokens...)
 }
 
 // KeyShaped returns the length of the token s begins with if it is shaped like a
@@ -310,27 +383,6 @@ func hexRun(s string) bool {
 		if n >= minHexLen && letter+digit == 2 {
 			return true
 		}
-	}
-	return false
-}
-
-// slashedKey reports whether text holds a run of base64 characters, / included,
-// of minSlashedLen or more that mixes upper case, lower case and digits. Paths and
-// URLs are left out: their runs start with / or follow . or $, or have more than
-// maxKeySlashes.
-func slashedKey(text string) bool {
-	for i := 0; i < len(text); {
-		n := 0
-		for i+n < len(text) && isBase64Byte(text[i+n]) {
-			n++
-		}
-		run := text[i : i+n]
-		path := strings.HasPrefix(run, "/") || i > 0 && strings.IndexByte(".$", text[i-1]) >= 0 ||
-			strings.Count(run, "/") > maxKeySlashes
-		if n >= minSlashedLen && !path && charClasses(run) == 3 {
-			return true
-		}
-		i += max(n, 1)
 	}
 	return false
 }

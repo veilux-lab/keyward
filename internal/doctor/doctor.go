@@ -75,7 +75,8 @@ type Report struct {
 
 	// Plaintext, Unmovable and Literals look like credentials: values in the
 	// files, other text in them, and values in MCP server definitions. Those of a
-	// known shape are problems; the rest only may be credentials.
+	// known shape, and the nearby lines listed with them, are problems; the rest
+	// only may be credentials.
 	Plaintext []Plaintext
 	Unmovable []Unmovable
 	Literals  []mcpconfig.Literal
@@ -93,8 +94,9 @@ type Report struct {
 
 // Problems names each kind of problem found, with its count. A dangling or
 // malformed reference breaks a command; a credential in plaintext is open to any
-// agent. Orphans, unknowns and values that only may be credentials do not count:
-// they cost a line of output, not a failure.
+// agent, and is counted as the report's list of them counts it, every line of a
+// range in it as one. Orphans, unknowns and the other values that only may be
+// credentials do not count: they cost a line of output, not a failure.
 func (r *Report) Problems() []string {
 	var problems []string
 	if n := len(r.Dangling); n > 0 {
@@ -103,8 +105,8 @@ func (r *Report) Problems() []string {
 	if n := len(r.Malformed); n > 0 {
 		problems = append(problems, fmt.Sprintf("%d malformed reference(s)", n))
 	}
-	if certain, _ := r.plaintextEntries(); len(certain) > 0 {
-		problems = append(problems, fmt.Sprintf("%d credential(s) in plaintext", len(certain)))
+	if certain, _ := r.plaintextEntries(); certain.lines > 0 {
+		problems = append(problems, fmt.Sprintf("%d credential(s) in plaintext", certain.lines))
 	}
 	return problems
 }
@@ -277,12 +279,13 @@ func scanReferences(path string, content []byte) (valid, malformed []Reference) 
 // scanPlaintext finds assignments whose value still looks like a credential, and
 // the credential-shaped text migrate cannot move. It calls Detect itself rather
 // than building a migration plan, which refuses a whole file when two names
-// collide. A line whose comment holds migrate.IgnoreMarker is left out.
+// collide. A line whose comment holds migrate.IgnoreMarker is left out, and so is
+// a placeholder.
 func scanPlaintext(path string, content []byte) ([]Plaintext, []Unmovable) {
 	f := migrate.Scan(content)
 	var found []Plaintext
 	for _, a := range f.Assignments {
-		if strings.Contains(a.Trailer, migrate.IgnoreMarker) {
+		if strings.Contains(a.Trailer, migrate.IgnoreMarker) || migrate.Placeholder(a.Value) {
 			continue
 		}
 		if d := migrate.Detect(a.Name, a.Value); d.Secret || d.Possible {
@@ -382,18 +385,62 @@ func sortFindings(f []Finding) {
 	sort.Slice(f, func(i, j int) bool { return f[i].Name < f[j].Name })
 }
 
+// listing is the entries of one list in the report, how many lines or MCP fields
+// they name, whether one is a range of lines the user may mark, and whether one is
+// a line the user may mark as holding no secret.
+type listing struct {
+	entries          []string
+	lines            int
+	ranges, markable bool
+}
+
+// eachLine is what the advice to mark a line adds where l lists a range of lines
+// the user may mark.
+func (l listing) eachLine() string {
+	if l.ranges {
+		return "marking each line of a range, "
+	}
+	return ""
+}
+
+// maxGap is how many lines apart flagged lines can be and still be listed as one
+// range.
+const maxGap = 3
+
 // plaintextEntries renders each value that looks like a credential, with how to
 // move it out: those of a known shape, and those that only may be credentials.
-func (r *Report) plaintextEntries() (certain, possible []string) {
-	add := func(known bool, where, reason, fix string) {
-		if !known {
-			fix = "if it is one, " + fix
-		}
-		entry := fmt.Sprintf("  %s\n      %s\n      %s\n", where, reason, fix)
+// Nearby text migrate cannot move is listed as one range, as stretches merges it,
+// with those of a known shape if one of its lines is.
+func (r *Report) plaintextEntries() (certain, possible listing) {
+	// add lists an entry naming lines with those of a known shape if known says one
+	// of them holds one. Marking such an entry's lines would hide a credential, so
+	// that is never advised.
+	add := func(lines int, known, markable bool, where, reason, fix string) {
+		list := &possible
 		if known {
-			certain = append(certain, entry)
-		} else {
-			possible = append(possible, entry)
+			list, markable = &certain, false
+		}
+		list.entries = append(list.entries, fmt.Sprintf("  %s\n      %s\n      %s\n", where, reason, fix))
+		list.lines += lines
+		list.ranges = list.ranges || lines > 1 && markable
+		list.markable = list.markable || markable
+	}
+	// What only may be a credential is fixed if it is one.
+	unsure := func(known bool, fix string) string {
+		if known {
+			return fix
+		}
+		return "if it is one, " + fix
+	}
+	// Marking a line whose comment is listed too would hide the comment as well.
+	type line struct {
+		file string
+		n    int
+	}
+	commented := map[line]bool{}
+	for _, u := range r.Unmovable {
+		if u.Kind == "trailer" {
+			commented[line{u.File, u.Line}] = true
 		}
 	}
 	for _, p := range r.Plaintext {
@@ -408,10 +455,28 @@ func (r *Report) plaintextEntries() (certain, possible []string) {
 		} else {
 			fix += "; migrate moves only values it is sure of"
 		}
-		add(p.KnownShape, fmt.Sprintf("%s:%d  %s", p.File, p.Line, p.Name), p.Reason, fix)
+		markable := !commented[line{p.File, p.Line}]
+		if !markable && !p.KnownShape {
+			fix += "; before marking its line as holding no secret, remove the comment beside it by hand, which marking would leave alone too"
+		}
+		add(1, p.KnownShape, markable, fmt.Sprintf("%s:%d  %s", p.File, p.Line, p.Name), p.Reason, unsure(p.KnownShape, fix))
 	}
-	for _, u := range r.Unmovable {
-		add(u.KnownShape, fmt.Sprintf("%s:%d  (%s)", u.File, u.Line, u.Kind), "credential-shaped text keyward cannot move", "remove it by hand in an editor")
+	for _, s := range stretches(r.Unmovable, r.Plaintext) {
+		where, reason, fix := fmt.Sprintf("%s:%d  (%s)", s.File, s.Line, s.Kind), migrate.Describe(s.Labels), unsure(s.KnownShape, "remove it by hand in an editor")
+		if s.lines > 1 {
+			where, reason = fmt.Sprintf("%s:%d-%d  (%d %s lines)", s.File, s.Line, s.last, s.lines, s.Kind), migrate.Describe(migrate.Kinds(s.Labels))
+		}
+		switch {
+		case s.valued && s.KnownShape:
+			fix = "remove the comment by hand in an editor"
+		case s.valued:
+			fix = "if it is one, remove the comment by hand in an editor; marking the line would leave its value alone too"
+		case s.lines > 1 && s.KnownShape:
+			fix = "remove them by hand in an editor"
+		case s.lines > 1:
+			fix = "for each that is one, remove it by hand in an editor"
+		}
+		add(s.lines, s.KnownShape, !s.valued, where, reason, fix)
 	}
 	// keyward run resolves only its environment, so a field outside env reads a
 	// reference through a variable. One in env does too, of its own name: unwrap
@@ -454,9 +519,48 @@ func (r *Report) plaintextEntries() (certain, possible []string) {
 		case l.Project != "":
 			fix += " in " + l.Project
 		}
-		add(l.KnownShape, fmt.Sprintf("%s  %s server %s, %s", l.Config, l.Client, l.Server, l.Field), l.Reason, fix)
+		add(1, l.KnownShape, false, fmt.Sprintf("%s  %s server %s, %s", l.Config, l.Client, l.Server, l.Field), l.Reason, unsure(l.KnownShape, fix))
 	}
 	return certain, possible
+}
+
+// A stretch is lines of one file holding text migrate cannot move the same way,
+// each within maxGap lines of the last and none listed apart between them: the
+// first line, with every line's labels and a known shape if any line has one,
+// where it ends, and how many lines it holds. valued marks a trailer whose line's
+// value is listed too, which stays alone.
+type stretch struct {
+	Unmovable
+	last, lines int
+	valued      bool
+}
+
+// stretches merges the lines of found into stretches, in file order. A line joins
+// only the stretch of the line listed just before it, never across a value of
+// plain, so marking each line of a range marks no line of another entry.
+func stretches(found []Unmovable, plain []Plaintext) []stretch {
+	values := map[string][]int{}
+	for _, p := range plain {
+		values[p.File] = append(values[p.File], p.Line)
+	}
+	var merged []stretch
+	for _, u := range found {
+		lines := values[u.File]
+		i := sort.SearchInts(lines, u.Line)
+		valued := i < len(lines) && lines[i] == u.Line
+		if n := len(merged); n > 0 && !valued {
+			s := &merged[n-1]
+			if s.File == u.File && s.Kind == u.Kind && !s.valued && u.Line-s.last <= maxGap &&
+				(i == 0 || lines[i-1] <= s.last) {
+				s.last, s.lines, s.KnownShape = u.Line, s.lines+1, s.KnownShape || u.KnownShape
+				s.Labels = append(s.Labels, u.Labels...)
+				continue
+			}
+		}
+		u.Labels = slices.Clone(u.Labels)
+		merged = append(merged, stretch{Unmovable: u, last: u.Line, lines: 1, valued: valued})
+	}
+	return merged
 }
 
 // String renders the report. Problems come first, because a dangling reference
@@ -491,20 +595,19 @@ func (r *Report) String() string {
 	}
 
 	certain, possible := r.plaintextEntries()
-	if len(certain) > 0 {
-		fmt.Fprintf(&b, "\n%d credential(s) in plaintext:\n%s", len(certain), strings.Join(certain, ""))
+	if certain.lines > 0 {
+		fmt.Fprintf(&b, "\n%d credential(s) in plaintext:\n%s", certain.lines, strings.Join(certain.entries, ""))
 		// Rotating leaves the vault with the old value. The user makes these changes;
 		// an agent that opens a line reads the secret.
 		b.WriteString("Then rotate each one, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to fix them.\n")
-		// A value of a known shape can still be an example or a test fixture.
-		if slices.ContainsFunc(r.Plaintext, func(p Plaintext) bool { return p.KnownShape }) || slices.ContainsFunc(r.Unmovable, func(u Unmovable) bool { return u.KnownShape }) {
-			b.WriteString("If one of these lines holds no secret, end it with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n")
-		}
 	}
-	if len(possible) > 0 {
-		fmt.Fprintf(&b, "\n%d value(s) that may be credentials:\n%s", len(possible), strings.Join(possible, ""))
-		b.WriteString("Rotate each one that is a credential, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to judge them.\n" +
-			"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n")
+	if possible.lines > 0 {
+		fmt.Fprintf(&b, "\n%d value(s) that may be credentials:\n%s", possible.lines, strings.Join(possible.entries, ""))
+		b.WriteString("Rotate each one that is a credential, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to judge them.\n")
+		if possible.markable {
+			b.WriteString("If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, " + possible.eachLine() +
+				"and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n")
+		}
 	}
 
 	if len(r.Orphaned) > 0 {

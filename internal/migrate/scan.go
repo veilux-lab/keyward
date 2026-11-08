@@ -10,7 +10,9 @@ package migrate
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+	"unicode"
 )
 
 // Assignment is one simple shell variable assignment.
@@ -157,10 +159,14 @@ type UnmovableLine struct {
 	// KnownShape marks text holding a credential of a known shape, as it marks a
 	// value in Detection. The rest only may be credentials.
 	KnownShape bool
+
+	// Labels say what the text looks like, one for each part of it, in order.
+	Labels []Label
 }
 
 // Unmovable finds credential-shaped text that no assignment's value accounts
-// for: in comments, in trailers, and on lines the scanner does not parse.
+// for: in comments, in trailers, and on lines the scanner does not parse. It
+// leaves out placeholders, and tokens a comment shows to be none.
 func (f *File) Unmovable() []UnmovableLine {
 	trailers := make(map[int]string, len(f.Assignments))
 	for _, a := range f.Assignments {
@@ -172,12 +178,41 @@ func (f *File) Unmovable() []UnmovableLine {
 		if trailer, ok := trailers[i+1]; ok {
 			text, kind = trailer, "trailer"
 		}
+		parts := clues(text)
+		if kind == "comment" || kind == "trailer" {
+			comment := readComment(text)
+			parts = append(parts, comment.besideDocument(parts)...)
+			parts = slices.DeleteFunc(parts, func(c clue) bool { return c.random && comment.noToken(c.start, c.end) })
+		}
+		parts = slices.DeleteFunc(parts, func(c clue) bool { return c.placeholder })
 		// An assignment is marked only in its trailer, as NewPlan and doctor read it.
-		if shaped, known := credentialShaped(text); shaped && !marked(text) {
-			found = append(found, UnmovableLine{Line: i + 1, Kind: kind, KnownShape: known})
+		if len(parts) > 0 && !marked(text) {
+			found = append(found, unmovableLine(i+1, kind, text, parts))
 		}
 	}
 	return found
+}
+
+// unmovableLine describes the clues found in a line's text. A part found twice, as
+// an assignment and the token it holds, is labelled once, as it was found first.
+func unmovableLine(line int, kind, text string, parts []clue) UnmovableLine {
+	u := UnmovableLine{Line: line, Kind: kind}
+	taken := make([]bool, len(text))
+	var shown []clue
+	for _, c := range parts {
+		u.KnownShape = u.KnownShape || c.known
+		if !slices.Contains(taken[c.start:c.end], true) {
+			shown = append(shown, c)
+			for j := c.start; j < c.end; j++ {
+				taken[j] = true
+			}
+		}
+	}
+	slices.SortFunc(shown, func(a, b clue) int { return a.start - b.start })
+	for _, c := range shown {
+		u.Labels = append(u.Labels, c.label)
+	}
+	return u
 }
 
 // unparsedKind names what holds the text of a line that is not an assignment.
@@ -194,44 +229,72 @@ func unparsedKind(line string) string {
 	return "unsupported syntax"
 }
 
-// namedSecret reports whether text, a comment or a line the scanner does not
-// parse, sets a variable Detect calls a secret: NAME=VALUE commented out, after
-// declare -x, or several to a line, or the NAME VALUE of launchctl setenv, fish's
-// set, and spaced INI. A secret too plain to look like one is found by its name.
-// known reports whether Detect gave one a known shape.
-func namedSecret(text string) (secret, known bool) {
-	fields := strings.Fields(strings.TrimLeft(text, "# \t"))
-	var found []Detection
-	for _, field := range fields {
-		if a, ok := parseAssignment(field); ok {
-			found = append(found, Detect(a.Name, a.Value))
+// assignments finds where text, a comment or a line the scanner does not parse,
+// sets a variable Detect calls a secret or a possible one: NAME=VALUE commented
+// out, after declare -x, or several to a line, or the NAME VALUE of launchctl
+// setenv, fish's set, and spaced INI. A secret too plain to look like one is found
+// by its name.
+func assignments(text string) []clue {
+	trimmed := strings.TrimLeft(text, "# \t")
+	offset := len(text) - len(trimmed)
+	spans := fieldsAt(trimmed)
+	fields := make([]string, len(spans))
+	for i, s := range spans {
+		fields[i] = trimmed[s[0]:s[1]]
+	}
+	var found []clue
+	add := func(name, value string, from, to int) {
+		if d := Detect(name, value); d.Secret || d.Possible {
+			found = append(found, clue{start: offset + spans[from][0], end: offset + spans[to][1], known: d.KnownShape, label: d.label, placeholder: Placeholder(value)})
 		}
 	}
-	if name, value := spacedPair(fields); name != "" {
-		found = append(found, Detect(name, strings.Trim(value, `'"`)))
+	for i, field := range fields {
+		if a, ok := parseAssignment(field); ok {
+			add(a.Name, a.Value, i, i)
+		}
 	}
-	for _, d := range found {
-		secret, known = secret || d.Secret, known || d.KnownShape
+	if name, value, ok := spacedPair(fields); ok {
+		add(fields[name], strings.Trim(fields[value], `'"`), name, value)
 	}
-	return secret, known
+	return found
 }
 
-// spacedPair returns the name and value that launchctl setenv, fish's set, and
-// spaced INI separate with spaces, if fields are one of those.
-func spacedPair(fields []string) (name, value string) {
+// spacedPair returns which of fields are the name and the value that launchctl
+// setenv, fish's set, and spaced INI separate with spaces, if fields are one of
+// those.
+func spacedPair(fields []string) (name, value int, ok bool) {
 	switch {
 	case len(fields) >= 4 && fields[0] == "launchctl" && fields[1] == "setenv":
-		return fields[2], fields[3]
+		return 2, 3, true
 	case len(fields) >= 3 && fields[1] == "=":
-		return fields[0], fields[2]
+		return 0, 2, true
 	case len(fields) >= 3 && fields[0] == "set":
 		for i := 1; i+1 < len(fields); i++ {
 			if !strings.HasPrefix(fields[i], "-") {
-				return fields[i], fields[i+1]
+				return i, i + 1, true
 			}
 		}
 	}
-	return "", ""
+	return 0, 0, false
+}
+
+// fieldsAt returns where each field of s is, as strings.Fields splits s, as
+// [start, end).
+func fieldsAt(s string) [][]int {
+	var found [][]int
+	start := -1
+	for i, r := range s {
+		switch space := unicode.IsSpace(r); {
+		case space && start >= 0:
+			found, start = append(found, []int{start, i}), -1
+		case !space && start < 0:
+			start = i
+		}
+	}
+	if start >= 0 {
+		found = append(found, []int{start, len(s)})
+	}
+	return found
 }
 
 // marked reports whether a comment in text, a line or a trailer, carries

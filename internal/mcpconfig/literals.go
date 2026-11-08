@@ -58,17 +58,27 @@ func Literals(servers []Server) []Literal {
 				found = append(found, Literal{Client: s.Client, Config: s.Config, Server: s.Name, Project: s.Project, Field: field, Detection: d})
 			}
 		}
+		// A placeholder holds no credential. An argument is not judged so, as a
+		// script can hold one beside a credential.
 		for k, v := range s.Env {
-			add("env."+k, detect(k, v))
+			if !migrate.Placeholder(v) {
+				add("env."+k, detect(k, v))
+			}
 		}
 		for k, v := range s.Headers {
-			add("headers."+k, header(k, v))
+			if !migrate.Placeholder(v) {
+				add("headers."+k, header(k, v))
+			}
 		}
 		for k, v := range s.httpHeaders {
-			add("http_headers."+k, header(k, v))
+			if !migrate.Placeholder(v) {
+				add("http_headers."+k, header(k, v))
+			}
 		}
 		// Read as an argument, so a token after = in the query string counts.
-		add("url", argument(s.URL))
+		if !migrate.Placeholder(s.URL) {
+			add("url", argument(s.URL))
+		}
 		for i, a := range s.Args {
 			d := argument(a)
 			// A header given with --header is judged by its name too, as a bridge's is.
