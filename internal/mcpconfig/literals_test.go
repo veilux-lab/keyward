@@ -553,6 +553,40 @@ func TestLoadAllReadsTheMCPJSONOfEveryProjectFolder(t *testing.T) {
 	}
 }
 
+// Cursor keeps a project's own servers in its folder's .cursor/mcp.json. Load
+// reads the current folder's, and LoadAll also reads that of every project
+// Claude Code lists and of each folder it is given, once each. A folder keyward
+// knows of no other way, it cannot read.
+func TestLoadAllReadsTheCursorConfigOfEveryProjectFolder(t *testing.T) {
+	home, workdir, root := t.TempDir(), t.TempDir(), t.TempDir()
+	other, unlisted := filepath.Join(root, "other"), filepath.Join(root, "unlisted")
+	write(t, filepath.Join(home, ".claude.json"), `{"projects": {"`+other+`": {}}}`)
+	for dir, name := range map[string]string{home: "global", workdir: "mine", other: "theirs", unlisted: "extra", filepath.Join(root, "unknown"): "unseen"} {
+		write(t, filepath.Join(dir, ".cursor", "mcp.json"), `{"mcpServers": {"`+name+`": {"command": "srv"}}}`)
+	}
+	cursor := func(servers []mcpconfig.Server) string {
+		var out []string
+		for _, s := range servers {
+			if s.Client == "Cursor" {
+				out = append(out, s.Name)
+			}
+		}
+		slices.Sort(out)
+		return strings.Join(out, ", ")
+	}
+	current, errs := mcpconfig.Load(home, workdir)
+	all, more := mcpconfig.LoadAll(home, workdir, unlisted, home, workdir)
+	if len(errs)+len(more) != 0 {
+		t.Fatal(errs, more)
+	}
+	if got := cursor(current); got != "global, mine" {
+		t.Errorf("Load's Cursor servers = %s", got)
+	}
+	if got := cursor(all); got != "extra, global, mine, theirs" {
+		t.Errorf("LoadAll's Cursor servers = %s", got)
+	}
+}
+
 // Codex's static http_headers are read so Literals can see them. A suggestion
 // moves their text into env, as it does any header's, so the bridge still sends
 // them and none reaches a command line, where any process could read it. The

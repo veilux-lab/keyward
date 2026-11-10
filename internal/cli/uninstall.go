@@ -170,8 +170,8 @@ type offboarding struct {
 	// gone are servers of Claude Code projects whose folder no longer exists,
 	// where Claude Code's CLI cannot run to change them.
 	gone []mcpconfig.Finding
-	// folders hold a .mcp.json the ledger says wrap changed, kept for the check
-	// at the end, after the ledger is gone.
+	// folders are those ledgerFolders names, kept for the check at the end,
+	// after the ledger is gone.
 	folders []string
 	// unset are servers that, changed back, read a variable no file sets.
 	unset []unset
@@ -199,12 +199,9 @@ func (c *CLI) offboardingPlan() (offboarding, error) {
 			p.links = append(p.links, r)
 		case ledger.Dir:
 			p.dirs = append(p.dirs, r.Path)
-		case ledger.Server:
-			if filepath.Base(r.Path) == ".mcp.json" {
-				p.folders = append(p.folders, filepath.Dir(r.Path))
-			}
 		}
 	}
+	p.folders = ledgerFolders(records, c.Home)
 	// MCP configs are changed through their tools, never restored as text: those
 	// whose servers were read, and the Claude Code and Codex configs, which can
 	// mention a reference outside a server, as in a prompt's history.

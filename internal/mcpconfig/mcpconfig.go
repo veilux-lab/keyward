@@ -22,6 +22,7 @@ import (
 
 	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/migrate"
+	"github.com/veilux-lab/keyward/internal/shell"
 )
 
 // Server is one MCP server definition, from any supported client.
@@ -76,21 +77,22 @@ type Finding struct {
 	// Suggestion is the replacement definition, in the client's own format, with
 	// literal env and header values hidden, and what may be a secret in its args,
 	// or for a server that runs through keyward but whose --only leaves out a
-	// reference, or that reads one in its args, the changes to make. It and Want
-	// are empty for a server that runs through keyward already, if wrapping it
-	// again would change nothing, for one ByHand marks, and for one Arguments
-	// returns.
+	// reference, that reads one in its args, or that only needs
+	// --allow-command-line, the changes to make. It and Want are empty for a
+	// server that runs through keyward already, if wrapping it again would change
+	// nothing, and for one ByHand marks.
 	Suggestion string
 	// Note says where the suggestion goes, or why there is none.
 	Note string
 	// Want is the suggested definition, for applying it rather than printing it.
 	Want Definition
 	// Exposed names what a server that already runs through keyward puts in a
-	// command line, which any process can read: secrets, and headers with text
-	// written out that marks a credential.
+	// command line, which any process can read, or would if keyward run started
+	// it: secrets, and headers with text written out that marks a credential.
 	Exposed []string
 	// InURL names the secrets in a remote server's URL. mcp-remote takes the URL
-	// as an argument, so the suggestion puts their values in its command line.
+	// as an argument, so the suggestion, or without one the server as it is,
+	// puts their values in its command line.
 	InURL []string
 	// WrittenInURL marks a remote server's URL that may hold a secret written out,
 	// in a query string, user info or its path, and goes in that command line too.
@@ -106,11 +108,32 @@ type Finding struct {
 	// ByHand marks a server whose script keyward cannot rewrite safely. It has no
 	// suggestion, and its note says how to change it by hand.
 	ByHand bool
-	// Passed names the secrets a server that runs through keyward has its script
-	// pass to a program as an argument, so into its command line, sorted. Only the
-	// server can take them another way, so there is no suggestion.
-	Passed []string
+	// CommandLine names the secrets, sorted, that keyward run finds the server
+	// would put in a program's command line, started as Want starts it or, if
+	// there is no change, as it is. keyward run refuses to start it unless given
+	// --allow-command-line.
+	CommandLine []string
+	// AllowCommandLine marks a server whose keyward run has --allow-command-line,
+	// as Want starts it or, if there is no change, as it is. A change gives it
+	// the option for a CommandLine the user allows.
+	AllowCommandLine bool
+	// Unreadable marks a CommandLine of every secret keyward run resolves, as it
+	// cannot read the script, or follow it to its end, to see where they go.
+	Unreadable bool
+	// Refused marks a server whose keyward run, as configured, refuses to start
+	// it, for a secret it would put in a command line, or a script it cannot
+	// read.
+	Refused bool
+	// Reasons are what keyward run says when it refuses to start the server: as
+	// configured, if Refused, or else as Want starts it, if the script it reads
+	// is in the server's definition, rather than one wrap would write.
+	Reasons []Reason
 }
+
+// A Reason is what keyward run says of a script it refuses: where a secret
+// would go, or why it cannot read the script, and how to fix that. Reasons one
+// fix covers share it, which only the last of them gives.
+type Reason struct{ Why, Fix string }
 
 // Definition is how a stdio server is started.
 type Definition struct {
@@ -158,16 +181,21 @@ func load(home, workdir string, everyProject bool, folders []string) ([]Server, 
 		dirs = slices.Concat(dirs, projects, folders)
 	}
 	seen := map[string]bool{}
+	var read []string
 	for _, dir := range dirs {
 		if !seen[dir] {
 			seen[dir] = true
+			read = append(read, dir)
 			add(loadProject(dir))
 		}
 	}
 	add(loadCodex(filepath.Join(home, ".codex", "config.toml")))
 	add(loadJSON("Cursor", filepath.Join(home, ".cursor", "mcp.json"), ""))
-	if workdir != home {
-		add(loadJSON("Cursor", filepath.Join(workdir, ".cursor", "mcp.json"), ""))
+	// Cursor keeps a project's servers in its folder too.
+	for _, dir := range read {
+		if dir != home {
+			add(loadJSON("Cursor", filepath.Join(dir, ".cursor", "mcp.json"), ""))
+		}
 	}
 	return servers, errs
 }
@@ -339,14 +367,28 @@ func runsThroughKeyward(s Server) bool {
 }
 
 // Check returns the servers that would receive a reference, through keyward run
-// or not, and the bridges that run through keyward but put a secret in a command
-// line, with any fixes.
+// or not, and those that run through keyward but put a secret in a command line,
+// which keyward run refuses unless given --allow-command-line, each with any fix.
 func Check(servers []Server, refs map[string]string) []Finding {
+	return CheckAllowing(servers, refs, func(Server, []string) bool { return false })
+}
+
+// CheckAllowing is Check for a user who allows some servers to put secrets in a
+// command line, which keyward run refuses unless given --allow-command-line. A
+// change gives a server's keyward run the option if the server would put
+// secrets there that allow accepts for it, or if its keyward run has it already.
+func CheckAllowing(servers []Server, refs map[string]string, allow func(s Server, secrets []string) bool) []Finding {
 	var findings []Finding
 	// reported marks the servers found here. Wrapped as suggested, each names in
 	// --only every reference in its env.
 	reported := make([]bool, len(servers))
+	allowedFor := func(s Server) func([]string) bool {
+		return func(secrets []string) bool {
+			return runsThroughKeyward(s) && allowsCommandLine(s.Args) || allow(s, secrets)
+		}
+	}
 	for i, configured := range servers {
+		allowed := allowedFor(configured)
 		s, expanded, bridged := remoteBridge(configured)
 		if !bridged {
 			s = configured
@@ -359,7 +401,22 @@ func Check(servers []Server, refs map[string]string) []Finding {
 			s.Command, s.Args = inner[0], inner[1:]
 		}
 		if s.disabled || runsThroughKeyward(s) {
-			if f, ok := exposedURL(s, refs); ok {
+			if f, ok := passing(s, refs); ok {
+				// One whose --only also leaves out a reference is reported once, with the
+				// fix for that.
+				if gap, unresolvedToo := unresolved(s, refs, allowed); unresolvedToo {
+					gap.Exposed, gap.InURL = f.Exposed, f.InURL
+					f, reported[i] = gap, true
+				} else {
+					f = asIs(f, s, allowed)
+				}
+				findings = append(findings, f)
+			}
+			continue
+		}
+		if run, ok := scriptedRun(s); ok {
+			if f, ok := passing(run, refs); ok && f.Refused {
+				f.Server, f.ByHand, f.Note = configured, true, scriptedNote(f)
 				findings = append(findings, f)
 			}
 			continue
@@ -380,7 +437,8 @@ func Check(servers []Server, refs map[string]string) []Finding {
 		// sh fills in a variable a script expands, as "$VAR", from the environment
 		// the client starts it with, which holds the reference.
 		command := append([]string{s.Command}, s.Args...)
-		if at, _ := scriptAt(command); at >= 0 && len(inArgs) == 0 {
+		at, _ := scriptAt(command)
+		if at >= 0 && len(inArgs) == 0 {
 			words, _ := readScript(command[at])
 			for _, w := range words {
 				for _, v := range w.expanded {
@@ -416,7 +474,7 @@ func Check(servers []Server, refs map[string]string) []Finding {
 		if url == "" {
 			url = remoteURL(append([]string{s.Command}, s.Args...))
 		}
-		f := Finding{Server: s, InURL: secretsIn(url, used), WrittenInURL: writtenInURL(url), InArgs: inArgs}
+		f := Finding{Server: s, InURL: secretsIn(url, used), WrittenInURL: writtenInURL(url), InArgs: inArgs, Refused: refused(configured, refs)}
 		if bridged {
 			if f.Exposed = commandLine(s, expanded, used); len(f.Exposed) == 0 {
 				continue
@@ -428,23 +486,28 @@ func Check(servers []Server, refs map[string]string) []Finding {
 		slices.Sort(f.Vars)
 		var ok bool
 		if len(inArgs) > 0 {
-			f.Suggestion, f.Note, f.Want, ok = rewrap(configured, inArgs, refs, used)
+			f.Suggestion, f.Note, f.Want, ok = rewrap(configured, inArgs, refs, used, allowed)
 		} else {
-			f.Suggestion, f.Note, f.Want, ok = suggest(s, configured, used)
+			f.Suggestion, f.Note, f.Want, ok = suggest(s, configured, used, allowed)
 		}
-		if !ok {
+		if ok {
+			f.CommandLine, f.Unreadable = commandLineOf(f.Want, s, refs)
+			f.AllowCommandLine = allowsCommandLine(f.Want.Args)
+		} else {
 			f.ByHand, f.InURL, f.WrittenInURL = true, nil, false
 		}
 		// Only header authentication takes a secret out of the URL, so a bridge that
 		// exposes nothing else would be written again as it is.
 		if bridged && sameBridge(f.Want, configured) {
-			f.Suggestion, f.Want, f.Note = "", Definition{}, unchanged
+			f = asIs(f, configured, allowed)
 		}
+		// A bridge's script, and one wrap rewrites in place, are in the definition.
+		f.Reasons = reasonsFor(f, configured, s, refs, bridged || at >= 0)
 		findings = append(findings, f)
 		reported[i] = true
 	}
 	for i, s := range servers {
-		if f, ok := unresolved(s, refs); ok && !reported[i] {
+		if f, ok := unresolved(s, refs, allowedFor(s)); ok && !reported[i] {
 			findings = append(findings, f)
 		}
 	}
@@ -478,10 +541,11 @@ func readInArgs(s Server, refs map[string]string) []string {
 // rewrap is the fix for a server that runs through keyward but reads a reference
 // in the command it runs: that command started as starts starts it, with each
 // reference it reads in the server's env, and in its first --only, if it has one,
-// with any other reference the server is handed that --only leaves out. It is
-// printed as the changes it makes, as unresolved's fix is. It is false for a
-// script keyward cannot rewrite safely.
-func rewrap(s Server, inArgs []string, refs, used map[string]string) (string, string, Definition, bool) {
+// with any other reference the server is handed that --only leaves out, and
+// --allow-command-line as allowing gives it. It is printed as the changes it
+// makes, as unresolved's fix is. It is false for a script keyward cannot rewrite
+// safely.
+func rewrap(s Server, inArgs []string, refs, used map[string]string, allowed func([]string) bool) (string, string, Definition, bool) {
 	inner := wrappedCommand(s)
 	words, shown, ok := starts(inner, used)
 	if !ok {
@@ -515,9 +579,10 @@ func rewrap(s Server, inArgs []string, refs, used map[string]string) (string, st
 	}
 	before := shownArgs(inner)
 	changes = append(changes, "In args, change "+quoteWords(before[same:])+" to "+quoteWords(shown[same:])+".")
-	var given []string
+	var given, added []string
 	want.Env, given = referenced(s, needs, refs)
-	changes = append(changes, given...)
+	want, added = allowing(want, s, refs, allowed)
+	changes = slices.Concat(changes, given, added)
 	var fields []string
 	if !slices.Equal(before, inner) || !slices.Equal(shown, words) {
 		fields = hiddenFields(s)
@@ -527,9 +592,10 @@ func rewrap(s Server, inArgs []string, refs, used map[string]string) (string, st
 
 // unresolved reports a server that runs through keyward with a reference in its
 // env that its --only leaves out. The fix is the same server with each such
-// variable added to its first --only, printed as the changes it makes, so a
-// setting keyward does not read stays as it is.
-func unresolved(s Server, refs map[string]string) (Finding, bool) {
+// variable added to its first --only, and --allow-command-line as allowing
+// gives it, printed as the changes it makes, so a setting keyward does not read
+// stays as it is.
+func unresolved(s Server, refs map[string]string, allowed func([]string) bool) (Finding, bool) {
 	if s.disabled || !runsThroughKeyward(s) {
 		return Finding{}, false
 	}
@@ -551,18 +617,163 @@ func unresolved(s Server, refs map[string]string) (Finding, bool) {
 	at := firstOnly(s.Args)
 	f.Want.Args[at] += "," + strings.Join(f.Unresolved, ",")
 	changes := []string{"In args, change " + quoteJSON(s.Args[at]) + " to " + quoteJSON(f.Want.Args[at]) + "."}
-	var given []string
+	var given, added []string
 	f.Want.Env, given = referenced(s, f.Unresolved, refs)
-	changes = append(changes, given...)
-	f.Suggestion, f.Note = strings.Join(changes, "\n"), changesNote(s, len(changes))
+	f.Want, added = allowing(f.Want, s, refs, allowed)
+	changes = slices.Concat(changes, given, added)
+	f.CommandLine, f.Unreadable = commandLineOf(f.Want, s, refs)
+	f.AllowCommandLine, f.Refused = allowsCommandLine(f.Want.Args), refused(s, refs)
+	f.Suggestion, f.Note, f.Reasons = strings.Join(changes, "\n"), changesNote(s, len(changes)), reasonsFor(f, s, s, refs, true)
 	return f, true
 }
 
+// allowing gives want, which starts s's server through keyward run,
+// --allow-command-line if it would put secrets in a command line that allowed
+// accepts and lacks the option, and returns the change that adds it, if any.
+func allowing(want Definition, s Server, refs map[string]string, allowed func([]string) bool) (Definition, []string) {
+	if secrets, _ := commandLineOf(want, s, refs); len(secrets) == 0 || !allowed(secrets) || allowsCommandLine(want.Args) {
+		return want, nil
+	}
+	want.Args = slices.Insert(slices.Clone(want.Args), 1, "--allow-command-line")
+	return want, []string{addOption}
+}
+
+// addOption is the change that gives a server's keyward run --allow-command-line.
+const addOption = `In args, add "--allow-command-line" after "run".`
+
+// asIs is f for a server that runs through keyward as configured does, which
+// wrapping again would leave as it is: nothing to change, but to give its
+// keyward run --allow-command-line, if it lacks the option and the user allows
+// what the server would put in a command line.
+func asIs(f Finding, configured Server, allowed func([]string) bool) Finding {
+	f.Suggestion, f.Want, f.Note = "", Definition{}, unchanged
+	if f.AllowCommandLine = allowsCommandLine(configured.Args); f.AllowCommandLine && f.Unreadable {
+		f.Note = uncheckedNote
+	} else if f.AllowCommandLine {
+		f.Note = allowedNote
+	} else if len(f.CommandLine) > 0 && allowed(f.CommandLine) {
+		f.Want = Definition{Command: configured.Command, Args: slices.Insert(slices.Clone(configured.Args), 1, "--allow-command-line"), Env: configured.Env}
+		f.Suggestion, f.Note, f.AllowCommandLine = addOption, changesNote(configured, 1), true
+	}
+	return f
+}
+
+// refused reports whether s starts through a keyward run that refuses to start
+// it, as it would put a secret in a command line, or cannot read its script.
+func refused(s Server, refs map[string]string) bool {
+	if s.disabled || !runsThroughKeyward(s) || allowsCommandLine(s.Args) {
+		return false
+	}
+	secrets, _ := commandLineOf(Definition{Command: s.Command, Args: s.Args, Env: s.Env}, s, refs)
+	return len(secrets) > 0
+}
+
+// allowsCommandLine reports whether a keyward run's args give it
+// --allow-command-line, so that it starts a command whatever the command puts
+// in a command line.
+func allowsCommandLine(args []string) bool {
+	_, allow, _ := runOptions(args)
+	return allow
+}
+
+// commandLineOf names the secrets def, which starts s's server through keyward
+// run, would put in a program's command line, as keyward run finds them, sorted.
+// unread says keyward run cannot read the script, which could put any of them
+// there.
+func commandLineOf(def Definition, s Server, refs map[string]string) (secrets []string, unread bool) {
+	secrets, _, unread = checked(def, s, refs)
+	return secrets, unread
+}
+
+// checked is commandLineOf, with what keyward run says of them.
+func checked(def Definition, s Server, refs map[string]string) ([]string, []Reason, bool) {
+	s.Command, s.Args, s.Env = def.Command, def.Args, def.Env
+	if !runsThroughKeyward(s) {
+		return nil, nil, false
+	}
+	_, _, at := runOptions(s.Args)
+	return inCommandLine(asStarted(s.Args[at:], refs), resolves(s, refs))
+}
+
+// reasonsFor is f's Reasons: what keyward run says of configured, if it refuses
+// to start that, or else of the change, which starts s's server, if own marks
+// its script as one the definition holds and keyward run would refuse it.
+func reasonsFor(f Finding, configured, s Server, refs map[string]string, own bool) []Reason {
+	var reasons []Reason
+	switch {
+	case f.Refused:
+		_, reasons, _ = checked(Definition{Command: configured.Command, Args: configured.Args, Env: configured.Env}, configured, refs)
+	case own && len(f.CommandLine) > 0 && !f.AllowCommandLine:
+		_, reasons, _ = checked(f.Want, s, refs)
+	}
+	return reasons
+}
+
+// inCommandLine names the secrets among vars, which keyward run resolves, that
+// command, which it starts, would put in a program's command line, sorted, and
+// says why, as keyward run does. keyward run refuses a script it cannot read
+// that names one of them, which unread says, and such a script could pass on
+// any of them.
+func inCommandLine(command, vars []string) (secrets []string, reasons []Reason, unread bool) {
+	name, script, ok := shell.Command(command)
+	if !ok {
+		return nil, nil, false
+	}
+	found, err := shell.Check(name, script, vars)
+	if err != nil {
+		why := fmt.Sprintf("keyward run cannot read the script %s -c runs, to check where its values go: %v", name, err)
+		return slices.Sorted(slices.Values(vars)), []Reason{{why, shell.Hint(err)}}, true
+	}
+	for _, f := range found {
+		secrets = append(secrets, f.Var)
+		reasons = append(reasons, Reason{f.Message(), shell.ServerAdvice(f, found)})
+	}
+	slices.Sort(secrets)
+	return slices.Compact(secrets), reasons, false
+}
+
+// resolves names the variables keyward run resolves for s, which starts through
+// it: each that holds a reference as s starts, but those its --only leaves out,
+// sorted. Codex gives a server only its env and the variables env_vars names;
+// the other clients start one in their own environment, which holds each
+// migrated variable.
+func resolves(s Server, refs map[string]string) []string {
+	vars := handed(s, refs)
+	if !s.toml {
+		for v := range refs {
+			if _, set := s.Env[v]; !set {
+				vars = append(vars, v)
+			}
+		}
+	}
+	if only := onlyOf(s.Args); only != nil {
+		vars = slices.DeleteFunc(vars, func(v string) bool { return !slices.Contains(only, v) })
+	}
+	slices.Sort(vars)
+	return slices.Compact(vars)
+}
+
+// asStarted is command as its client starts it, which fills each placeholder
+// that reads a migrated variable with the variable's reference.
+func asStarted(command []string, refs map[string]string) []string {
+	started := make([]string, len(command))
+	for i, word := range command {
+		started[i] = placeholder.ReplaceAllStringFunc(word, func(p string) string {
+			if ref, ok := refs[placeholder.FindStringSubmatch(p)[1]]; ok {
+				return handle.Prefix + ref
+			}
+			return p
+		})
+	}
+	return started
+}
+
 // firstOnly is where the args of a keyward run that has an --only give the value
-// of the first, as keyward run's first option other than --no-mask is one.
+// of the first, as keyward run's first option other than --no-mask and
+// --allow-command-line is one.
 func firstOnly(args []string) int {
 	at := 1
-	for args[at] == "--no-mask" {
+	for args[at] == "--no-mask" || args[at] == "--allow-command-line" {
 		at++
 	}
 	if args[at] == "--only" {
@@ -642,9 +853,10 @@ func handed(s Server, refs map[string]string) []string {
 // suggest wraps the server in keyward run. A remote server goes through the
 // mcp-remote bridge, so that its headers are filled in by the local process. Its
 // note names fields of current, the definition as written, since a bridge's s is
-// the remote server it stands for. It is false, with a note, for a server whose
-// script keyward cannot rewrite safely.
-func suggest(s, current Server, used map[string]string) (string, string, Definition, bool) {
+// the remote server it stands for. keyward run is given --allow-command-line if
+// the server would put secrets in a command line that allowed accepts. It is
+// false, with a note, for a server whose script keyward cannot rewrite safely.
+func suggest(s, current Server, used map[string]string, allowed func([]string) bool) (string, string, Definition, bool) {
 	env := map[string]string{}
 	for k, v := range s.Env {
 		env[k] = v
@@ -706,6 +918,10 @@ func suggest(s, current Server, used map[string]string) (string, string, Definit
 		return "", byHand, Definition{}, false
 	}
 	run := []string{"run", "--only", strings.Join(only, ","), "--"}
+	// keyward run resolves only these, each set to its reference in env.
+	if secrets, _, _ := inCommandLine(words, only); len(secrets) > 0 && allowed(secrets) {
+		run = slices.Insert(run, 1, "--allow-command-line")
+	}
 	printed := slices.Concat(run, shown)
 	want := Definition{Command: "keyward", Args: slices.Concat(run, words), Env: env}
 	// A bridge's script also holds its header text, which moves to env, so fields
@@ -726,15 +942,16 @@ func suggest(s, current Server, used map[string]string) (string, string, Definit
 // byHand is the note for a server whose script keyward cannot rewrite safely.
 const byHand = `keyward cannot rewrite its script safely, so change it by hand: in the script, write ${VAR} as "$VAR", ` +
 	`or as '$''{VAR}' in an mcp-remote --header, for a shell that has VAR in its environment; set VAR to its cap:// reference in env; ` +
-	`and start the server with keyward run --only VAR.`
+	`and start the server with keyward run --only VAR, which refuses a script that passes VAR to a program as an argument.`
 
 // starts returns the words keyward run starts for inner, and the same as printed.
 // A placeholder there that reads a reference must be filled in after keyward run
 // resolves it. So a script inner runs is rewritten in place, as another sh -c
 // would put each value into the script, and any other command runs through sh,
 // which fills each in, but leaves one in a header to mcp-remote, to keep the
-// value out of its command line. It is false for a script it cannot rewrite, or
-// cannot find.
+// value out of its command line. In any other argument, it is in a program's
+// command line, which keyward run refuses unless given --allow-command-line. It
+// is false for a script it cannot rewrite, or cannot find.
 func starts(inner []string, used map[string]string) (words, printed []string, ok bool) {
 	reads := func(w string) bool { return len(secretsIn(w, used)) > 0 }
 	at, found := scriptAt(inner)
@@ -1038,40 +1255,38 @@ func Undo(servers []Server) []Finding {
 // wrappedCommand is the command a keyward-wrapped server starts, after keyward
 // run and each of its options, read as keyward run reads them.
 func wrappedCommand(s Server) []string {
-	inner := s.Args[1:]
-	for len(inner) > 0 {
-		if inner[0] == "--no-mask" || strings.HasPrefix(inner[0], "--only=") {
-			inner = inner[1:]
-		} else if inner[0] == "--only" && len(inner) > 1 {
-			inner = inner[2:]
-		} else {
-			break
-		}
-	}
-	if len(inner) > 0 && inner[0] == "--" {
-		inner = inner[1:]
-	}
-	return inner
+	_, _, at := runOptions(s.Args)
+	return s.Args[at:]
 }
 
 // onlyOf is the names a keyward run's --only options list, read from its args as
 // keyward run reads them, or none if it has no --only.
 func onlyOf(args []string) []string {
-	var names []string
-	for args = args[1:]; len(args) > 0; args = args[1:] {
-		if args[0] == "--no-mask" {
-			continue
+	only, _, _ := runOptions(args)
+	return only
+}
+
+// runOptions reads the args of a keyward run as keyward run reads its options,
+// which come before the command: the names its --only options list, whether it
+// is given --allow-command-line, and where the command starts, past any --.
+func runOptions(args []string) (only []string, allowCommandLine bool, command int) {
+	for command = 1; command < len(args); command++ {
+		switch arg := args[command]; {
+		case arg == "--no-mask":
+		case arg == "--allow-command-line":
+			allowCommandLine = true
+		case strings.HasPrefix(arg, "--only="):
+			only = append(only, strings.Split(strings.TrimPrefix(arg, "--only="), ",")...)
+		case arg == "--only" && command+1 < len(args):
+			command++
+			only = append(only, strings.Split(args[command], ",")...)
+		case arg == "--":
+			return only, allowCommandLine, command + 1
+		default:
+			return only, allowCommandLine, command
 		}
-		value, inline := strings.CutPrefix(args[0], "--only=")
-		if !inline {
-			if args[0] != "--only" || len(args) < 2 {
-				break
-			}
-			value, args = args[1], args[1:]
-		}
-		names = append(names, strings.Split(value, ",")...)
 	}
-	return names
+	return only, allowCommandLine, command
 }
 
 // remoteBridge is bridgeOf for a bridge Check writes again, one that is on and
@@ -1272,69 +1487,27 @@ func headerText(h *scriptWord) [][]int {
 	return found
 }
 
-// exposedURL reports a server that runs through keyward with a script not read as
-// a bridge, as one that gives mcp-remote a callback port, whose sh expands a
-// secret into the URL it gives mcp-remote, and so into its command line. Only
-// header authentication would take the secret out.
-func exposedURL(s Server, refs map[string]string) (Finding, bool) {
-	words, ok := wrappedScript(s)
-	url, _ := remoteWords(words)
-	if !ok || url < 0 {
+// passing reports a server that runs through keyward with a script not read as
+// a bridge, which puts a secret in a program's command line, as keyward run
+// finds it: in the URL it gives mcp-remote, as with a callback port, or as
+// another argument. Only the server can take it out, as with header
+// authentication for one in the URL.
+func passing(s Server, refs map[string]string) (Finding, bool) {
+	if s.disabled {
 		return Finding{}, false
 	}
-	exposed := resolved(s, refs, words[url].expanded)
-	return Finding{Server: s, Vars: exposed, Exposed: exposed, InURL: exposed, WrittenInURL: true, Note: unchanged}, len(exposed) > 0
-}
-
-// Arguments returns each server that runs through keyward whose script passes a
-// secret to a program as an argument, so into its command line, with Passed
-// naming them. Only the server can take one another way, so none has a change.
-// A bridge keyward reads is left to Check, which writes it again.
-func Arguments(servers []Server, refs map[string]string) []Finding {
-	var found []Finding
-	for _, s := range servers {
-		if _, _, bridged := remoteBridge(s); bridged {
-			continue
-		}
-		if passed := passedAsArgument(s, refs); len(passed) > 0 {
-			found = append(found, Finding{Server: s, Vars: passed, Passed: passed})
+	secrets, reasons, unread := checked(Definition{Command: s.Command, Args: s.Args, Env: s.Env}, s, refs)
+	f := Finding{Server: s, Vars: secrets, Exposed: secrets, CommandLine: secrets, Unreadable: unread, Refused: !allowsCommandLine(s.Args)}
+	if f.Refused {
+		f.Reasons = reasons
+	}
+	if words, ok := wrappedScript(s); ok {
+		if url, _ := remoteWords(words); url >= 0 {
+			f.InURL = slices.DeleteFunc(slices.Clone(secrets), func(v string) bool { return !slices.Contains(words[url].expanded, v) })
 		}
 	}
-	slices.SortFunc(found, func(a, b Finding) int {
-		return strings.Compare(a.Client+a.Config+a.Name, b.Client+b.Config+b.Name)
-	})
-	return found
+	return f, len(secrets) > 0
 }
-
-// passedAsArgument names the secrets that the script of a server that runs
-// through keyward passes to a program as an argument, but in mcp-remote's URL,
-// which Check reports, sorted. A variable set for a command, and one a shell
-// builtin reads, as printf piping it to a program, are in no command line.
-func passedAsArgument(s Server, refs map[string]string) []string {
-	words, ok := wrappedScript(s)
-	if !ok {
-		return nil
-	}
-	url, _ := remoteWords(words)
-	var passed []string
-	eachCommand(words, func(start int, texts []string) {
-		// exec runs a program even of a builtin's name.
-		program := launched(texts)
-		if program < 0 || slices.Contains(builtins, texts[program]) && !slices.Contains(texts[:program], "exec") {
-			return
-		}
-		for i := start + program + 1; i < start+len(texts); i++ {
-			if i != url {
-				passed = append(passed, words[i].expanded...)
-			}
-		}
-	})
-	return resolved(s, refs, passed)
-}
-
-// builtins are commands a shell runs itself, which put what they read in no
-// program's command line.
-var builtins = []string{"echo", "printf", "export", "local", "readonly", "declare", "typeset", "read", "test", "[", "cd", ":"}
 
 // wrappedScript reads the script of a server that runs through keyward, if the
 // command it starts is a shell given one, that keyward can read.
@@ -1350,23 +1523,63 @@ func wrappedScript(s Server) ([]shellWord, bool) {
 	return readScript(inner[at])
 }
 
-// resolved returns those of vars that keyward run resolves to a secret for s,
-// sorted: each migrated in a shell file, and each holding a reference in its env.
-func resolved(s Server, refs map[string]string, vars []string) []string {
-	held := handed(s, refs)
-	var found []string
-	for _, v := range vars {
-		if _, ok := refs[v]; ok || slices.Contains(held, v) {
-			found = append(found, v)
-		}
+// scriptedRun is the keyward run that s's own script starts, as zsh -lc
+// "keyward run ..." does to get a login shell's PATH, as a server that starts
+// through it, if the script gives it only words written out, which it gets as
+// they are.
+func scriptedRun(s Server) (Server, bool) {
+	command := append([]string{s.Command}, s.Args...)
+	at, _ := scriptAt(command)
+	if at < 0 {
+		return Server{}, false
 	}
-	slices.Sort(found)
-	return slices.Compact(found)
+	words, ok := readScript(command[at])
+	if !ok {
+		return Server{}, false
+	}
+	run, found := s, false
+	eachCommand(words, func(start int, texts []string) {
+		i := launched(texts)
+		if found || i < 0 || i+1 >= len(texts) || filepath.Base(texts[i]) != "keyward" || texts[i+1] != "run" {
+			return
+		}
+		for _, w := range words[start+i : start+len(texts)] {
+			if len(w.expanded) > 0 || len(w.placeholders) > 0 {
+				return
+			}
+		}
+		run.Command, run.Args, found = texts[i], texts[i+1:], true
+	})
+	return run, found
 }
 
-// unchanged is the note for a server that already runs through keyward, whose URL
-// alone puts a secret in a command line.
-const unchanged = "It already runs through keyward, so wrapping it again would change nothing."
+// scriptedNote is the note for f, a server whose own script starts a keyward
+// run that refuses to start it, as it would put secrets in a command line, or
+// cannot read its script.
+func scriptedNote(f Finding) string {
+	const note = "Its own script starts keyward run, which keyward mcp wrap does not change, so change the script as keyward run says, or, to start it anyway, "
+	if f.Unreadable {
+		return note + "unchecked, give that keyward run --allow-command-line."
+	}
+	them := "it"
+	if len(f.CommandLine) > 1 {
+		them = "them"
+	}
+	return note + "with " + strings.Join(f.CommandLine, ", ") + " in a command line, where any process can read " + them + ", give that keyward run --allow-command-line."
+}
+
+// unchanged is the note for a server that already runs through keyward, but
+// that keyward run refuses, as only a change to its script would take the
+// secret out of a command line.
+const unchanged = "It already runs through keyward, so change its script as keyward run says."
+
+// allowedNote is unchanged for a server whose keyward run has
+// --allow-command-line.
+const allowedNote = "It already runs through keyward, which starts it with a secret in a command line, as its keyward run has --allow-command-line."
+
+// uncheckedNote is allowedNote for a server whose script keyward run cannot
+// read.
+const uncheckedNote = "It already runs through keyward, which starts it unchecked, as its keyward run has --allow-command-line."
 
 // commandLine names the secrets a bridge puts in mcp-remote's arguments: each its
 // shell expands, and each header whose text written out the header's name or

@@ -483,13 +483,16 @@ func TestRunWorksWithoutSeparator(t *testing.T) {
 }
 
 func TestRunRequiresACommand(t *testing.T) {
-	for _, args := range [][]string{{"run"}, {"run", "--"}} {
+	for _, args := range [][]string{{"run"}, {"run", "--"}, {"run", "--allow-command-line"}} {
 		h := newHarness(t, "", nil, nil)
 		if code := h.cli.Run(args); code != 2 {
 			t.Errorf("Run(%v) exit code = %d, want 2", args, code)
 		}
 		if h.exec.calls != 0 {
 			t.Errorf("Run(%v) called exec", args)
+		}
+		if want := "usage: keyward run [--only VAR,...] [--no-mask] [--allow-command-line] [--] <command> [arguments]\n"; h.err() != want {
+			t.Errorf("Run(%v) stderr = %q, want %q", args, h.err(), want)
 		}
 	}
 }

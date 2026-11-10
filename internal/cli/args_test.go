@@ -84,7 +84,7 @@ func TestRunPassesOptionsThrough(t *testing.T) {
 
 // run has options of its own, so the message says where they go.
 func TestOptionsBeforeRunAreRejected(t *testing.T) {
-	for _, args := range [][]string{{"--dry-run", "run", "echo"}, {"--no-mask", "run", "echo"}} {
+	for _, args := range [][]string{{"--dry-run", "run", "echo"}, {"--no-mask", "run", "echo"}, {"--allow-command-line", "run", "echo"}} {
 		h := newHarness(t, "", nil, nil)
 		if code := h.cli.Run(args); code != 2 {
 			t.Errorf("%v: exit code = %d, want 2", args, code)
@@ -136,6 +136,12 @@ func TestRunOnlyRejectsAVariableThatIsNotSet(t *testing.T) {
 	if !strings.Contains(h.err(), "TYPO") {
 		t.Errorf("stderr = %q, want it to name the variable", h.err())
 	}
+	// Before a script that keyward run would refuse, too.
+	h = newHarness(t, "", nil, []string{"PATH=/usr/bin:/bin", "T=cap://t"})
+	h.cli.Run([]string{"run", "--only", "T,TYPO", "--", "sh", "-c", `curl -u "u:$T" x`})
+	if want := "keyward run: --only names TYPO, which is not set\n"; h.err() != want {
+		t.Errorf("stderr = %q, want %q", h.err(), want)
+	}
 }
 
 // After the command, --only belongs to the command.
@@ -146,5 +152,33 @@ func TestRunOnlyAfterTheCommandIsTheCommands(t *testing.T) {
 	}
 	if !slices.Equal(h.exec.argv, []string{"echo", "--only", "X"}) {
 		t.Errorf("argv = %v", h.exec.argv)
+	}
+}
+
+// --allow-command-line is run's before the command, in any order with --only
+// and --no-mask. After it, it is the command's, and lets nothing through.
+func TestRunAllowCommandLineGoesBeforeTheCommand(t *testing.T) {
+	script := `curl -u "u:$T" https://api.example.com`
+	env := []string{"PATH=/usr/bin:/bin", "T=cap://t"}
+	for _, args := range [][]string{
+		{"run", "--allow-command-line", "--only", "T", "--", "sh", "-c", script},
+		{"run", "--only", "T", "--allow-command-line", "sh", "-c", script},
+		{"run", "--no-mask", "--only=T", "--allow-command-line", "--", "sh", "-c", script},
+	} {
+		h := newHarness(t, "", map[string]string{"t": token}, env)
+		if code := h.cli.Run(args); code != 0 || h.exec.calls != 1 {
+			t.Fatalf("%v: exit code = %d, exec ran %d times. stderr: %s", args, code, h.exec.calls, h.err())
+		}
+		if !slices.Equal(h.exec.argv, []string{"sh", "-c", script}) || !contains(h.exec.env, "T="+token) {
+			t.Errorf("%v: argv = %v, env = %v", args, h.exec.argv, h.exec.env)
+		}
+	}
+	h := newHarness(t, "", map[string]string{"t": token}, env)
+	if code := h.cli.Run([]string{"run", "--only", "T", "sh", "-c", script, "--allow-command-line"}); code != 2 || h.exec.calls != 0 {
+		t.Errorf("after the script: exit code = %d, exec ran %d times; want it refused", code, h.exec.calls)
+	}
+	h = newHarness(t, "", map[string]string{"t": token}, env)
+	if code := h.cli.Run([]string{"run", "echo", "--allow-command-line"}); code != 0 || !slices.Equal(h.exec.argv, []string{"echo", "--allow-command-line"}) {
+		t.Errorf("after echo: exit code = %d, argv = %v", code, h.exec.argv)
 	}
 }

@@ -25,9 +25,10 @@ const (
 	Link Kind = "agent_link"
 	// Server is an MCP server keyward changed through its tool; Text is its scope.
 	Server Kind = "mcp_server"
-	// Allowed is an MCP server whose URL may put the variables in Text, joined
-	// by commas, in mcp-remote's command line, as allowed with --allow-command-line.
-	// Path is the config named as keyward mcp names it.
+	// Allowed is an MCP server that may put the variables in Text, joined by
+	// commas, in a command line, from its URL or as an argument, as allowed with
+	// keyward mcp wrap --allow-command-line, which gives its keyward run that
+	// option. Path is the config named as keyward mcp names it.
 	Allowed Kind = "mcp_command_line"
 	// Dir is a directory keyward created, removed once it is empty.
 	Dir Kind = "owned_dir"
