@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,6 +25,43 @@ func TestActivityIsWrittenBeforeExecWithoutArgumentsOrEnvironment(t *testing.T) 
 	data, _ := json.Marshal(events)
 	if strings.Contains(string(data), "dummy-private") || events[0].Name != "token" {
 		t.Fatal("activity leaked arguments, environment, or values")
+	}
+}
+
+// A run refused for its script is recorded as denied, an outcome the log
+// accepts, with nothing resolved, nothing started, and nothing of the script;
+// a typo in --only before it is still a usage error.
+func TestARefusedRunIsRecordedAsDeniedWithNothingResolvedOrStarted(t *testing.T) {
+	log, err := activity.New(activity.DefaultConfig(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `curl -u "dummy-private-user:$TOKEN" x`
+	for _, tc := range []struct {
+		args    []string
+		outcome string
+	}{
+		{[]string{"run", "--", "sh", "-c", script}, "denied"},
+		{[]string{"run", "--only", "TOKEN,TYPO", "--", "sh", "-c", script}, "usage"},
+	} {
+		h := newHarness(t, "", map[string]string{"token": "dummy-private-value"}, []string{"PATH=/usr/bin:/bin", "TOKEN=cap://token"})
+		var events []activity.Event
+		h.cli.Record = func(e activity.Event) {
+			if err := log.Record(e); err != nil {
+				t.Errorf("the activity log rejects %v: %v", e, err)
+			}
+			e.DurationMS = 0
+			events = append(events, e)
+		}
+		if code := h.cli.Run(tc.args); code != 2 {
+			t.Errorf("%q: exit code = %d, want 2", tc.args, code)
+		}
+		if want := []activity.Event{{Command: "run", Operation: "command", Outcome: tc.outcome}}; !slices.Equal(events, want) {
+			t.Errorf("%q: events = %v, want %v", tc.args, events, want)
+		}
+		if data, _ := json.Marshal(events); strings.Contains(string(data), "dummy-private") {
+			t.Errorf("%q: activity shows the script or a value: %s", tc.args, data)
+		}
 	}
 }
 

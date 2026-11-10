@@ -850,6 +850,29 @@ func TestTheAdviceForACredentialInAURLSaysToSendItInAHeader(t *testing.T) {
 	}
 }
 
+// keyward run refuses a server that passes a secret as an argument, unless given
+// --allow-command-line, so the advice for a credential in a server's args is to
+// pass it in env, if the server reads it from there, and otherwise says that
+// wrap puts ${VAR} there in its command line only if given the option, as
+// mcp-remote fills in one in a --header itself.
+func TestTheAdviceForACredentialInArgsSaysToPassItInEnv(t *testing.T) {
+	const otherwise = ", if the server reads it from there, or else write ${VAR} in its place, which wrap puts in the server's command line only if given " +
+		"--allow-command-line, unless it is in an mcp-remote --header; then run keyward mcp wrap\n"
+	for client, want := range map[string]string{
+		"Claude Code": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it in env as VAR" + otherwise,
+		"Codex":       "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it with env_vars = [\"VAR\"]" + otherwise,
+	} {
+		servers := []mcpconfig.Server{{Client: client, Config: "/home/someone/config", Name: "slack", Command: "npx", Args: []string{"-y", "slack-mcp", "--token", githubToken}}}
+		r, err := doctor.Run(vault.NewMemory(), nil, servers)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if out := r.String(); !strings.Contains(out, "server slack, args[3]\n") || !strings.Contains(out, want) {
+			t.Errorf("%s: the report lacks %q:\n%s", client, want, out)
+		}
+	}
+}
+
 // wrap changes a Claude Code project's server only in the project's folder, so the
 // advice for a credential in one names the folder. Where the folder no longer
 // exists, as a removed worktree's, it says to remove the server by hand instead.

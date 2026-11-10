@@ -512,6 +512,16 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 			}
 			fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header " + header + ", if the server takes it there, " +
 				"or else write ${VAR} in its place, which wrap puts in mcp-remote's command line and log only if given --allow-command-line; then run keyward mcp wrap"
+		case strings.HasPrefix(l.Field, "args[") && !strings.Contains(l.Field, " ("):
+			// keyward run refuses a secret as an argument unless given
+			// --allow-command-line, but wrap leaves one in a header to mcp-remote.
+			env := "in env as VAR"
+			if l.Client == "Codex" {
+				env = "with env_vars = [\"VAR\"]"
+			}
+			fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it " + env + ", if the server reads it from there, " +
+				"or else write ${VAR} in its place, which wrap puts in the server's command line only if given --allow-command-line, unless it is in an mcp-remote --header; " +
+				"then run keyward mcp wrap"
 		}
 		switch config, _, _ := strings.Cut(l.Config, " (project "); {
 		case mcpconfig.Gone(l.Project):

@@ -186,7 +186,8 @@ func TestDoctorFailsOnATokenMigrateLeftInARewrittenLine(t *testing.T) {
 // mcp wrap moves the URL into a script, and quotes JSON or a quoted value again in
 // a script, all still in ~/.claude.json, where unwrap leaves them. doctor reports
 // each in the field that holds it, before and after both, which change only how
-// the server gets its reference. Nothing prints it.
+// the server gets its reference. Nothing prints it. The JSON holds ORG_TOKEN in
+// an argument, so wrap is given --allow-command-line.
 func TestDoctorStillReportsALiteralThatMCPWrapMoved(t *testing.T) {
 	const (
 		literalOnly   = "Problems found: 1 credential(s) in plaintext."
@@ -196,7 +197,7 @@ func TestDoctorStillReportsALiteralThatMCPWrapMoved(t *testing.T) {
 		{`{"type": "http", "url": "https://bot:` + urlPassword + `@mcp.example.com/mcp", "headers": {"X-Org": "${ORG_TOKEN}"}}`, urlPassword,
 			"url", "args[6] (its mcp-remote URL)", "args[1] (its mcp-remote URL)"},
 		{`{"command": "npx", "args": ["-y", "@smithery/cli", "run", "@org/server", "--config", "{\"apiKey\": \"` + anthropicKey + `\", \"orgToken\": \"${ORG_TOKEN}\"}"]}`, anthropicKey,
-			"args[5]", "args[6]", "args[1]"},
+			"args[5]", "args[7]", "args[1]"},
 		{`{"command": "sh", "args": ["-c", "API_KEY=\"` + anthropicKey + `\" exec some-mcp --root \"${HOME}\""], "env": {"ORG_TOKEN": "${ORG_TOKEN}"}}`, anthropicKey,
 			"args[1]", "args[6]", "args[1]"},
 	} {
@@ -216,7 +217,7 @@ func TestDoctorStillReportsALiteralThatMCPWrapMoved(t *testing.T) {
 		}
 
 		doctor("before wrap", tc.before, withReference)
-		if code, out := run("mcp", "wrap"); code != 0 {
+		if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 {
 			t.Fatalf("wrap exit %d:\n%s", code, out)
 		}
 		doctor("after wrap", tc.wrapped, literalOnly)
@@ -323,10 +324,13 @@ func TestFollowingDoctorsAdviceForAnMCPLiteralLeavesAServerThatResolvesIt(t *tes
 	}
 }
 
-// wrap keeps a literal in a server's args where it is. Following doctor's advice
-// puts ${VAR} there, which the client fills in before keyward run starts, so the
-// server would get the reference: keyward mcp and doctor report it until wrap
-// writes it again through sh, which hands it the value.
+// wrap keeps a literal in a server's args where it is. Doctor's advice is to pass
+// it in env, if the server reads it from there, or else to put ${VAR} there,
+// which the client fills in before keyward run starts, so the server would get
+// the reference: keyward mcp and doctor report it until wrap writes it again
+// through sh, which hands it the value. The value is then an argument, which
+// keyward run refuses unless given --allow-command-line, so wrap gives it the
+// option once the user accepts that.
 func TestFollowingDoctorsAdviceForALiteralInAWrappedServersArgsLeavesAServerThatGetsIt(t *testing.T) {
 	h := newHarness(t, "yes\n", map[string]string{"pagerduty-key": "fake-pagerduty-value"}, nil)
 	dir := homed(t, h)
@@ -349,7 +353,8 @@ func TestFollowingDoctorsAdviceForALiteralInAWrappedServersArgsLeavesAServerThat
 	if code, out := run("mcp", "wrap"); code != 0 {
 		t.Fatalf("wrap exit %d:\n%s", code, out)
 	}
-	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "Claude Code server pd, args[7]\n") {
+	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "Claude Code server pd, args[7]\n") ||
+		!strings.Contains(out, "and pass it in env as VAR, if the server reads it from there, or else write ${VAR} in its place, which wrap puts in the server's command line only if given --allow-command-line") {
 		t.Fatalf("doctor exit %d, want 1 and the literal in args[7]:\n%s", code, out)
 	}
 	// The user follows it: keyward add, a variable set to the reference, and ${VAR}
@@ -370,9 +375,12 @@ func TestFollowingDoctorsAdviceForALiteralInAWrappedServersArgsLeavesAServerThat
 	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "reads GH_TOKEN in its arguments, which keyward run does not resolve") {
 		t.Errorf("mcp exit %d, want 1 and why the server needs a change:\n%s", code, out)
 	}
+	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped pd: wrapped, it would pass GH_TOKEN as an argument, which keyward run refuses") {
+		t.Errorf("wrap exit %d, want 1 and the server skipped:\n%s", code, out)
+	}
 	h.cli.Stdin = strings.NewReader("yes\n")
-	if code, out := run("mcp", "wrap"); code != 0 {
-		t.Fatalf("wrap exit %d:\n%s", code, out)
+	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 {
+		t.Fatalf("wrap --allow-command-line exit %d:\n%s", code, out)
 	}
 	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." {
 		t.Errorf("doctor exit %d, want 0:\n%s", code, out)
@@ -456,12 +464,12 @@ func TestFollowingDoctorsAdviceForALiteralInABridgesURLRewritesItsScriptInPlace(
 	data, _ := os.ReadFile(config)
 	os.WriteFile(config, []byte(strings.Replace(string(data), literal, "${Q_KEY}", 1)), 0o600)
 
-	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "reads Q_KEY in its arguments") || !strings.Contains(out, "Warning: its URL holds Q_KEY") ||
-		!strings.Contains(out, "It skips q unless given --allow-command-line, as its URL reads Q_KEY.") {
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "reads Q_KEY in its arguments") || !strings.Contains(out, "npx would get Q_KEY in its command line (line 1)") ||
+		!strings.Contains(out, "keyward mcp wrap skips it. To start it anyway, with Q_KEY in a command line") {
 		t.Errorf("mcp exit %d, want 1, the server and the URL's warning:\n%s", code, out)
 	}
 	before := len(*calls)
-	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped q: its URL holds Q_KEY") || len(*calls) != before+1 {
+	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped q: keyward run would refuse to start it as wrap would change it.\n  npx would get Q_KEY") || len(*calls) != before+1 {
 		t.Errorf("wrap exit %d, want 1 and the server skipped (ran %q):\n%s", code, (*calls)[before:], out)
 	}
 	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
@@ -663,7 +671,7 @@ func TestDoctorPrintsItsVerdictLast(t *testing.T) {
 		{"problems", "export A='cap://alpha'\nexport GITHUB_TOKEN=" + leftoverToken + "\n", mcpIssue,
 			[]exposure.Exposure{{Secret: "alpha", PID: 42, Program: "node"}}, 1,
 			"Problems found: 1 credential(s) in plaintext; 1 MCP server(s) would receive cap:// references instead of values; " +
-				"1 MCP server(s) put a secret in a command line, which any process can read; 1 secret(s) in a running program's command line."},
+				"1 MCP server(s) would put a secret in a command line, so keyward run refuses to start them; 1 secret(s) in a running program's command line."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, "", map[string]string{"alpha": "v", "github-token": "v"}, nil)

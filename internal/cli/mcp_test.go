@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -56,7 +57,8 @@ func TestDoctorPointsAtMCPWhenAServerNeedsKeyward(t *testing.T) {
 }
 
 // A bridge from an earlier keyward is reported for what it does: it already runs
-// through keyward, but its token is in mcp-remote's command line.
+// through keyward, but would put its token in mcp-remote's command line, so
+// keyward run refuses to start it, and keyward mcp says so as keyward run does.
 func TestMCPAndDoctorReportABridgeThatExposesItsToken(t *testing.T) {
 	h := newHarness(t, "", nil, nil)
 	home := homed(t, h)
@@ -64,7 +66,7 @@ func TestMCPAndDoctorReportABridgeThatExposesItsToken(t *testing.T) {
 	if code := h.cli.Run([]string{"mcp"}); code != 1 {
 		t.Errorf("exit %d, want 1 while a server exposes a secret", code)
 	}
-	for _, want := range []string{"1 MCP server(s) put a secret in a command line", "exposes GITHUB_TOKEN", "'$''{GITHUB_TOKEN}'"} {
+	for _, want := range []string{refusedProblem, "keyward run refuses to start it (Claude Code", "npx would get GITHUB_TOKEN in its command line (line 1)", "'$''{GITHUB_TOKEN}'"} {
 		if !strings.Contains(h.out(), want) {
 			t.Errorf("mcp output lacks %q:\n%s", want, h.out())
 		}
@@ -76,26 +78,30 @@ func TestMCPAndDoctorReportABridgeThatExposesItsToken(t *testing.T) {
 	h = newHarness(t, "", nil, nil)
 	h.cli.Home = home
 	h.cli.Run([]string{"doctor"})
-	if !strings.Contains(h.out(), "put a secret in a command line, which any process can read; see keyward mcp") {
+	if !strings.Contains(h.out(), refusedProblem+"; see keyward mcp") {
 		t.Errorf("doctor output:\n%s", h.out())
 	}
 }
 
 // From 1.1.4 mcp-remote fills in a bridge's headers, but a secret in its URL, or a
 // credential written in a header, is still in mcp-remote's command line. keyward
-// mcp reports such a bridge, as doctor does, instead of finding nothing to change.
+// mcp reports such a bridge, as doctor does, instead of finding nothing to change:
+// keyward run refuses to start one for a secret it resolves, and starts one with
+// a header's text written out, as it resolves none.
 func TestMCPAndDoctorReportACurrentBridgeThatStillExposesASecret(t *testing.T) {
-	for _, tc := range []struct{ script, exposes string }{
-		{`exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" --transport http-only`, "exposes PD_KEY"},
-		{`exec npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer "'$''{PD_KEY}'"" --header "X-Team-Token: fake-literal-header" --transport http-only`, "exposes the X-Team-Token header"},
+	const exposed = "1 MCP server(s) put a secret in a command line, which any process can read"
+	for _, tc := range []struct{ script, exposes, problem string }{
+		{`exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" --transport http-only`, "keyward run refuses to start it", refusedProblem},
+		{`exec npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer "'$''{PD_KEY}'"" --header "X-Team-Token: fake-literal-header" --transport http-only`,
+			"exposes the X-Team-Token header", exposed},
 	} {
 		h := newHarness(t, "", nil, nil)
 		home := homed(t, h)
 		config, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"team": map[string]any{
 			"command": "keyward", "args": []string{"run", "--only", "PD_KEY", "--", "sh", "-c", tc.script}, "env": map[string]string{"PD_KEY": "cap://pagerduty-key"}}}})
 		os.WriteFile(filepath.Join(home, ".claude.json"), config, 0o600)
-		if code := h.cli.Run([]string{"mcp"}); code != 1 || !strings.Contains(h.out(), "1 MCP server(s) put a secret in a command line") || !strings.Contains(h.out(), tc.exposes) {
-			t.Errorf("exit %d, want 1 and %q:\n%s", code, tc.exposes, h.out())
+		if code := h.cli.Run([]string{"mcp"}); code != 1 || !strings.Contains(h.out(), tc.problem) || !strings.Contains(h.out(), tc.exposes) {
+			t.Errorf("exit %d, want 1, %q and %q:\n%s", code, tc.problem, tc.exposes, h.out())
 		}
 		if strings.Contains(h.out(), "fake-literal") {
 			t.Errorf("mcp printed a literal:\n%s", h.out())
@@ -104,7 +110,7 @@ func TestMCPAndDoctorReportACurrentBridgeThatStillExposesASecret(t *testing.T) {
 		h = newHarness(t, "", nil, nil)
 		h.cli.Home = home
 		h.cli.Run([]string{"doctor"})
-		if !strings.Contains(h.out(), "put a secret in a command line, which any process can read; see keyward mcp") {
+		if !strings.Contains(h.out(), tc.problem+"; see keyward mcp") {
 			t.Errorf("doctor output:\n%s", h.out())
 		}
 	}
@@ -214,7 +220,7 @@ func runner(h *harness, printed *strings.Builder) func(args ...string) (int, str
 // server unless told to allow it. Literal env and header values are never printed,
 // but are kept when applied.
 func TestMCPWrapSkipsAServerWhoseURLReadsAMigratedSecretUnlessAllowed(t *testing.T) {
-	h := newHarness(t, "yes\n", nil, nil)
+	h := newHarness(t, "yes\n", map[string]string{"pagerduty-key": "fake-pagerduty-value", "github-token": "fake-github-value"}, nil)
 	home := homed(t, h)
 	h.cli.Interactive, h.cli.Self = true, "/opt/homebrew/bin/keyward"
 	os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export PD_KEY='cap://pagerduty-key'\nexport GITHUB_TOKEN='cap://github-token'\n"), 0o644)
@@ -226,8 +232,9 @@ func TestMCPWrapSkipsAServerWhoseURLReadsAMigratedSecretUnlessAllowed(t *testing
 	run := runner(h, &printed)
 
 	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "its URL holds PD_KEY") || !strings.Contains(out, "use header authentication if the server supports it") ||
-		!strings.Contains(out, "It skips mixed unless given --allow-command-line, as its URL reads PD_KEY.") {
-		t.Errorf("mcp exit %d, want 1 and a warning:\n%s", code, out)
+		!strings.Contains(out, "keyward mcp wrap skips it. To start it anyway, with PD_KEY in a command line, where any process can read it, run keyward mcp wrap --allow-command-line mixed.") ||
+		strings.Contains(out, "Replace the") {
+		t.Errorf("mcp exit %d, want 1, a warning and no change keyward run would refuse:\n%s", code, out)
 	}
 	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped mixed: its URL holds PD_KEY") || !strings.Contains(out, "keyward mcp wrap --allow-command-line mixed") {
 		t.Errorf("wrap exit %d, want 1 and the server skipped:\n%s", code, out)
@@ -244,8 +251,11 @@ func TestMCPWrapSkipsAServerWhoseURLReadsAMigratedSecretUnlessAllowed(t *testing
 	if !strings.Contains(string(data), "mcp-remote") || !strings.Contains(string(data), `"KW_HDR_1":"fake-literal-prefix-"`) || !strings.Contains(string(data), `"KW_HDR_2":"fake-literal-header"`) {
 		t.Errorf("config after wrap: %s", data)
 	}
-	if strings.Contains(printed.String(), "fake-literal") {
-		t.Errorf("printed a literal:\n%s", printed.String())
+	if code, out := start(t, h, run, filepath.Join(home, ".claude.json"), "mixed"); code != 0 {
+		t.Errorf("the server's keyward run exit %d, want 0:\n%s", code, out)
+	}
+	if strings.Contains(printed.String(), "fake-") {
+		t.Errorf("printed a literal or value:\n%s", printed.String())
 	}
 }
 
@@ -336,41 +346,314 @@ func TestMCPReportsAScriptThatReadsAMigratedVariableAsShDoes(t *testing.T) {
 	}
 }
 
-// A server that takes its token as an argument still gets it there once wrapped,
-// in its command line, as before keyward. keyward mcp and doctor list it as a
-// warning, saying to pass the token in env if the server reads it from there, so
-// doctor's advice for the token it finds in a running program's command line, to
-// see keyward mcp, leads somewhere.
+// A server that takes its token as an argument would get it in its command line
+// once wrapped, as it did before keyward, which keyward run refuses. So keyward
+// mcp shows no change for it, and wrap skips it, saying to pass the token in env
+// if the server reads it from there, unless given --allow-command-line, which it
+// gives the server's keyward run. keyward mcp and doctor then list it as a
+// warning, so doctor's advice for the token it finds in a running program's
+// command line, to see keyward mcp, leads somewhere.
 func TestMCPAndDoctorWarnOfAServerThatTakesItsTokenAsAnArgument(t *testing.T) {
 	h := newHarness(t, "", map[string]string{"slack-bot-token": "fake-slack-value"}, nil)
 	home := homed(t, h)
 	h.cli.Interactive, h.cli.Self = true, "/opt/homebrew/bin/keyward"
 	os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export SLACK_BOT_TOKEN='cap://slack-bot-token'\n"), 0o644)
-	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers": {"slack": {"command": "npx", "args": ["-y", "slack-mcp", "--token", "${SLACK_BOT_TOKEN}"]}}}`), 0o600)
-	fakeTools(t, h, home)
+	config := filepath.Join(home, ".claude.json")
+	os.WriteFile(config, []byte(`{"mcpServers": {"slack": {"command": "npx", "args": ["-y", "slack-mcp", "--token", "${SLACK_BOT_TOKEN}"]}}}`), 0o600)
+	calls := fakeTools(t, h, home)
 	var printed strings.Builder
 	run := runner(h, &printed)
-	const warning = "1 MCP server(s) pass a secret to a program as an argument, which any process can read in its command line"
+	const (
+		argument = "its script passes SLACK_BOT_TOKEN as an argument, which any process can read in its command line; pass it in env instead, if the server reads it from there"
+		refused  = "wrapped, it would pass SLACK_BOT_TOKEN as an argument, which keyward run refuses; pass it in env instead, if the server reads it from there"
+		anyway   = "to start it anyway, with SLACK_BOT_TOKEN in a command line, where any process can read it, run keyward mcp wrap --allow-command-line slack."
+	)
 
-	h.cli.Stdin = strings.NewReader("yes\n")
-	if code, out := run("mcp", "wrap"); code != 0 {
-		t.Fatalf("wrap exit %d:\n%s", code, out)
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "Warning: "+refused+".") || !strings.Contains(out, "keyward mcp wrap skips it. T"+anyway[1:]) ||
+		strings.Contains(out, `"command": "keyward"`) {
+		t.Errorf("mcp exit %d, want 1, the warning and no change keyward run would refuse:\n%s", code, out)
 	}
-	if code, out := run("mcp"); code != 0 || !strings.Contains(out, "No MCP server needs a change.") || !strings.Contains(out, warning+":") ||
-		!strings.Contains(out, "slack (Claude Code, ~/.claude.json): its script passes SLACK_BOT_TOKEN as an argument; pass it in env instead, if the server reads it from there.") {
+	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped slack: "+refused+", or, "+anyway) {
+		t.Errorf("wrap exit %d, want 1 and the server skipped:\n%s", code, out)
+	}
+	for _, call := range *calls {
+		if !strings.Contains(call, "--help") {
+			t.Errorf("ran %q for a skipped server", call)
+		}
+	}
+	h.cli.Stdin = strings.NewReader("yes\n")
+	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 || !strings.Contains(out, "✓ slack") {
+		t.Fatalf("wrap --allow-command-line exit %d:\n%s", code, out)
+	}
+	if code, out := run("mcp"); code != 0 || !strings.Contains(out, "No MCP server needs a change.") || !strings.Contains(out, allowedSection+":") ||
+		!strings.Contains(out, "slack (Claude Code, ~/.claude.json): "+argument+".") {
 		t.Errorf("mcp exit %d, want 0 and the warning:\n%s", code, out)
 	}
-	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." || !strings.Contains(out, warning+"; see keyward mcp") {
+	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." || !strings.Contains(out, allowedSection+"; see keyward mcp") {
 		t.Errorf("doctor exit %d, want 0 and the warning:\n%s", code, out)
+	}
+	if code, out := start(t, h, run, config, "slack"); code != 0 || h.exec.calls != 1 {
+		t.Errorf("the server's keyward run exit %d, want 0 and the server started:\n%s", code, out)
 	}
 	h.cli.Exposures = func() ([]exposure.Exposure, error) {
 		return []exposure.Exposure{{Secret: "slack-bot-token", PID: 4242, Program: "node"}}, nil
 	}
-	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "keyward mcp shows how for MCP servers") || !strings.Contains(out, warning+"; see keyward mcp") {
+	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "keyward mcp shows how for MCP servers") || !strings.Contains(out, allowedSection+"; see keyward mcp") {
 		t.Errorf("doctor exit %d, want 1 and the warning beside the exposure:\n%s", code, out)
 	}
 	if strings.Contains(printed.String(), "fake-slack-value") {
 		t.Errorf("printed the value:\n%s", printed.String())
+	}
+}
+
+// A server the user allowed with --allow-command-line before 1.5.0 runs through
+// keyward already, and needs only the option in its keyward run, so keyward mcp
+// does not say to run it through keyward, but says the option is there because
+// the user allowed it, as wrap does when it prints the change, unless given the
+// option now.
+func TestAnOptionTheUserAllowedBeforeIsSaidToBeWhy(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"pagerduty-key": "fake-pagerduty-value"}, nil)
+	home := homed(t, h)
+	config := filepath.Join(home, ".cursor", "mcp.json")
+	os.MkdirAll(filepath.Dir(config), 0o755)
+	data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"team": map[string]any{"command": "keyward",
+		"args": []string{"run", "--only", "PD_KEY", "--", "sh", "-c", `exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" --transport http-only`},
+		"env":  map[string]string{"PD_KEY": "cap://pagerduty-key"}}}})
+	os.WriteFile(config, data, 0o600)
+	h.cli.Ledger.Add(ledger.Record{Kind: ledger.Allowed, Path: config, Name: "team", Text: "PD_KEY"})
+	var printed strings.Builder
+	run := runner(h, &printed)
+	const before = "You allowed this with --allow-command-line before, and keyward run now needs the option in its args. Make this change"
+
+	for _, args := range [][]string{{"mcp"}, {"mcp", "wrap"}} {
+		if code, out := run(args...); code != 1 || !strings.Contains(out, before) || !strings.Contains(out, `In args, add "--allow-command-line" after "run".`) || strings.Contains(out, "like this") {
+			t.Errorf("%v exit %d, want 1 and why the option is added:\n%s", args, code, out)
+		}
+	}
+	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 1 || strings.Contains(out, "before") || !strings.Contains(out, `In args, add "--allow-command-line" after "run".`) {
+		t.Errorf("wrap --allow-command-line exit %d, want 1 and the change alone:\n%s", code, out)
+	}
+}
+
+// wrap changes another Claude Code project's servers only in its folder, so it
+// names the folder, with the command to run there, which keeps the option it was
+// given. keyward mcp marks each such server that keyward run refuses.
+func TestAServerOfAnotherProjectIsNamedWithTheCommandForIt(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"slack-bot-token": "fake-slack-value"}, nil)
+	home := homed(t, h)
+	other := filepath.Join(home, "other")
+	os.Mkdir(other, 0o755)
+	os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export SLACK_BOT_TOKEN='cap://slack-bot-token'\n"), 0o644)
+	data, _ := json.Marshal(map[string]any{"projects": map[string]any{other: map[string]any{"mcpServers": map[string]any{
+		"slack": map[string]any{"command": "npx", "args": []string{"-y", "slack-mcp", "--token", "${SLACK_BOT_TOKEN}"}},
+		"wrapped": map[string]any{"command": "keyward", "args": []string{"run", "--only", "SLACK_BOT_TOKEN", "--", "sh", "-c", `exec npx -y slack-mcp --token "$SLACK_BOT_TOKEN"`},
+			"env": map[string]string{"SLACK_BOT_TOKEN": "cap://slack-bot-token"}}}}}})
+	os.WriteFile(filepath.Join(home, ".claude.json"), data, 0o600)
+	fakeTools(t, h, home)
+	var printed strings.Builder
+	run := runner(h, &printed)
+
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "\n  slack  ~/other\n") || !strings.Contains(out, "\n  wrapped  ~/other  (keyward run refuses to start it)\n") {
+		t.Errorf("mcp exit %d, want 1 and both servers:\n%s", code, out)
+	}
+	for _, args := range [][]string{{"mcp", "wrap", "--allow-command-line"}, {"mcp", "wrap", "--allow-command-line", "slack"}} {
+		if code, out := run(args...); code != 1 || !strings.Contains(out, "run keyward mcp wrap --allow-command-line ") || strings.Contains(out, "run keyward mcp wrap in") || strings.Contains(out, "wrap there") {
+			t.Errorf("%v exit %d, want 1 and the command with its option:\n%s", args, code, out)
+		}
+	}
+}
+
+// Upgraded, keyward run refuses to start a server that an earlier keyward wrapped
+// to put a secret in a command line. keyward mcp and doctor report each with its
+// fix: one the ledger says the user allowed gets --allow-command-line in its
+// keyward run on the next wrap, and one that passes its token as an argument
+// waits for the user to allow it, or for the server to take the token from env.
+func TestAServerKeywardRunRefusesIsReportedWithItsFix(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"pagerduty-key": "fake-pagerduty-value", "slack-bot-token": "fake-slack-value"}, nil)
+	home := homed(t, h)
+	h.cli.Interactive = true
+	config := filepath.Join(home, ".claude.json")
+	data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
+		"team": map[string]any{"command": "keyward", "args": []string{"run", "--only", "PD_KEY", "--", "sh", "-c", `exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" --transport http-only`},
+			"env": map[string]string{"PD_KEY": "cap://pagerduty-key"}},
+		"slack": map[string]any{"command": "keyward", "args": []string{"run", "--only", "SLACK_BOT_TOKEN", "--", "sh", "-c", `exec npx -y slack-mcp --token "$SLACK_BOT_TOKEN"`},
+			"env": map[string]string{"SLACK_BOT_TOKEN": "cap://slack-bot-token"}},
+	}})
+	os.WriteFile(config, data, 0o600)
+	h.cli.Ledger.Add(ledger.Record{Kind: ledger.Allowed, Path: config, Name: "team", Text: "PD_KEY"})
+	fakeTools(t, h, home)
+	var printed strings.Builder
+	run := runner(h, &printed)
+	started := func(name string) int {
+		t.Helper()
+		code, _ := start(t, h, run, config, name)
+		return code
+	}
+	const refused = "2 MCP server(s) would put a secret in a command line, so keyward run refuses to start them"
+
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, refused+".") || !strings.Contains(out, `In args, add "--allow-command-line" after "run".`) ||
+		!strings.Contains(out, "npx would get SLACK_BOT_TOKEN in its command line (line 1)") ||
+		!strings.Contains(out, "To start it anyway, with SLACK_BOT_TOKEN in a command line, where any process can read it, run keyward mcp wrap --allow-command-line slack.") {
+		t.Errorf("mcp exit %d, want 1 and each server's fix:\n%s", code, out)
+	}
+	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: "+refused+"." {
+		t.Errorf("doctor exit %d, want 1 and both servers reported:\n%s", code, out)
+	}
+	if started("team") != 2 || started("slack") != 2 {
+		t.Fatal("keyward run started a server it should refuse")
+	}
+	h.cli.Stdin = strings.NewReader("yes\n")
+	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "✓ team") ||
+		!strings.Contains(out, "Skipped slack: it already runs through keyward, but keyward run refuses to start it.\n  npx would get SLACK_BOT_TOKEN in its command line (line 1)") {
+		t.Errorf("wrap exit %d, want 1, team given the option and slack skipped:\n%s", code, out)
+	}
+	if code := started("team"); code != 0 {
+		t.Errorf("team's keyward run exit %d, want 0", code)
+	}
+	h.cli.Stdin = strings.NewReader("yes\n")
+	if code, out := run("mcp", "wrap", "--allow-command-line", "slack"); code != 0 || !strings.Contains(out, "✓ slack") {
+		t.Errorf("wrap --allow-command-line slack exit %d:\n%s", code, out)
+	}
+	if code := started("slack"); code != 0 {
+		t.Errorf("slack's keyward run exit %d, want 0", code)
+	}
+	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." ||
+		!strings.Contains(out, "2 MCP server(s) put a secret in a command line, as allowed with --allow-command-line; see keyward mcp") {
+		t.Errorf("doctor exit %d, want 0 and both servers listed as allowed:\n%s", code, out)
+	}
+	if strings.Contains(printed.String(), "fake-") {
+		t.Errorf("printed a value:\n%s", printed.String())
+	}
+}
+
+// For a wrapped server keyward run refuses, keyward mcp and wrap say what keyward
+// run says when the server starts: each reason, with its fix, such as a header
+// mcp-remote fills in for a bridge written by hand, or why it cannot read the
+// script. A fix never sends the value on stdin, where a server reads the
+// protocol. --allow-command-line comes last, said to leave the secret where any
+// process can read it, or for a script keyward run cannot read, to start the
+// server unchecked. Nothing calls the server exposed, as it does not start.
+func TestMCPSaysWhatKeywardRunSaysOfAServerItRefuses(t *testing.T) {
+	for name, tc := range map[string]struct{ shell, script, fix string }{
+		"a bridge written by hand": {"sh", `npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer $JIRA"`, ""},
+		"a script in another":      {"sh", `exec sh -c "GITHUB_PERSONAL_ACCESS_TOKEN=$JIRA exec github-mcp-server stdio"`, ""},
+		"a token as an argument":   {"sh", `exec npx -y slack-mcp --token "$JIRA"`, "Pass it to npx in an environment variable it reads instead."},
+		"a script it cannot read":  {"zsh", `for x (a b) print $x; T="$JIRA" exec some-mcp`, ""},
+	} {
+		h := newHarness(t, "", map[string]string{"jira-token": "fake-jira-value"}, nil)
+		home := homed(t, h)
+		h.cli.Interactive = true
+		config := filepath.Join(home, ".claude.json")
+		data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"jira": map[string]any{"command": "keyward",
+			"args": []string{"run", "--only", "JIRA", "--", tc.shell, "-c", tc.script}, "env": map[string]string{"JIRA": "cap://jira-token"}}}})
+		os.WriteFile(config, data, 0o600)
+		fakeTools(t, h, home)
+		var printed strings.Builder
+		run := runner(h, &printed)
+		anyway, problem := "To start it anyway, with JIRA in a command line, where any process can read it, run keyward mcp wrap --allow-command-line jira.",
+			"1 MCP server(s) would put a secret in a command line, so keyward run refuses to start them."
+		if tc.shell == "zsh" {
+			anyway, problem = "To start it anyway, unchecked, run keyward mcp wrap --allow-command-line jira.",
+				"1 MCP server(s) start a script keyward run cannot read, so it refuses to start them."
+		}
+
+		code, said := start(t, h, run, config, "jira")
+		if code != 2 {
+			t.Fatalf("%s: keyward run exit %d, want 2:\n%s", name, code, said)
+		}
+		_, mcp := run("mcp")
+		h.cli.Stdin = strings.NewReader("yes\n")
+		_, wrap := run("mcp", "wrap")
+		for _, out := range []string{mcp, wrap} {
+			// Each line keyward run prints, but its last, about the option, and a
+			// fix that sends the value on stdin.
+			lines := strings.Split(strings.TrimSpace(said), "\n")
+			for _, line := range lines[:len(lines)-1] {
+				if line = strings.TrimSpace(strings.TrimPrefix(line, "keyward run: ")); !strings.Contains(line, "stdin") && !strings.Contains(out, line) {
+					t.Errorf("%s: output lacks %q:\n%s", name, line, out)
+				}
+			}
+			if strings.Contains(out, "stdin") || !strings.Contains(out, tc.fix) {
+				t.Errorf("%s: output lacks the fix %q, or sends the value on stdin:\n%s", name, tc.fix, out)
+			}
+			if !strings.Contains(out, "keyward run refuses to start it") || !strings.HasSuffix(strings.TrimSpace(out), anyway) ||
+				strings.Contains(out, "exposes") || strings.Contains(out, "which any process can read") {
+				t.Errorf("%s: output does not say keyward run refuses it, with the option last:\n%s", name, out)
+			}
+		}
+		if !strings.HasPrefix(mcp, problem) {
+			t.Errorf("%s: keyward mcp does not start with %q:\n%s", name, problem, mcp)
+		}
+	}
+}
+
+// keyward run cannot see where the script of a server it cannot read puts a
+// secret, so nothing says the server puts one in a command line: refused, it
+// would start unchecked, and once allowed, it does.
+func TestAServerKeywardRunCannotReadIsSaidToStartUnchecked(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"pagerduty-key": "fake-pagerduty-value"}, nil)
+	home := homed(t, h)
+	h.cli.Interactive = true
+	config := filepath.Join(home, ".claude.json")
+	data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"pd": map[string]any{"command": "keyward",
+		"args": []string{"run", "--only", "PD_KEY", "--", "zsh", "-c", `for x (a b) print $x; PD="$PD_KEY" exec some-mcp`},
+		"env":  map[string]string{"PD_KEY": "cap://pagerduty-key"}}}})
+	os.WriteFile(config, data, 0o600)
+	fakeTools(t, h, home)
+	var printed strings.Builder
+	run := runner(h, &printed)
+	const problem = "1 MCP server(s) start a script keyward run cannot read, so it refuses to start them"
+
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, problem+".") ||
+		!strings.Contains(out, "To start it anyway, unchecked, run keyward mcp wrap --allow-command-line pd.") || strings.Contains(out, "command line,") {
+		t.Errorf("mcp exit %d, want 1, and the server said to start unchecked:\n%s", code, out)
+	}
+	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: "+problem+"." {
+		t.Errorf("doctor exit %d, want 1 and the server counted:\n%s", code, out)
+	}
+	h.cli.Stdin = strings.NewReader("yes\n")
+	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 || !strings.Contains(out, "✓ pd") {
+		t.Fatalf("wrap --allow-command-line exit %d:\n%s", code, out)
+	}
+	const allowed = "1 MCP server(s) start unchecked, as allowed with --allow-command-line"
+	if code, out := run("mcp"); code != 0 || !strings.Contains(out, allowed+":") ||
+		!strings.Contains(out, "pd (Claude Code, ~/.claude.json): keyward run cannot read its script, so it starts it unchecked.") {
+		t.Errorf("mcp exit %d, want 0 and the server listed as allowed:\n%s", code, out)
+	}
+	if code, out := run("doctor"); code != 0 || !strings.Contains(out, allowed+"; see keyward mcp") {
+		t.Errorf("doctor exit %d, want 0 and the server listed as allowed:\n%s", code, out)
+	}
+	// One given the option by hand, which the ledger does not record.
+	data, _ = json.Marshal(map[string]any{"mcpServers": map[string]any{"hand": map[string]any{"command": "keyward",
+		"args": []string{"run", "--allow-command-line", "--only", "PD_KEY", "--", "zsh", "-c", `for x (a b) print $x; PD="$PD_KEY" exec some-mcp`},
+		"env":  map[string]string{"PD_KEY": "cap://pagerduty-key"}}}})
+	os.WriteFile(config, data, 0o600)
+	if code, out := run("mcp"); code != 1 || !strings.HasPrefix(out, "1 MCP server(s) start unchecked, as keyward run cannot read their script.") ||
+		!strings.Contains(out, "starts unchecked, as keyward run cannot read its script") || strings.Contains(out, "exposes") || strings.Contains(out, "command line,") {
+		t.Errorf("mcp exit %d, want 1 and the server said to start unchecked:\n%s", code, out)
+	}
+	if strings.Contains(printed.String(), "fake-") {
+		t.Errorf("printed a value:\n%s", printed.String())
+	}
+}
+
+// keyward mcp and doctor count servers, so one that keyward run refuses and
+// whose --only also leaves out a reference is one server to change, listed once.
+func TestAServerWithTwoProblemsIsCountedOnce(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"slack-bot-token": "fake-slack-value", "pagerduty-key": "fake-pagerduty-value"}, nil)
+	home := homed(t, h)
+	data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"slack": map[string]any{"command": "keyward",
+		"args": []string{"run", "--only", "SLACK_BOT_TOKEN", "--", "sh", "-c", `exec npx -y slack-mcp --token "$SLACK_BOT_TOKEN"`},
+		"env":  map[string]string{"SLACK_BOT_TOKEN": "cap://slack-bot-token", "PD_KEY": "cap://pagerduty-key"}}}})
+	os.WriteFile(filepath.Join(home, ".claude.json"), data, 0o600)
+	var printed strings.Builder
+	run := runner(h, &printed)
+
+	if code, out := run("mcp"); code != 1 || !strings.HasPrefix(out, refusedProblem+".\n") || strings.Count(out, "\nslack\n") != 1 {
+		t.Errorf("mcp exit %d, want 1 and the server once:\n%s", code, out)
+	}
+	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: "+refusedProblem+"." {
+		t.Errorf("doctor exit %d, want 1 and the server counted once:\n%s", code, out)
 	}
 }
 
@@ -391,7 +674,8 @@ func TestMCPWrapSkipsAServerWhoseURLAfterItsHeadersReadsAMigratedSecret(t *testi
 	var printed strings.Builder
 	run := runner(h, &printed)
 
-	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "Warning: its URL holds Q_KEY") || !strings.Contains(out, "It skips q unless given --allow-command-line, as its URL reads Q_KEY.") {
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "Warning: its URL holds Q_KEY") ||
+		!strings.Contains(out, "keyward mcp wrap skips it. To start it anyway, with Q_KEY in a command line") {
 		t.Errorf("mcp exit %d, want 1 and a warning:\n%s", code, out)
 	}
 	h.cli.Stdin = strings.NewReader("yes\n")
@@ -412,6 +696,9 @@ func TestMCPWrapSkipsAServerWhoseURLAfterItsHeadersReadsAMigratedSecret(t *testi
 	}
 	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." || !strings.Contains(out, allowedSection+"; see keyward mcp") {
 		t.Errorf("doctor exit %d, want 0 and the server listed as allowed:\n%s", code, out)
+	}
+	if code, out := start(t, h, run, filepath.Join(home, ".claude.json"), "q", "Q_KEY=cap://q-key", "JIRA=cap://jira-token"); code != 0 {
+		t.Errorf("the server's keyward run exit %d, want 0:\n%s", code, out)
 	}
 }
 
@@ -451,19 +738,86 @@ func TestAnAllowedServersOwnMCPRemoteIsListedAsAllowedAndKeepsItsTransport(t *te
 		if data, _ := os.ReadFile(config); string(data) != string(applied) || strings.Contains(string(data), "--transport") {
 			t.Errorf("%v: config after wrap: %s", port, data)
 		}
+		if code, out := start(t, h, run, config, "q", "Q_KEY=cap://q-key", "JIRA=cap://jira-token"); code != 0 {
+			t.Errorf("%v: the server's keyward run exit %d, want 0:\n%s", port, code, out)
+		}
 	}
 }
 
-// wrap skips a server for its URL only if the URL reads a migrated secret, as the
-// README says, so help and the flag's own usage say so too, not any secret.
-func TestHelpSaysWhichServersAllowCommandLineWraps(t *testing.T) {
+// wrap skips a server only if it would put a migrated secret in a command line,
+// as the README says, so the flag's own usage says so too, not any secret.
+// Help's one line for the flag says the same of run and wrap.
+func TestHelpSaysWhatAllowCommandLineAllows(t *testing.T) {
 	h := newHarness(t, "", nil, nil)
 	h.cli.Run([]string{"help"})
 	h.cli.Run([]string{"mcp", "wrap", "-h"})
-	for name, out := range map[string]string{"help": h.out(), "mcp wrap -h": h.err()} {
-		if !strings.Contains(out, "also wrap a server whose URL reads a migrated secret") {
-			t.Errorf("%s does not say which servers --allow-command-line wraps:\n%s", name, out)
+	for name, tc := range map[string]struct{ out, want string }{
+		"help":        {h.out(), "\n  --allow-command-line   run, mcp wrap: allow a migrated secret in a program's command line\n"},
+		"mcp wrap -h": {h.err(), "also wrap a server that would put a migrated secret in a command line, from its URL or as an argument"},
+	} {
+		if !strings.Contains(tc.out, tc.want) {
+			t.Errorf("%s does not say what --allow-command-line allows:\n%s", name, tc.out)
 		}
+	}
+}
+
+// Codex and Cursor users apply by hand the entries keyward mcp prints, so every
+// one it prints starts through keyward run. One that keyward run would refuse,
+// as its URL or arguments would put a secret in a command line, is not printed,
+// until wrap --allow-command-line prints it with the option.
+func TestEveryEntryKeywardMCPPrintsStarts(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"pagerduty-key": "fake-pagerduty-value", "slack-bot-token": "fake-slack-value", "github-token": "fake-github-value"}, nil)
+	home := homed(t, h)
+	os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export PD_KEY='cap://pagerduty-key'\nexport SLACK_BOT_TOKEN='cap://slack-bot-token'\nexport GITHUB_TOKEN='cap://github-token'\n"), 0o644)
+	os.MkdirAll(filepath.Join(home, ".cursor"), 0o755)
+	os.WriteFile(filepath.Join(home, ".cursor", "mcp.json"), []byte(`{"mcpServers": {
+    "keyed": {"url": "https://mcp.example.com/mcp?key=${env:PD_KEY}"},
+    "other": {"command": "npx", "args": ["-y", "other-mcp", "--token", "${env:SLACK_BOT_TOKEN}"]},
+    "gh": {"command": "npx", "args": ["-y", "gh-mcp"], "env": {"GITHUB_TOKEN": "${env:GITHUB_TOKEN}"}},
+    "remote": {"url": "https://api.example.com/mcp/", "headers": {"Authorization": "Bearer ${env:GITHUB_TOKEN}"}}}}`), 0o600)
+	var printed strings.Builder
+	run := runner(h, &printed)
+	// starts reports whether the entry for name in out, if printed, starts.
+	starts := func(out, name string) (bool, bool) {
+		t.Helper()
+		start := strings.Index(out, "\n    "+strconv.Quote(name)+": {\n")
+		if start < 0 {
+			return false, false
+		}
+		end := strings.Index(out[start:], "\n    }\n")
+		var entry map[string]struct {
+			Args []string
+			Env  map[string]string
+		}
+		if err := json.Unmarshal([]byte("{"+strings.ReplaceAll(out[start:start+end+6], "\n    ", "\n")+"}"), &entry); err != nil {
+			t.Fatalf("%s: %v:\n%s", name, err, out)
+		}
+		var env []string
+		for k, v := range entry[name].Env {
+			env = append(env, k+"="+v)
+		}
+		h.cli.Environ = func() []string { return env }
+		code, said := run(entry[name].Args...)
+		if code != 0 {
+			t.Logf("%s's keyward run exit %d:\n%s", name, code, said)
+		}
+		return true, code == 0
+	}
+
+	_, out := run("mcp")
+	for name, want := range map[string]bool{"keyed": false, "other": false, "gh": true, "remote": true} {
+		if shown, started := starts(out, name); shown != want || shown && !started {
+			t.Errorf("%s: printed %v, want %v, and started %v:\n%s", name, shown, want, started, out)
+		}
+	}
+	_, out = run("mcp", "wrap", "--allow-command-line", "keyed", "other")
+	for _, name := range []string{"keyed", "other"} {
+		if shown, started := starts(out, name); !shown || !started {
+			t.Errorf("%s: with --allow-command-line, printed %v and started %v:\n%s", name, shown, started, out)
+		}
+	}
+	if strings.Contains(printed.String(), "fake-") {
+		t.Errorf("printed a value:\n%s", printed.String())
 	}
 }
 
@@ -494,33 +848,83 @@ func TestMCPWrapWithoutATerminalSaysToRunItAgainWithItsFlag(t *testing.T) {
 
 // Wrapping a bridge again puts nothing new in a command line, as the secret in its
 // URL is there already, and takes out what else it exposes. So wrap does it
-// without --allow-command-line, warning that the URL's secret stays.
+// without --allow-command-line, as it rewrites any earlier keyward's bridge, but
+// keyward run still refuses to start it for the URL's secret. keyward mcp and
+// wrap say so, and wrap fails, giving it no check mark, until given
+// --allow-command-line.
 func TestMCPWrapRewrapsABridgeWhoseURLHoldsASecret(t *testing.T) {
+	const anyway = "To start it anyway, with PD_KEY in a command line, where any process can read it, run keyward mcp wrap --allow-command-line team."
 	for _, script := range []string{
 		`exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" --header "Authorization: Bearer $GITHUB_TOKEN" --transport http-only`,
 		`exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" --header "Authorization: Bearer "'$''{GITHUB_TOKEN}'"" --header "X-Team: fake-literal-header" --transport http-only`,
 	} {
-		h := newHarness(t, "yes\n", nil, nil)
+		h := newHarness(t, "yes\n", map[string]string{"github-token": "fake-github-value", "pagerduty-key": "fake-pagerduty-value"}, nil)
 		home := homed(t, h)
 		h.cli.Interactive, h.cli.Self = true, "/opt/homebrew/bin/keyward"
-		config, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"team": map[string]any{
+		config := filepath.Join(home, ".claude.json")
+		data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"team": map[string]any{
 			"command": "/opt/homebrew/bin/keyward", "args": []string{"run", "--only", "GITHUB_TOKEN,PD_KEY", "--", "sh", "-c", script},
 			"env": map[string]string{"GITHUB_TOKEN": "cap://github-token", "PD_KEY": "cap://pagerduty-key"}}}})
-		os.WriteFile(filepath.Join(home, ".claude.json"), config, 0o600)
+		os.WriteFile(config, data, 0o600)
 		fakeTools(t, h, home)
 		var printed strings.Builder
 		run := runner(h, &printed)
 
-		if code, out := run("mcp", "wrap"); code != 0 || !strings.Contains(out, "Warning: its URL holds PD_KEY") || strings.Contains(out, "Skipped") {
-			t.Errorf("wrap exit %d, want 0 and a warning:\n%s", code, out)
+		if code, out := run("mcp"); code != 1 || !strings.Contains(out, "keyward run would still refuse to start it once changed, as it would put PD_KEY in a command line. "+anyway) ||
+			strings.Contains(out, "like this") {
+			t.Errorf("mcp exit %d, want 1 and that the change leaves it refused:\n%s", code, out)
+		}
+		if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Warning: keyward run would still refuse to start it once changed") ||
+			!strings.Contains(out, "team changed, but keyward run still refuses to start it. "+anyway) ||
+			strings.Contains(out, "✓") || strings.Contains(out, "Restart Claude Code") || strings.Contains(out, "Skipped") {
+			t.Errorf("wrap exit %d, want 1 and the server changed but not started:\n%s", code, out)
+		}
+		if data, _ := os.ReadFile(config); !strings.Contains(string(data), `'$''{GITHUB_TOKEN}'`) {
+			t.Errorf("config after wrap: %s", data)
 		}
 		// What is left exposed is the URL's secret alone.
-		if code, out := run("mcp"); code != 1 || !strings.Contains(out, "exposes PD_KEY (") {
+		if code, out := run("mcp"); code != 1 || !strings.Contains(out, "keyward run refuses to start it (") || strings.Count(out, " would get ") != 1 ||
+			!strings.Contains(out, "npx would get PD_KEY in its command line (line 1)") {
 			t.Errorf("mcp after wrap exit %d:\n%s", code, out)
+		}
+		if code, out := start(t, h, run, config, "team"); code != 2 || !strings.Contains(out, "would get PD_KEY in its command line") {
+			t.Errorf("the server's keyward run exit %d, want 2 and PD_KEY refused:\n%s", code, out)
+		}
+		h.cli.Stdin = strings.NewReader("yes\n")
+		if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 || !strings.Contains(out, "✓ team") {
+			t.Errorf("wrap --allow-command-line exit %d:\n%s", code, out)
+		}
+		if code, out := start(t, h, run, config, "team"); code != 0 {
+			t.Errorf("the allowed server's keyward run exit %d, want 0:\n%s", code, out)
 		}
 		if strings.Contains(printed.String(), "fake-literal") {
 			t.Errorf("printed a literal:\n%s", printed.String())
 		}
+	}
+}
+
+// wrap skips such a bridge until a credential in its header is moved out, as
+// claude mcp add-json would get it in its command line. It says only that, as
+// --allow-command-line would not change it.
+func TestMCPWrapSkipsARefusedBridgeForItsCredentialAlone(t *testing.T) {
+	const headerKey = "FakeOpaqueTeamHeader0000"
+	h := newHarness(t, "yes\n", map[string]string{"pagerduty-key": "fake-pagerduty-value"}, nil)
+	home := homed(t, h)
+	h.cli.Interactive, h.cli.Self = true, "/opt/homebrew/bin/keyward"
+	data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"team": map[string]any{"command": "keyward",
+		"args": []string{"run", "--only", "PD_KEY", "--", "sh", "-c", `exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" --header "X-Api-Key: ` + headerKey + `" --transport http-only`},
+		"env":  map[string]string{"PD_KEY": "cap://pagerduty-key"}}}})
+	os.WriteFile(filepath.Join(home, ".claude.json"), data, 0o600)
+	fakeTools(t, h, home)
+	var printed strings.Builder
+	run := runner(h, &printed)
+
+	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped team: its env.KW_HDR_1 (from its X-Api-Key header) holds a credential") ||
+		strings.Contains(out, "start it anyway") {
+		t.Errorf("wrap exit %d, want 1 and the server skipped for its credential alone:\n%s", code, out)
+	}
+	if strings.Contains(printed.String(), headerKey) {
+		t.Errorf("printed the header's text:\n%s", printed.String())
 	}
 }
 
@@ -557,10 +961,10 @@ func TestMCPReportsABridgeWithAnotherTransportThatExposesASecret(t *testing.T) {
 		"args": []string{"run", "--only", "ATLASSIAN_TOKEN", "--", "sh", "-c", `exec npx -y mcp-remote https://mcp.example.com/v1/sse --transport sse-only --header "Authorization: Bearer $ATLASSIAN_TOKEN"`},
 		"env":  map[string]string{"ATLASSIAN_TOKEN": "cap://atlassian-token"}}}})
 	os.WriteFile(config, earlier, 0o600)
-	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "exposes ATLASSIAN_TOKEN") {
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "keyward run refuses to start it") || !strings.Contains(out, "npx would get ATLASSIAN_TOKEN in its command line") {
 		t.Errorf("mcp exit %d, want 1 and the exposure:\n%s", code, out)
 	}
-	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "1 MCP server(s) put a secret in a command line") {
+	if code, out := run("doctor"); code != 1 || !strings.Contains(out, refusedProblem) {
 		t.Errorf("doctor exit %d, want 1 and the exposure:\n%s", code, out)
 	}
 	h.cli.Stdin = strings.NewReader("yes\n")
@@ -612,6 +1016,53 @@ func TestMCPWrapBridgesAnSSEServerOverSSE(t *testing.T) {
 	overSSE("uninstall")
 }
 
+// A server whose own script starts keyward run is checked as keyward run checks
+// it, so one keyward run refuses does not stop starting unreported: keyward mcp
+// and doctor report it, with what keyward run says, and wrap leaves it to the
+// user, as it does not rewrite such a script. One keyward run starts is left
+// alone, not wrapped again.
+func TestMCPReportsAKeywardRunInAServersOwnScript(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"jira-token": "fake-jira-value"}, nil)
+	home := homed(t, h)
+	h.cli.Interactive = true
+	os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export JIRA='cap://jira-token'\n"), 0o644)
+	config := filepath.Join(home, ".claude.json")
+	write := func(script string) {
+		data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"jira": map[string]any{"command": "/bin/zsh", "args": []string{"-lc", script}}}})
+		os.WriteFile(config, data, 0o600)
+	}
+	write(`keyward run --only JIRA -- sh -c 'exec npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer $JIRA"'`)
+	calls := fakeTools(t, h, home)
+	var printed strings.Builder
+	run := runner(h, &printed)
+	const (
+		why    = "npx would get JIRA in its command line (line 1), where other programs and security logs can read it."
+		byHand = "Its own script starts keyward run, which keyward mcp wrap does not change, so change the script as keyward run says, " +
+			"or, to start it anyway, with JIRA in a command line, where any process can read it, give that keyward run --allow-command-line."
+	)
+
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, refusedProblem) || !strings.Contains(out, "keyward run refuses to start it (") ||
+		!strings.Contains(out, why) || !strings.Contains(out, byHand) || strings.Contains(out, "mcp wrap --allow-command-line") {
+		t.Errorf("mcp exit %d, want 1 and the server reported:\n%s", code, out)
+	}
+	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: "+refusedProblem+"." {
+		t.Errorf("doctor exit %d, want 1 and the server reported:\n%s", code, out)
+	}
+	h.cli.Stdin = strings.NewReader("yes\n")
+	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped jira: keyward run refuses to start it.\n  "+why) || !strings.HasSuffix(out, "\n  "+byHand+"\n") {
+		t.Errorf("wrap exit %d, want 1 and the server left to the user:\n%s", code, out)
+	}
+	for _, call := range *calls {
+		if !strings.Contains(call, "--help") {
+			t.Errorf("ran %q for a server it leaves to the user", call)
+		}
+	}
+	write(`keyward run --only JIRA -- sh -c 'JIRA_TOKEN="$JIRA" exec jira-mcp'`)
+	if code, out := run("mcp"); code != 0 || !strings.Contains(out, "No MCP server needs a change.") {
+		t.Errorf("mcp exit %d, want 0 for a server keyward run starts:\n%s", code, out)
+	}
+}
+
 // A server whose script keyward cannot rewrite safely is reported, with a note to
 // change it by hand and no change to apply: wrap skips it, and an earlier
 // --allow-command-line for it does not list it as allowed.
@@ -646,13 +1097,19 @@ func TestMCPLeavesAScriptItCannotRewriteToTheUser(t *testing.T) {
 }
 
 // The section keyward mcp and doctor list a server under once the user has
-// allowed its URL to put a secret in mcp-remote's command line.
-const allowedSection = "1 MCP server(s) put a secret from their URL in a command line, as allowed with --allow-command-line"
+// allowed it to put a secret in a command line.
+const allowedSection = "1 MCP server(s) put a secret in a command line, as allowed with --allow-command-line"
+
+// The problem keyward mcp and doctor report for a server that keyward run
+// refuses to start.
+const refusedProblem = "1 MCP server(s) would put a secret in a command line, so keyward run refuses to start them"
 
 // A bridge whose only exposure is the secret in its URL would be wrapped again
-// unchanged. keyward mcp reports it, with no replacement to apply, and wrap leaves
-// it alone and fails, until --allow-command-line records that the user accepts
-// it. keyward mcp and doctor then list it as a warning, and wrap passes over it.
+// unchanged, and keyward run refuses to start it. keyward mcp reports it, with no
+// replacement to apply, and wrap leaves it alone and fails, until
+// --allow-command-line records that the user accepts it and gives its keyward
+// run the option. keyward mcp and doctor then list it as a warning, and wrap
+// passes over it.
 func TestMCPLeavesABridgeThatExposesOnlyItsURL(t *testing.T) {
 	h := newHarness(t, "yes\nyes\n", map[string]string{"pagerduty-key": "v"}, nil)
 	home := homed(t, h)
@@ -665,20 +1122,27 @@ func TestMCPLeavesABridgeThatExposesOnlyItsURL(t *testing.T) {
 	var printed strings.Builder
 	run := runner(h, &printed)
 
-	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "exposes PD_KEY") || !strings.Contains(out, "its URL holds PD_KEY") || !strings.Contains(out, "already runs through keyward") ||
-		!strings.Contains(out, "If you accept that, run keyward mcp wrap --allow-command-line team.") || strings.Contains(out, "like this") || strings.Contains(out, "makes these changes") {
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "keyward run refuses to start it") || !strings.Contains(out, "npx would get PD_KEY in its command line") || !strings.Contains(out, "already runs through keyward") ||
+		!strings.Contains(out, "To start it anyway, with PD_KEY in a command line, where any process can read it, run keyward mcp wrap --allow-command-line team.") ||
+		strings.Contains(out, "like this") || strings.Contains(out, "makes these changes") {
 		t.Errorf("mcp exit %d:\n%s", code, out)
 	}
 	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped team: it already runs through keyward") ||
-		!strings.Contains(out, "or, if you accept that, run keyward mcp wrap --allow-command-line team.") {
+		!strings.Contains(out, "\n  To start it anyway, with PD_KEY in a command line, where any process can read it, run keyward mcp wrap --allow-command-line team.") {
 		t.Errorf("wrap exit %d:\n%s", code, out)
 	}
-	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "1 MCP server(s) put a secret in a command line") {
+	if code, out := run("doctor"); code != 1 || !strings.Contains(out, refusedProblem) {
 		t.Errorf("doctor exit %d, want 1 and the server reported:\n%s", code, out)
 	}
-	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 || !strings.Contains(out, "Allowed team to keep PD_KEY from its URL in mcp-remote's command line") {
+	for _, call := range *calls {
+		if !strings.Contains(call, "--help") {
+			t.Errorf("ran %q for a server it skips", call)
+		}
+	}
+	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 || !strings.Contains(out, `"run","--allow-command-line","--only","PD_KEY"`) || !strings.Contains(out, "✓ team") {
 		t.Errorf("wrap --allow-command-line exit %d:\n%s", code, out)
 	}
+	applied := len(*calls)
 	if code, out := run("mcp"); code != 0 || !strings.Contains(out, allowedSection+":") || !strings.Contains(out, "its URL holds PD_KEY") {
 		t.Errorf("mcp exit %d, want 0 and the server listed:\n%s", code, out)
 	}
@@ -688,11 +1152,51 @@ func TestMCPLeavesABridgeThatExposesOnlyItsURL(t *testing.T) {
 	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." || !strings.Contains(out, allowedSection+"; see keyward mcp") {
 		t.Errorf("doctor exit %d, want 0 and the server listed:\n%s", code, out)
 	}
-	for _, call := range *calls {
+	for _, call := range (*calls)[applied:] {
 		if !strings.Contains(call, "--help") {
 			t.Errorf("ran %q for a server that would not change", call)
 		}
 	}
+	if code, out := start(t, h, run, filepath.Join(home, ".claude.json"), "team"); code != 0 || h.exec.calls != 1 {
+		t.Errorf("the server's keyward run exit %d, want 0 and the server started:\n%s", code, out)
+	}
+}
+
+// start runs the server name in config through its keyward run, as Claude Code
+// starts it, with the server's env added to client's, and returns how it ended:
+// 0 once the server starts, 2 if keyward run refuses it.
+func start(t *testing.T, h *harness, run func(...string) (int, string), config, name string, client ...string) (int, string) {
+	t.Helper()
+	s := server(t, config, name)
+	env := slices.Clone(client)
+	for k, v := range s.Env {
+		env = append(env, k+"="+v)
+	}
+	h.cli.Environ = func() []string { return env }
+	return run(s.Args...)
+}
+
+// server reads the definition of the server name in a Claude Code config.
+func server(t *testing.T, config, name string) (s struct {
+	Command string
+	Args    []string
+	Env     map[string]string
+}) {
+	t.Helper()
+	var doc struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	data, err := os.ReadFile(config)
+	if err == nil {
+		err = json.Unmarshal(data, &doc)
+	}
+	if err == nil {
+		err = json.Unmarshal(doc.MCPServers[name], &s)
+	}
+	if err != nil {
+		t.Fatalf("reading %s from %s: %v", name, config, err)
+	}
+	return s
 }
 
 // A bridge allowed in its project's folder is listed as allowed wherever keyward
@@ -700,6 +1204,7 @@ func TestMCPLeavesABridgeThatExposesOnlyItsURL(t *testing.T) {
 func TestAnAllowedBridgeInAnotherProjectIsListedAsAllowed(t *testing.T) {
 	h := newHarness(t, "yes\n", map[string]string{"pagerduty-key": "v"}, nil)
 	home := homed(t, h)
+	h.cli.Interactive = true
 	other := filepath.Join(home, "other-project")
 	os.Mkdir(other, 0o755)
 	config, _ := json.Marshal(map[string]any{"projects": map[string]any{other: map[string]any{"mcpServers": map[string]any{"team": map[string]any{
@@ -711,7 +1216,7 @@ func TestAnAllowedBridgeInAnotherProjectIsListedAsAllowed(t *testing.T) {
 	run := runner(h, &printed)
 
 	h.cli.Workdir = other
-	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 || !strings.Contains(out, "Allowed team") {
+	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 || !strings.Contains(out, "✓ team") {
 		t.Fatalf("wrap --allow-command-line in the project's folder exit %d:\n%s", code, out)
 	}
 	h.cli.Workdir = home
@@ -720,6 +1225,49 @@ func TestAnAllowedBridgeInAnotherProjectIsListedAsAllowed(t *testing.T) {
 	}
 	if code, out := run("doctor"); code != 0 || !strings.Contains(out, allowedSection+"; see keyward mcp") {
 		t.Errorf("doctor exit %d, want 0 and the server listed as allowed:\n%s", code, out)
+	}
+}
+
+// Cursor keeps a project's servers in its folder's .cursor/mcp.json, and lists
+// the folders nowhere keyward reads. So keyward mcp and doctor read it in each
+// folder they know of, wherever they run: those of Claude Code's projects, and
+// those the ledger names, as where the user allowed a Cursor server. They say
+// that a project elsewhere is not read.
+func TestMCPAndDoctorReadTheCursorServersOfEveryKnownFolder(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"slack-bot-token": "fake-slack-value", "pagerduty-key": "fake-pagerduty-value"}, nil)
+	home := homed(t, h)
+	project, allowed := filepath.Join(home, "dev", "project"), filepath.Join(home, "dev", "allowed")
+	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"projects": {"`+project+`": {}}}`), 0o600)
+	// Cursor makes this folder when installed.
+	os.Mkdir(filepath.Join(home, ".cursor"), 0o755)
+	cursor := func(dir, name, script, env, ref string) string {
+		config := filepath.Join(dir, ".cursor", "mcp.json")
+		os.MkdirAll(filepath.Dir(config), 0o755)
+		data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{name: map[string]any{"command": "keyward",
+			"args": []string{"run", "--only", env, "--", "sh", "-c", script}, "env": map[string]string{env: ref}}}})
+		os.WriteFile(config, data, 0o600)
+		return config
+	}
+	cursor(project, "slack", `exec npx -y slack-mcp --token "$SLACK_BOT_TOKEN"`, "SLACK_BOT_TOKEN", "cap://slack-bot-token")
+	config := cursor(allowed, "team", `exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" --transport http-only`, "PD_KEY", "cap://pagerduty-key")
+	h.cli.Ledger.Add(ledger.Record{Kind: ledger.Allowed, Path: config, Name: "team", Text: "PD_KEY"})
+	var printed strings.Builder
+	run := runner(h, &printed)
+	const unread = "keyward reads a Cursor project's .cursor/mcp.json only in this folder and in those of Claude Code's projects, so run keyward mcp in any other folder you open in Cursor."
+
+	if code, out := run("mcp"); code != 1 || !strings.HasPrefix(out, "2 MCP server(s) would put a secret in a command line") ||
+		!strings.Contains(out, "(Cursor, ~/dev/project/.cursor/mcp.json)") || !strings.Contains(out, "(Cursor, ~/dev/allowed/.cursor/mcp.json)") || !strings.HasSuffix(out, "\n"+unread+"\n") {
+		t.Errorf("mcp exit %d, want 1 and both servers:\n%s", code, out)
+	}
+	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: 2 MCP server(s) would put a secret in a command line, so keyward run refuses to start them." ||
+		!strings.Contains(out, "\n"+unread+"\n") {
+		t.Errorf("doctor exit %d, want 1 and both servers:\n%s", code, out)
+	}
+	os.RemoveAll(filepath.Join(home, ".cursor"))
+	os.RemoveAll(filepath.Join(project, ".cursor"))
+	os.RemoveAll(filepath.Join(allowed, ".cursor"))
+	if _, out := run("mcp"); strings.Contains(out, "Cursor") {
+		t.Errorf("mcp speaks of Cursor to one who does not use it:\n%s", out)
 	}
 }
 
@@ -781,6 +1329,9 @@ func TestAServerWrappedWithAllowCommandLineIsListedAsAWarning(t *testing.T) {
 	}
 	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." || !strings.Contains(out, allowedSection+"; see keyward mcp") {
 		t.Errorf("doctor exit %d, want 0 and the server listed:\n%s", code, out)
+	}
+	if code, out := start(t, h, run, config, "exa"); code != 0 {
+		t.Errorf("the server's keyward run exit %d, want 0:\n%s", code, out)
 	}
 	os.WriteFile(rc, []byte("export SMITHERY_API_KEY='cap://smithery-api-key'\nexport PD_KEY='cap://pagerduty-key'\n"), 0o644)
 	var doc map[string]map[string]any
@@ -1132,8 +1683,10 @@ func TestMCPNeverPrintsAHeaderArgumentInACursorServer(t *testing.T) {
 		// As wrap prints it, with its hidden text copied in, and then as unwrap does.
 		{map[string]any{"command": "keyward", "args": []string{"run", "--only", "GITHUB_TOKEN", "--", "sh", "-c", script}, "env": map[string]string{"GITHUB_TOKEN": "cap://github-token"}},
 			"args[6]", [][]string{{"mcp", "unwrap"}}},
+		// Its own script puts the token in mcp-remote's command line, which wrap
+		// keeps only if given --allow-command-line, and only then prints it.
 		{map[string]any{"command": "sh", "args": []string{"-c", script}, "env": map[string]string{"GITHUB_TOKEN": "${env:GITHUB_TOKEN}"}},
-			"args[1]", [][]string{{"mcp"}, {"mcp", "wrap"}}},
+			"args[1]", [][]string{{"mcp", "wrap", "--allow-command-line"}}},
 	} {
 		h := newHarness(t, "", map[string]string{"github-token": "v"}, nil)
 		home := homed(t, h)

@@ -27,9 +27,9 @@ type Literal struct {
 
 // LoadAll is Load plus the servers of every Claude Code project, not just the
 // current folder's: its local servers, and those in its folder's .mcp.json and
-// in that of each of folders, which Claude Code may not list. keyward changes
-// those only from their project's folder, but a token in any of them is
-// plaintext on this Mac all the same.
+// .cursor/mcp.json, and in those of each of folders, which no tool may list.
+// keyward changes a Claude Code project's only from its folder, but a token in
+// any of them is plaintext on this Mac all the same.
 func LoadAll(home, workdir string, folders ...string) ([]Server, []error) {
 	return load(home, workdir, true, folders)
 }

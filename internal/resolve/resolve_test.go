@@ -3,6 +3,7 @@ package resolve_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -367,5 +368,37 @@ func TestEnvOnlyStillFailsForANamedReference(t *testing.T) {
 	var rerr *resolve.Error
 	if !errors.As(err, &rerr) || len(rerr.Failures) != 1 || rerr.Failures[0].Key != "T" {
 		t.Errorf("err = %v, want one failure for T", err)
+	}
+}
+
+// Variables names what EnvOnly resolves without reading the vault, so keyward
+// run can check a command before any value is read: the entries resolution
+// changes are those of the variables it names, and no others. EnvOnly without
+// keys, as keyward run without --only, resolves every reference.
+func TestVariablesAreTheOnesResolutionResolves(t *testing.T) {
+	store := newStore(t, map[string]string{"a": "value-a", "b": "value-b"})
+	env := []string{"PATH=/bin", "A=cap://a", "B=cap://B", "PLAIN=value", "NOEQUALS", "C=CAP://a", "A=set-again", "B=cap://b"}
+	for _, tc := range []struct{ only, want []string }{
+		{nil, []string{"A", "B"}},
+		{[]string{"B", "PLAIN", "UNSET"}, []string{"B"}},
+		{[]string{"C", "NOEQUALS"}, nil},
+	} {
+		vars := resolve.Variables(env, tc.only)
+		if !reflect.DeepEqual(vars, tc.want) {
+			t.Errorf("Variables(env, %q) = %q, want %q", tc.only, vars, tc.want)
+		}
+		got, err := resolve.New(store).EnvOnly(env, tc.only)
+		if err != nil {
+			t.Fatalf("EnvOnly(env, %q): %v", tc.only, err)
+		}
+		var changed []string
+		for i, entry := range env {
+			if key, _, _ := strings.Cut(entry, "="); got.Env[i] != entry && !slices.Contains(changed, key) {
+				changed = append(changed, key)
+			}
+		}
+		if !reflect.DeepEqual(changed, vars) {
+			t.Errorf("EnvOnly(env, %q) resolved %q, but Variables names %q", tc.only, changed, vars)
+		}
 	}
 }

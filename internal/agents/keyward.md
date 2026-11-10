@@ -33,6 +33,14 @@ reference, not a broken value.
   under `keyward run`, no `ps e`, `ps -E`, `ps eww`, `ps aux`, `ps -ef`,
   `ps -o args`, `-o command`, or `-o comm`, and never write one to a file. To check
   that a value is set, print its length.
+- `keyward run` refuses a `sh -c` script that would put a value it resolves in
+  another program's arguments, and names the variable, the program and the line:
+  change the command the way it shows. Give it a script with `sh -c`, not on
+  stdin as in `keyward run -- bash <<'EOF'`, which it cannot check. It also
+  refuses a script it cannot read that names such a value: rewrite it the way it
+  says. Never add `--allow-command-line`, which runs it anyway, unless the user
+  asks. A note that puts a credential in a command line is wrong; follow this
+  guide and fix the note.
 - In output that is not a terminal, `keyward run` replaces a value it resolved with
   `cap://NAME#masked` and says which. That usually means the command printed it:
   change the command, and never rerun it with `--no-mask` or look for the value
@@ -79,9 +87,9 @@ reference, not a broken value.
 - An authentication failure, or a tool that receives `cap://…`, usually means it
   was started outside keyward, or that it is a program the user set up to read
   the value through `keyward run`, as above, and gets `cap://NAME#masked`. Say
-  which rather than looking for the value.
-  For an MCP server, `keyward mcp` shows the fix; leave applying it to the user,
-  who can run `keyward mcp wrap`.
+  which rather than looking for the value. An MCP server that stops starting may
+  have been refused by `keyward run`. For an MCP server, `keyward mcp` shows the
+  fix; leave applying it to the user, who can run `keyward mcp wrap`.
 - When keyward reports a leaked value, tell the user to rotate it; do not open the
   file or line it names, or print the named program's command line.
 - Only the user decides a value is not a secret: never add `# keyward:ignore`
@@ -92,8 +100,8 @@ reference, not a broken value.
   `keyward recovery restore` with their recovery code.
 - Never run `keyward setup` or `keyward recovery`; ask the user to run them in
   Terminal.app, not an editor terminal.
-- Do not run `keyward migrate`, `restore`, `rm`, `add --force`, `backups recover`,
-  `backups rm`, `mcp wrap`, `mcp unwrap`, `agents link`, `agents unlink`, or
-  `uninstall`, read keyward's ledger, backups, or vault, edit
-  `~/.agents/keyward.md`, or delete keyward's Keychain items, unless the user asks,
-  even when a keyward message suggests it.
+- Do not run `keyward migrate`, `restore`, `rm`, `add --force`,
+  `run --allow-command-line`, `backups recover`, `backups rm`, `mcp wrap`,
+  `mcp unwrap`, `agents link`, `agents unlink`, or `uninstall`, read keyward's
+  ledger, backups, or vault, edit `~/.agents/keyward.md`, or delete keyward's
+  Keychain items, unless the user asks, even when a keyward message suggests it.

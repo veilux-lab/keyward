@@ -14,6 +14,8 @@ import (
 
 	"github.com/veilux-lab/keyward/internal/exposure"
 	"github.com/veilux-lab/keyward/internal/mcpconfig"
+	"github.com/veilux-lab/keyward/internal/resolve"
+	"github.com/veilux-lab/keyward/internal/shell"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
@@ -775,31 +777,27 @@ func TestAURLAfterMCPRemotesHeadersIsJudgedAsItsURL(t *testing.T) {
 }
 
 // A bridge written by hand is not read as keyward's, so Check finds nothing in it
-// to change. One whose script keyward can read is listed for a secret its sh
-// passes mcp-remote in a header, as any script's argument is; one it cannot, as
-// with $(...), is left alone. One whose script reads ${JIRA} gets the reference,
-// as its client fills that in before keyward run starts, so it is reported for
-// that alone, as any wrapped command would be.
+// to rewrite. One whose sh passes mcp-remote a secret in a header, as any
+// script's argument is, with $(...) or without, is reported, as keyward run
+// refuses to start it, with nothing to change. One whose script reads ${JIRA}
+// gets the reference, as its client fills that in before keyward run starts, so
+// it is reported for that alone, as any wrapped command would be.
 func TestAHandWrittenBridgeIsNotReadAsKeywards(t *testing.T) {
-	for script, passed := range map[string]string{
-		`exec npx -y mcp-remote https://mcp.example.com/v1/mcp --header "Authorization: Basic $(printf '%s' "$JIRA" | base64)"`: "",
-		`exec npx -y mcp-remote https://mcp.example.com/v1/mcp --header 'Authorization: Bearer '"$JIRA"`:                        "JIRA",
+	def := func(script string) mcpconfig.Definition {
+		return mcpconfig.Definition{Command: "keyward", Args: []string{"run", "--only", "JIRA", "--", "sh", "-c", script}, Env: map[string]string{"JIRA": "cap://jira-token"}}
+	}
+	for _, script := range []string{
+		`exec npx -y mcp-remote https://mcp.example.com/v1/mcp --header "Authorization: Basic $(printf '%s' "$JIRA" | base64)"`,
+		`exec npx -y mcp-remote https://mcp.example.com/v1/mcp --header 'Authorization: Bearer '"$JIRA"`,
 	} {
-		servers := load(t, "atlassian", bridge(script))
-		if findings := mcpconfig.Check(servers, refs); len(findings) != 0 {
+		findings := mcpconfig.Check(load(t, "atlassian", def(script)), refs)
+		if len(findings) != 1 || !findings[0].Refused || strings.Join(findings[0].CommandLine, ",") != "JIRA" || len(findings[0].InURL) != 0 || findings[0].Suggestion != "" {
 			t.Errorf("findings for %s = %+v", script, findings)
-		}
-		var got []string
-		for _, f := range mcpconfig.Arguments(servers, refs) {
-			got = append(got, f.Passed...)
-		}
-		if strings.Join(got, ",") != passed {
-			t.Errorf("%s: passed = %v, want %s", script, got, passed)
 		}
 	}
 	script := `exec npx -y mcp-remote https://mcp.example.com/v1/mcp --header "Authorization: Bearer "'${JIRA}'""`
-	findings := mcpconfig.Check(load(t, "atlassian", bridge(script)), refs)
-	if len(findings) != 1 || strings.Join(findings[0].InArgs, ",") != "JIRA" || len(findings[0].Exposed) != 0 {
+	findings := mcpconfig.Check(load(t, "atlassian", def(script)), refs)
+	if len(findings) != 1 || strings.Join(findings[0].InArgs, ",") != "JIRA" || len(findings[0].Exposed) != 0 || findings[0].Refused || len(findings[0].CommandLine) != 0 {
 		t.Errorf("findings for %s = %+v", script, findings)
 	}
 }
@@ -909,39 +907,386 @@ func TestAScriptNotReadAsABridgeIsReportedForASecretInItsURL(t *testing.T) {
 	}
 }
 
+// A server whose own script starts keyward run, as zsh -lc "keyward run ..." does
+// to get a login shell's PATH, runs through keyward too, so it is checked as
+// keyward run checks it, with the secrets its environment or the client's holds.
+// One keyward run refuses is reported, with what keyward run says, to change by
+// hand, as wrap does not rewrite such a script. None is wrapped again.
+func TestAServerWhoseScriptStartsKeywardRunIsCheckedAsOne(t *testing.T) {
+	for _, tc := range []struct {
+		script string
+		env    map[string]string
+		why    string
+	}{
+		{`keyward run --only JIRA -- sh -c 'exec npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer $JIRA"'`, map[string]string{"JIRA": "cap://jira-token"},
+			"npx would get JIRA in its command line (line 1), where other programs and security logs can read it."},
+		{`cd / && exec /opt/homebrew/bin/keyward run --only JIRA -- sh -c 'exec slack-mcp --token "$JIRA"'`, nil,
+			"slack-mcp would get JIRA in its command line (line 1), where other programs and security logs can read it."},
+		{`keyward run --only JIRA -- sh -c 'JIRA_TOKEN="$JIRA" exec jira-mcp'`, map[string]string{"JIRA": "cap://jira-token"}, ""},
+		{`keyward run --allow-command-line --only JIRA -- sh -c 'exec slack-mcp --token "$JIRA"'`, map[string]string{"JIRA": "cap://jira-token"}, ""},
+	} {
+		findings := mcpconfig.Check(load(t, "jira", mcpconfig.Definition{Command: "/bin/zsh", Args: []string{"-lc", tc.script}, Env: tc.env}), refs)
+		if tc.why == "" {
+			if len(findings) != 0 {
+				t.Errorf("%s: findings = %+v", tc.script, findings)
+			}
+			continue
+		}
+		if len(findings) != 1 {
+			t.Fatalf("%s: findings = %+v", tc.script, findings)
+		}
+		if f := findings[0]; !f.Refused || !f.ByHand || f.Want.Command != "" || len(f.Reasons) != 1 || f.Reasons[0].Why != tc.why ||
+			!strings.Contains(f.Note, "give that keyward run --allow-command-line") {
+			t.Errorf("%s: finding = %+v", tc.script, f)
+		}
+	}
+}
+
 // A server's script that passes a secret keyward run resolves to a program as an
 // argument puts it in that program's command line, as wrap's own script does for
 // a server that takes its token with --token, and an earlier keyward's for a
-// server's own sh -c. It is reported apart, with nothing keyward can change, as
-// only the server can take it another way. Setting a variable, a shell builtin,
-// as printf piping it to stdin, though not one exec runs, and a variable that
-// holds no secret do not count, nor does mcp-remote's URL, or a bridge keyward
-// reads, which Check reports.
+// server's own sh -c, so keyward run refuses to start it. It is reported with
+// nothing keyward can change, as only the server can take it another way, and
+// one in mcp-remote's URL as in its URL. Setting a variable, a shell builtin, as
+// printf piping it to stdin, though not one exec runs, and a variable that holds
+// no secret do not count.
 func TestAWrappedScriptThatPassesASecretAsAnArgumentIsReported(t *testing.T) {
-	for script, passed := range map[string]string{
-		`exec npx -y slack-mcp --token "$GITHUB_TOKEN"`:                                                                                "GITHUB_TOKEN",
-		`cd /srv && exec bash -c "exec some-mcp --token $GITHUB_TOKEN --key $PD_KEY"`:                                                  "GITHUB_TOKEN,PD_KEY",
-		`exec npx -y mcp-remote https://mcp.example.com/v1/mcp 3334 --header "Authorization: Bearer $GITHUB_TOKEN"`:                    "GITHUB_TOKEN",
-		`GITHUB_PERSONAL_ACCESS_TOKEN="$GITHUB_TOKEN" exec github-mcp-server stdio`:                                                    "",
-		`export TOKEN="$GITHUB_TOKEN"; printf '%s' "$PD_KEY" | exec some-mcp --key-stdin`:                                              "",
-		`exec printf '[%s]' "$PD_KEY"`:                                                                                                 "PD_KEY",
-		`exec some-mcp --root "$HOME"`:                                                                                                 "",
-		`exec npx -y mcp-remote "https://mcp.example.com/sse?key=$PD_KEY" 3334 --header "Authorization: Bearer "'$''{GITHUB_TOKEN}'""`: "",
-		`exec npx -y mcp-remote https://mcp.example.com/v1/mcp --header "Authorization: Bearer $GITHUB_TOKEN" --transport http-only`:   "",
+	for _, tc := range []struct{ script, commandLine, inURL string }{
+		{`exec npx -y slack-mcp --token "$GITHUB_TOKEN"`, "GITHUB_TOKEN", ""},
+		{`cd /srv && exec bash -c "exec some-mcp --token $GITHUB_TOKEN --key $PD_KEY"`, "GITHUB_TOKEN,PD_KEY", ""},
+		{`exec npx -y mcp-remote https://mcp.example.com/v1/mcp 3334 --header "Authorization: Bearer $GITHUB_TOKEN"`, "GITHUB_TOKEN", ""},
+		{`exec npx -y mcp-remote "https://mcp.example.com/sse?key=$PD_KEY" 3334 --header "Authorization: Bearer "'$''{GITHUB_TOKEN}'""`, "PD_KEY", "PD_KEY"},
+		{`exec printf '[%s]' "$PD_KEY"`, "PD_KEY", ""},
+		{`GITHUB_PERSONAL_ACCESS_TOKEN="$GITHUB_TOKEN" exec github-mcp-server stdio`, "", ""},
+		{`export TOKEN="$GITHUB_TOKEN"; printf '%s' "$PD_KEY" | exec some-mcp --key-stdin`, "", ""},
+		{`exec some-mcp --root "$HOME"`, "", ""},
 	} {
-		def := mcpconfig.Definition{Command: "keyward", Args: []string{"run", "--only", "GITHUB_TOKEN,PD_KEY", "--", "sh", "-c", script},
+		def := mcpconfig.Definition{Command: "keyward", Args: []string{"run", "--only", "GITHUB_TOKEN,PD_KEY", "--", "sh", "-c", tc.script},
 			Env: map[string]string{"GITHUB_TOKEN": "cap://github-token", "PD_KEY": "cap://pagerduty-key"}}
-		var got []string
-		for _, f := range mcpconfig.Arguments(load(t, "tool", def), refs) {
-			if f.Suggestion != "" || f.Want.Command != "" {
-				t.Errorf("%s: finding = %+v, want nothing to change", script, f)
+		findings := mcpconfig.Check(load(t, "tool", def), refs)
+		if tc.commandLine == "" {
+			if len(findings) != 0 {
+				t.Errorf("%s: findings = %+v", tc.script, findings)
 			}
-			got = append(got, f.Passed...)
+			continue
 		}
-		if strings.Join(got, ",") != passed {
-			t.Errorf("%s: passed = %v, want %s", script, got, passed)
+		if len(findings) != 1 {
+			t.Errorf("%s: findings = %+v", tc.script, findings)
+			continue
+		}
+		if f := findings[0]; strings.Join(f.CommandLine, ",") != tc.commandLine || strings.Join(f.InURL, ",") != tc.inURL || !f.Refused || f.Suggestion != "" || f.Want.Command != "" || f.ByHand {
+			t.Errorf("%s: finding = %+v, want %s in a command line and nothing to change", tc.script, f, tc.commandLine)
 		}
 	}
+}
+
+// A server keyward run refuses carries what keyward run says of it, so keyward
+// mcp can give the same reasons: of the server as configured, or of the change
+// wrap would make, for a script the definition holds. Each fix is a server's,
+// which never sends a value on stdin, where the server reads the protocol. One
+// wrap would write from a server's arguments is not in the definition, so it
+// carries none.
+func TestARefusedServerCarriesWhatKeywardRunSaysOfIt(t *testing.T) {
+	wrapped := func(shell, script string) mcpconfig.Definition {
+		return mcpconfig.Definition{Command: "keyward", Args: []string{"run", "--only", "JIRA,PD_KEY", "--", shell, "-c", script},
+			Env: map[string]string{"JIRA": "cap://jira-token", "PD_KEY": "cap://pagerduty-key"}}
+	}
+	for _, tc := range []struct {
+		shape    string
+		def      mcpconfig.Definition
+		why, fix string
+	}{
+		{"a bridge written by hand", wrapped("sh", `npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer $JIRA"`),
+			"npx would get JIRA in its command line (line 1), where other programs and security logs can read it.",
+			"Let mcp-remote fill it in from its environment instead: npx -y mcp-remote ... --header 'Authorization: Bearer ${JIRA}'"},
+		{"a script in another", wrapped("sh", `exec sh -c "GITHUB_PERSONAL_ACCESS_TOKEN=$JIRA exec github-mcp-server stdio"`),
+			"sh would get JIRA in its command line (line 1), where other programs and security logs can read it.",
+			`Let sh read "$JIRA" from its environment instead: sh -c '... "$JIRA" ...'`},
+		{"a script keyward run cannot read", wrapped("zsh", `for x (a b) print $x; PD="$PD_KEY" exec some-mcp`),
+			"keyward run cannot read the script zsh -c runs, to check where its values go: line 1: `for foo` must be followed by `in`, `do`, `;`, or a newline",
+			"Write it in sh syntax for sh -c, which keyward run can read."},
+		{"its own script, as wrap would change it", mcpconfig.Definition{Command: "sh", Args: []string{"-c", `exec some-mcp --token "${PD_KEY}"`}},
+			"some-mcp would get PD_KEY in its command line (line 1), where other programs and security logs can read it.",
+			"Pass it to some-mcp in an environment variable it reads instead."},
+		{"its arguments, as wrap would write them", mcpconfig.Definition{Command: "npx", Args: []string{"-y", "slack-mcp", "--token", "${PD_KEY}"}}, "", ""},
+	} {
+		findings := mcpconfig.Check(load(t, "server", tc.def), refs)
+		if len(findings) != 1 {
+			t.Fatalf("%s: findings = %+v", tc.shape, findings)
+		}
+		var want []mcpconfig.Reason
+		if tc.why != "" {
+			want = []mcpconfig.Reason{{Why: tc.why, Fix: tc.fix}}
+		}
+		if got := findings[0].Reasons; !slices.Equal(got, want) {
+			t.Errorf("%s: reasons = %q\nwant %q", tc.shape, got, want)
+		}
+	}
+}
+
+// A server keyward run refuses whose --only also leaves out a reference is one
+// finding, not two, so it is counted once and wrap changes it once, with both
+// fixes: the reference added to --only, and the option once the user allows it.
+func TestARefusedServerThatAlsoLeavesOutAReferenceIsReportedOnce(t *testing.T) {
+	def := mcpconfig.Definition{Command: "keyward", Args: []string{"run", "--only", "GITHUB_TOKEN", "--", "sh", "-c", `exec npx -y slack-mcp --token "$GITHUB_TOKEN"`},
+		Env: map[string]string{"GITHUB_TOKEN": "cap://github-token", "PD_KEY": "cap://pagerduty-key"}}
+	everything := func(mcpconfig.Server, []string) bool { return true }
+	for allowed, findings := range map[bool][]mcpconfig.Finding{
+		false: mcpconfig.Check(load(t, "slack", def), refs),
+		true:  mcpconfig.CheckAllowing(load(t, "slack", def), refs, everything),
+	} {
+		if len(findings) != 1 {
+			t.Fatalf("allowed %v: findings = %+v", allowed, findings)
+		}
+		f := findings[0]
+		if !f.Refused || strings.Join(f.CommandLine, ",") != "GITHUB_TOKEN" || strings.Join(f.Unresolved, ",") != "PD_KEY" || f.AllowCommandLine != allowed {
+			t.Errorf("allowed %v: finding = %+v", allowed, f)
+		}
+		if want := slices.Contains(f.Want.Args, "--allow-command-line"); !slices.Contains(f.Want.Args, "GITHUB_TOKEN,PD_KEY") || want != allowed || started(t, f.Want) != allowed {
+			t.Errorf("allowed %v: applied args = %q", allowed, f.Want.Args)
+		}
+	}
+}
+
+// keyward run refuses to start a server that would put a secret in a program's
+// command line, from its URL or as another argument, unless given
+// --allow-command-line. A change gives a server the option only if the user
+// allows those secrets, or if its keyward run has it already, and a server that
+// already runs through keyward, with nothing else to change, gets it as a change
+// of its own. A server that needs none is never given it.
+func TestAChangeGivesKeywardRunAllowCommandLineOnlyIfAllowed(t *testing.T) {
+	keyedBridge := bridge(`exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" ` + authHeader + ` --transport http-only`)
+	config, err := json.Marshal(map[string]any{"mcpServers": map[string]any{
+		"slack":  map[string]any{"command": "npx", "args": []string{"-y", "slack-mcp", "--token", "${GITHUB_TOKEN}"}},
+		"keyed":  map[string]any{"type": "http", "url": "https://mcp.example.com/mcp?key=${PD_KEY}", "headers": map[string]string{"Authorization": "Bearer ${GITHUB_TOKEN}"}},
+		"github": map[string]any{"type": "http", "url": "https://api.example.com/mcp/", "headers": map[string]string{"Authorization": "Bearer ${GITHUB_TOKEN}"}},
+		"bridge": map[string]any{"command": keyedBridge.Command, "args": keyedBridge.Args, "env": keyedBridge.Env},
+		"args": map[string]any{"command": "keyward", "args": []string{"run", "--only", "PD_KEY", "--", "printf", "[%s]", "--token", "${GITHUB_TOKEN}"},
+			"env": map[string]string{"PD_KEY": "cap://pagerduty-key"}},
+		"only": map[string]any{"command": "keyward", "args": []string{"run", "--only", "PD_KEY", "--", "sh", "-c", `exec tool --token "$OTHER_KEY"`},
+			"env": map[string]string{"PD_KEY": "cap://pagerduty-key", "OTHER_KEY": "cap://other-key"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".claude.json"), string(config))
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	want := map[string]struct{ commandLine, args string }{
+		"slack":  {"GITHUB_TOKEN", `run --allow-command-line --only GITHUB_TOKEN -- sh -c exec npx -y slack-mcp --token "$GITHUB_TOKEN"`},
+		"keyed":  {"PD_KEY", `run --allow-command-line --only GITHUB_TOKEN,PD_KEY -- sh -c exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" ` + authHeader + ` --transport http-only`},
+		"github": {"", `run --only GITHUB_TOKEN -- sh -c exec npx -y mcp-remote https://api.example.com/mcp/ ` + authHeader + ` --transport http-only`},
+		"bridge": {"PD_KEY", `run --allow-command-line --only GITHUB_TOKEN,PD_KEY -- sh -c exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" ` + authHeader + ` --transport http-only`},
+		"args":   {"GITHUB_TOKEN", `run --allow-command-line --only GITHUB_TOKEN,PD_KEY -- sh -c exec printf "[%s]" --token "$GITHUB_TOKEN"`},
+		"only":   {"OTHER_KEY", `run --allow-command-line --only PD_KEY,OTHER_KEY -- sh -c exec tool --token "$OTHER_KEY"`},
+	}
+	everything := func(mcpconfig.Server, []string) bool { return true }
+	for _, allowed := range []bool{false, true} {
+		findings := mcpconfig.Check(servers, refs)
+		if allowed {
+			findings = mcpconfig.CheckAllowing(servers, refs, everything)
+		}
+		if len(findings) != len(want) {
+			t.Fatalf("allowed %v: findings = %+v", allowed, findings)
+		}
+		for _, f := range findings {
+			w := want[f.Name]
+			if strings.Join(f.CommandLine, ",") != w.commandLine || f.AllowCommandLine != (allowed && w.commandLine != "") {
+				t.Errorf("allowed %v, %s: in a command line %v, allowed %v", allowed, f.Name, f.CommandLine, f.AllowCommandLine)
+			}
+			args := w.args
+			if !allowed {
+				args = strings.Replace(args, "run --allow-command-line ", "run ", 1)
+			}
+			if f.Name == "bridge" && !allowed {
+				// Wrapping it again would change nothing.
+				args = ""
+			}
+			if got := strings.Join(f.Want.Args, " "); got != args {
+				t.Errorf("allowed %v, %s: applied args = %q\nwant %q", allowed, f.Name, got, args)
+			}
+			if args != "" && started(t, f.Want) != (allowed || w.commandLine == "") {
+				t.Errorf("allowed %v, %s: keyward run would start it: %v", allowed, f.Name, !allowed)
+			}
+		}
+	}
+	// A change that only adds the option says so, and a server that has it keeps it.
+	f := mcpconfig.CheckAllowing(load(t, "bridge", keyedBridge), refs, everything)
+	if len(f) != 1 || f[0].Suggestion != `In args, add "--allow-command-line" after "run".` || !strings.HasPrefix(f[0].Note, "Make this change to the \"bridge\" entry in ") {
+		t.Fatalf("findings = %+v", f)
+	}
+	for _, again := range [][]mcpconfig.Finding{mcpconfig.Check(load(t, "bridge", f[0].Want), refs), mcpconfig.CheckAllowing(load(t, "bridge", f[0].Want), refs, everything)} {
+		if len(again) != 1 || again[0].Suggestion != "" || !again[0].AllowCommandLine || !strings.Contains(again[0].Note, "--allow-command-line") {
+			t.Errorf("once applied, findings = %+v", again)
+		}
+	}
+	rewrapped := mcpconfig.Check(load(t, "args", mcpconfig.Definition{Command: "keyward", Args: []string{"run", "--allow-command-line", "--only", "PD_KEY", "--", "printf", "[%s]", "--token", "${GITHUB_TOKEN}"},
+		Env: map[string]string{"PD_KEY": "cap://pagerduty-key"}}), refs)
+	if len(rewrapped) != 1 || !rewrapped[0].AllowCommandLine || !started(t, rewrapped[0].Want) {
+		t.Errorf("with the option, findings = %+v", rewrapped)
+	}
+}
+
+// keyward run refuses to start a server whose script would put a value it
+// resolves in a program's command line, unless given --allow-command-line. For
+// each shape of server that wrap writes, or wrote in an earlier version, Check
+// reports exactly those keyward run refuses, and wrap's change for each starts,
+// or puts a secret in a command line, which only the user can allow. So does
+// the change for each kind of server wrap starts from. internal/shell judges
+// each as keyward run does, so wrap, keyward mcp and doctor cannot drift from it.
+func TestKeywardRunStartsWhatWrapWrites(t *testing.T) {
+	const (
+		api   = "exec npx -y mcp-remote https://api.example.com/mcp/ "
+		jira  = "exec npx -y mcp-remote https://mcp.example.com/v1/mcp "
+		keyed = `exec npx -y mcp-remote "https://mcp.example.com/mcp?key=$PD_KEY" `
+	)
+	gh, pd, jiraEnv := map[string]string{"GITHUB_TOKEN": "cap://github-token"}, map[string]string{"PD_KEY": "cap://pagerduty-key"}, map[string]string{"JIRA": "cap://jira-token"}
+	both := map[string]string{"GITHUB_TOKEN": "cap://github-token", "PD_KEY": "cap://pagerduty-key"}
+	run := func(only string, env map[string]string, command ...string) mcpconfig.Definition {
+		args := []string{"run"}
+		if only != "" {
+			args = append(args, "--only", only)
+		}
+		return mcpconfig.Definition{Command: "keyward", Args: slices.Concat(args, []string{"--"}, command), Env: env}
+	}
+	allowed := func(def mcpconfig.Definition) mcpconfig.Definition {
+		def.Args = slices.Insert(slices.Clone(def.Args), 1, "--allow-command-line")
+		return def
+	}
+	everything := func(mcpconfig.Server, []string) bool { return true }
+	// changes checks wrap's change for servers: as Check suggests it, which keyward
+	// run starts unless it puts a secret in a command line the user has not
+	// allowed, and as CheckAllowing does once the user allows that.
+	changes := func(shape string, servers []mcpconfig.Server) {
+		t.Helper()
+		for _, f := range mcpconfig.Check(servers, refs) {
+			if f.Want.Command != "" && started(t, f.Want) != (len(f.CommandLine) == 0 || f.AllowCommandLine) {
+				t.Errorf("%s: keyward run would start %q: %v, but it puts %v in a command line", shape, f.Want.Args, !started(t, f.Want), f.CommandLine)
+			}
+		}
+		for _, f := range mcpconfig.CheckAllowing(servers, refs, everything) {
+			if f.Want.Command != "" && !started(t, f.Want) {
+				t.Errorf("%s: keyward run would refuse %q, allowed", shape, f.Want.Args)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		shape  string
+		def    mcpconfig.Definition
+		starts bool
+	}{
+		// What wrap writes, since 1.2.0.
+		{"a bridge", run("GITHUB_TOKEN", gh, "sh", "-c", api+authHeader+" --transport http-only"), true},
+		{"an SSE bridge", run("GITHUB_TOKEN", gh, "sh", "-c", api+authHeader+" --transport sse-only"), true},
+		{"a server's own mcp-remote", run("GITHUB_TOKEN", gh, "sh", "-c", api+authHeader), true},
+		{"one given a callback port", run("GITHUB_TOKEN", gh, "sh", "-c", api+"3334 "+authHeader), true},
+		{"a header's text moved to env", run("GITHUB_TOKEN", map[string]string{"GITHUB_TOKEN": "cap://github-token", "KW_HDR_1": "fake-literal-team"},
+			"sh", "-c", api+authHeader+` --header "X-Team: "'$''{KW_HDR_1}'"" --transport http-only`), true},
+		{"a header's text stored", run("GITHUB_TOKEN,KW_HDR_1", map[string]string{"GITHUB_TOKEN": "cap://github-token", "KW_HDR_1": "cap://x-team"},
+			"sh", "-c", api+authHeader+` --header "X-Team: "'$''{KW_HDR_1}'"" --transport http-only`), true},
+		{"a Codex header", run("JIRA", jiraEnv, "sh", "-c", jira+`--header "Authorization: "'$''{JIRA}'"" --transport http-only`), true},
+		{"a server's own script, rewritten in place", run("JIRA", jiraEnv, "sh", "-c", "cd / && "+jira+`--header 'Authorization: Bearer $''{JIRA}'`), true},
+		{"a token for the server's environment", run("GITHUB_TOKEN", gh, "sh", "-c", `GITHUB_PERSONAL_ACCESS_TOKEN="$GITHUB_TOKEN" exec github-mcp-server stdio`), true},
+		{"a key on stdin", run("PD_KEY", pd, "bash", "-c", `printf '%s' "$PD_KEY" | exec some-mcp --key-stdin`), true},
+		{"a script that names no secret", run("GITHUB_TOKEN", gh, "sh", "-c", `exec some-mcp --token "$(cat ~/.token)"`), true},
+		{"a token in the environment alone", run("PD_KEY", pd, "uvx", "pagerduty-mcp"), true},
+		{"docker given a variable's name", run("GITHUB_TOKEN", gh, "docker", "run", "-i", "--rm", "-e", "GITHUB_TOKEN", "img"), true},
+		{"a key in the URL, allowed", allowed(run("GITHUB_TOKEN,PD_KEY", both, "sh", "-c", keyed+authHeader+" --transport http-only")), true},
+		{"a token as an argument, allowed", allowed(run("GITHUB_TOKEN", gh, "sh", "-c", `exec npx -y slack-mcp --token "$GITHUB_TOKEN"`)), true},
+		{"a key in the URL, allowed before 1.5.0", run("GITHUB_TOKEN,PD_KEY", both, "sh", "-c", keyed+authHeader+" --transport http-only"), false},
+		{"a token as an argument", run("GITHUB_TOKEN", gh, "sh", "-c", `exec npx -y slack-mcp --token "$GITHUB_TOKEN"`), false},
+		{"a key in an option", run("PD_KEY", pd, "sh", "-c", `exec tool "--api-key=$PD_KEY"`), false},
+		{"exec printf, the program", run("GITHUB_TOKEN", gh, "sh", "-c", `exec printf "[%s]" --token "$GITHUB_TOKEN"`), false},
+		// What earlier versions wrote.
+		{"a bridge of 1.0.0 and 1.0.1", run("", gh, "sh", "-c", api+`--header "Authorization: Bearer $GITHUB_TOKEN" --transport http-only`), false},
+		{"a bridge of 1.0.2 to 1.1.3", run("GITHUB_TOKEN", gh, "sh", "-c", api+`--header "Authorization: Bearer $GITHUB_TOKEN" --transport http-only`), false},
+		{"one with a header's text written out", run("GITHUB_TOKEN", gh, "sh", "-c",
+			api+`--header "Authorization: Bearer $GITHUB_TOKEN" --header "X-Team: fake-literal-team" --transport http-only`), false},
+		{"a server's own mcp-remote of 1.1.4 to 1.1.7", run("JIRA", jiraEnv, "sh", "-c", jira+`--header "Authorization: Bearer $JIRA"`), false},
+		{"a key in the URL, wrapped before 1.2.0", run("PD_KEY", pd, "sh", "-c", keyed+"--transport http-only"), false},
+		{"a server's own script in another, passing a token", run("GITHUB_TOKEN", gh, "sh", "-c", `exec sh -c "exec some-mcp --token \"$GITHUB_TOKEN\""`), false},
+		{"one setting a token", run("GITHUB_TOKEN", gh, "sh", "-c", `exec sh -c "GITHUB_PERSONAL_ACCESS_TOKEN=$GITHUB_TOKEN exec github-mcp-server stdio"`), false},
+		{"one piping a key", run("PD_KEY", pd, "sh", "-c", `exec bash -c "printf '%s' \"$PD_KEY\" | exec some-mcp --key-stdin"`), false},
+		{"a bridge written by hand", run("T", map[string]string{"T": "cap://t"}, "sh", "-c", `npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer $T"`), false},
+	} {
+		if got := started(t, tc.def); got != tc.starts {
+			t.Errorf("%s: keyward run would start it: %v, want %v", tc.shape, got, tc.starts)
+		}
+		servers := load(t, "server", tc.def)
+		if refused := slices.ContainsFunc(mcpconfig.Check(servers, refs), func(f mcpconfig.Finding) bool { return f.Refused }); refused == tc.starts {
+			t.Errorf("%s: reported as refused: %v, want %v", tc.shape, refused, !tc.starts)
+		}
+		changes(tc.shape, servers)
+	}
+	for shape, server := range map[string]map[string]any{
+		"a remote server":                     {"type": "http", "url": "https://api.example.com/mcp/", "headers": map[string]string{"Authorization": "Bearer ${GITHUB_TOKEN}"}},
+		"an SSE server":                       {"type": "sse", "url": "https://api.example.com/sse", "headers": map[string]string{"Authorization": "Bearer ${GITHUB_TOKEN}"}},
+		"one with a key in its URL":           {"type": "http", "url": "https://mcp.example.com/mcp?key=${PD_KEY}"},
+		"one with a header written out":       {"type": "http", "url": "https://api.example.com/mcp/", "headers": map[string]string{"X-Team-Token": "fake-literal-team"}, "env": gh},
+		"a stdio server":                      {"command": "uvx", "args": []string{"pagerduty-mcp"}, "env": map[string]string{"PD_KEY": "${PD_KEY}"}},
+		"one taking its token as an argument": {"command": "npx", "args": []string{"-y", "slack-mcp", "--token", "${GITHUB_TOKEN}"}},
+		"one setting a token in a script":     {"command": "sh", "args": []string{"-c", `GITHUB_PERSONAL_ACCESS_TOKEN="$GITHUB_TOKEN" exec github-mcp-server stdio`}},
+		"one piping a key in a script":        {"command": "bash", "args": []string{"-c", `printf '%s' "$PD_KEY" | exec some-mcp --key-stdin`}},
+		"one passing a token in a script":     {"command": "sh", "args": []string{"-c", `exec some-mcp --token "${GITHUB_TOKEN}"`}},
+		"its own mcp-remote":                  {"command": "npx", "args": []string{"-y", "mcp-remote", "https://mcp.example.com/v1/mcp", "--header", "Authorization: Bearer ${JIRA}"}},
+		"its own mcp-remote with a key":       {"command": "npx", "args": []string{"-y", "mcp-remote", "https://mcp.example.com/mcp?key=${PD_KEY}", "--header", "Authorization: Bearer ${JIRA}"}},
+		"docker":                              {"command": "docker", "args": []string{"run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "img"}, "env": map[string]string{"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"}},
+	} {
+		config, err := json.Marshal(map[string]any{"mcpServers": map[string]any{"server": server}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		home := t.TempDir()
+		write(t, filepath.Join(home, ".claude.json"), string(config))
+		servers, errs := mcpconfig.Load(home, t.TempDir())
+		if len(errs) != 0 {
+			t.Fatal(errs)
+		}
+		if findings := mcpconfig.Check(servers, refs); len(findings) != 1 || findings[0].Want.Command != "keyward" {
+			t.Errorf("%s: findings = %+v, want it wrapped", shape, findings)
+		}
+		changes(shape, servers)
+	}
+}
+
+// started reports whether keyward run would start def, as Claude Code starts it,
+// in an environment that holds refs' references: whether it is given
+// --allow-command-line, or the command it starts puts no value it resolves in a
+// program's command line, as internal/shell finds them.
+func started(t *testing.T, def mcpconfig.Definition) bool {
+	t.Helper()
+	args, only, allow := def.Args[1:], []string(nil), false
+	for len(args) > 0 && strings.HasPrefix(args[0], "--") && args[0] != "--" {
+		switch value, inline := strings.CutPrefix(args[0], "--only="); {
+		case args[0] == "--allow-command-line":
+			allow = true
+		case inline:
+			only = append(only, strings.Split(value, ",")...)
+		case args[0] == "--only":
+			only, args = append(only, strings.Split(args[1], ",")...), args[1:]
+		}
+		args = args[1:]
+	}
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	var env []string
+	for v, ref := range refs {
+		env = append(env, v+"=cap://"+ref)
+	}
+	for k, v := range def.Env {
+		env = slices.DeleteFunc(env, func(e string) bool { return strings.HasPrefix(e, k+"=") })
+		env = append(env, k+"="+v)
+	}
+	name, script, ok := shell.Command(args)
+	if allow || !ok {
+		return true
+	}
+	found, err := shell.Check(name, script, resolve.Variables(env, only))
+	return err == nil && len(found) == 0
 }
 
 // Once wrapped in the current form, a server is not reported again.
@@ -1125,7 +1470,8 @@ enabled = false
 // keyward gets a reference it reads there as cap://NAME, or nothing: one migrated
 // in a shell file, or one in its env. Adding it to --only would not reach the
 // argument, so the server is wrapped again through sh, which fills it in from the
-// resolved environment. keyward run's options are read as it reads them, every
+// resolved environment. It is then in printf's command line, which only the
+// server could change. keyward run's options are read as it reads them, every
 // --only included. A placeholder that reads no reference needs nothing.
 func TestAWrappedServerThatReadsAReferenceInItsArgsIsWrappedAgain(t *testing.T) {
 	home := t.TempDir()
@@ -1158,8 +1504,9 @@ func TestAWrappedServerThatReadsAReferenceInItsArgsIsWrappedAgain(t *testing.T) 
 	for _, f := range findings {
 		w := want[f.Name]
 		configured := servers[slices.IndexFunc(servers, func(s mcpconfig.Server) bool { return s.Name == f.Name })]
-		if strings.Join(f.InArgs, ",") != w.inArgs || strings.Join(f.Want.Args, " ") != w.args || f.Want.Command != configured.Command || len(f.Unresolved) != 0 {
-			t.Errorf("%s: in args = %v, unresolved = %v, applied %s %q", f.Name, f.InArgs, f.Unresolved, f.Want.Command, f.Want.Args)
+		if strings.Join(f.InArgs, ",") != w.inArgs || strings.Join(f.Want.Args, " ") != w.args || f.Want.Command != configured.Command || len(f.Unresolved) != 0 ||
+			strings.Join(f.CommandLine, ",") != w.inArgs {
+			t.Errorf("%s: in args = %v, unresolved = %v, in a command line %v, applied %s %q", f.Name, f.InArgs, f.Unresolved, f.CommandLine, f.Want.Command, f.Want.Args)
 			continue
 		}
 		// It is printed as the changes it makes, so the rest of the entry stays.
@@ -1178,7 +1525,7 @@ func TestAWrappedServerThatReadsAReferenceInItsArgsIsWrappedAgain(t *testing.T) 
 		if out, err := cmd.Output(); err != nil || string(out) != "[--token][fake-github-value]" {
 			t.Errorf("%s: printf got %q, %v", f.Name, out, err)
 		}
-		if again := mcpconfig.Check(load(t, f.Name, f.Want), refs); len(again) != 0 {
+		if again := mcpconfig.Check(load(t, f.Name, f.Want), refs); !settled(again) {
 			t.Errorf("%s is reported again once applied: %+v", f.Name, again)
 		}
 	}
@@ -1188,7 +1535,7 @@ func TestAWrappedServerThatReadsAReferenceInItsArgsIsWrappedAgain(t *testing.T) 
 // printed as the changes it makes, as the --only fix is, so settings keyward does
 // not read, such as cwd and enabled_tools, stay, as do EDITOR in env_vars and a
 // reference there that --only names. Made by hand, the changes leave a server
-// keyward reports no more.
+// keyward reports for nothing but the token in echo's command line.
 func TestTheArgsFixKeepsACodexServersOtherSettings(t *testing.T) {
 	original := `[mcp_servers.echo]
 command = "keyward"
@@ -1225,7 +1572,7 @@ enabled_tools = ["echo"]
 	if len(errs) != 0 || len(back) != 1 {
 		t.Fatalf("read back as %+v, %v:\n%s", back, errs, edited)
 	}
-	if again := mcpconfig.Check(back, refs); len(again) != 0 {
+	if again := mcpconfig.Check(back, refs); !settled(again) {
 		t.Errorf("reported again once changed: %+v", again)
 	}
 	if !slices.Equal(back[0].Args, f.Want.Args) || back[0].Env["GITHUB_TOKEN"] != "cap://github-token" || strings.Join(back[0].PassEnv, ",") != "JIRA,EDITOR" {
@@ -1651,6 +1998,56 @@ func TestUndoReadsAServerWrappedWithNoMask(t *testing.T) {
 	}
 }
 
+// keyward mcp wrap --allow-command-line gives a server's keyward run that option,
+// so unwrap and uninstall must read past it.
+func TestUndoReadsAServerWrappedWithAllowCommandLine(t *testing.T) {
+	for _, args := range [][]string{
+		{"run", "--allow-command-line", "--only", "PD_KEY", "--", "uvx", "pagerduty-mcp"},
+		{"run", "--only=PD_KEY", "--no-mask", "--allow-command-line", "uvx", "pagerduty-mcp"},
+	} {
+		def := mcpconfig.Definition{Command: "keyward", Args: args, Env: map[string]string{"PD_KEY": "cap://pagerduty-key"}}
+		findings := mcpconfig.Undo(load(t, "pagerduty", def))
+		if len(findings) != 1 {
+			t.Fatalf("%v: findings = %+v", args, findings)
+		}
+		if s := parseJSON(t, findings[0]); s.Command != "uvx" || strings.Join(s.Args, " ") != "pagerduty-mcp" {
+			t.Errorf("%v: command = %s %v", args, s.Command, s.Args)
+		}
+	}
+}
+
+// keyward run reads --allow-command-line among its --only options, and so does
+// Check, as it does --no-mask, and it reads a bridge behind them as keyward's.
+// Written again, the bridge puts nothing in a command line, so needs no option.
+func TestCheckReadsTheOnlyOfAServerWrappedWithAllowCommandLine(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".claude.json"), `{"mcpServers": {
+    "before": {"command": "keyward", "args": ["run", "--allow-command-line", "--no-mask", "--only", "PD_KEY", "--", "uvx", "x"], "env": {"PD_KEY": "cap://pagerduty-key", "OTHER_KEY": "cap://other-key"}},
+    "between": {"command": "keyward", "args": ["run", "--only", "PD_KEY", "--allow-command-line", "--only", "JIRA", "--", "uvx", "x"], "env": {"PD_KEY": "cap://pagerduty-key", "JIRA": "cap://jira-token"}},
+    "bridge": {"command": "keyward", "args": ["run", "--allow-command-line", "--only", "PD_KEY", "--", "sh", "-c", "exec npx -y mcp-remote https://mcp.example.com/mcp --header \"Authorization: Bearer $PD_KEY\" --transport http-only"], "env": {"PD_KEY": "cap://pagerduty-key"}}
+  }}`)
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	want := map[string]string{
+		"before": "run --allow-command-line --no-mask --only PD_KEY,OTHER_KEY -- uvx x",
+		"bridge": `run --only PD_KEY -- sh -c exec npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer "'$''{PD_KEY}'"" --transport http-only`,
+	}
+	findings := mcpconfig.Check(servers, refs)
+	if len(findings) != len(want) {
+		t.Fatalf("findings = %+v", findings)
+	}
+	for _, f := range findings {
+		if got := strings.Join(f.Want.Args, " "); got != want[f.Name] {
+			t.Errorf("%s: applied args = %q, want %q", f.Name, got, want[f.Name])
+		}
+		if again := mcpconfig.Check(load(t, f.Name, f.Want), refs); len(again) != 0 {
+			t.Errorf("%s is reported again once applied: %+v", f.Name, again)
+		}
+	}
+}
+
 // keyward run reads --no-mask among its --only options, and so does Check: a
 // reference that a server's --only leaves out, or that it reads in its args,
 // is added to its first --only, and one a later --only names is not reported.
@@ -1679,10 +2076,17 @@ func TestCheckReadsTheOnlyOfAServerWrappedWithNoMask(t *testing.T) {
 		if got := strings.Join(f.Want.Args, " "); got != want[f.Name] {
 			t.Errorf("%s: applied args = %q, want %q", f.Name, got, want[f.Name])
 		}
-		if again := mcpconfig.Check(load(t, f.Name, f.Want), refs); len(again) != 0 {
+		if again := mcpconfig.Check(load(t, f.Name, f.Want), refs); !settled(again) {
 			t.Errorf("%s is reported again once applied: %+v", f.Name, again)
 		}
 	}
+}
+
+// settled reports whether Check, run on a server once its change is applied,
+// finds nothing more to change in it, but at most a secret it puts in a command
+// line, which only the server can take out.
+func settled(findings []mcpconfig.Finding) bool {
+	return !slices.ContainsFunc(findings, func(f mcpconfig.Finding) bool { return f.Suggestion != "" || f.ByHand || len(f.CommandLine) == 0 })
 }
 
 // The mcp-remote bridge needs no keyward: sh fills the header from the environment.

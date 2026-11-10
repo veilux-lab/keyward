@@ -98,17 +98,34 @@ func (e *Error) Unwrap() []error {
 // exists to remove. On any failure, Env returns a zero Result and an *Error
 // listing every reference that could not be resolved.
 func (r *Resolver) Env(env []string) (Result, error) {
-	return r.env(env, func(string) bool { return true })
+	return r.env(env, nil)
 }
 
-// EnvOnly is Env limited to the variables named in keys. Every other entry passes
-// through unchanged, so a reference the command does not need is neither read nor
-// able to fail.
+// EnvOnly is Env limited to the variables named in keys; nil keys, as for
+// keyward run without --only, limit nothing. Every other entry passes through
+// unchanged, so a reference the command does not need is neither read nor able
+// to fail.
 func (r *Resolver) EnvOnly(env []string, keys []string) (Result, error) {
-	return r.env(env, func(key string) bool { return slices.Contains(keys, key) })
+	return r.env(env, keys)
 }
 
-func (r *Resolver) env(env []string, wanted func(key string) bool) (Result, error) {
+// Variables returns the variables EnvOnly(env, only) resolves: those set to a
+// cap:// reference and, unless only is nil, named in it, each once, in env's
+// order. It reads no value, so a command can be checked before the vault is.
+func Variables(env, only []string) []string {
+	var vars []string
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && handle.IsRef(value) && (only == nil || slices.Contains(only, key)) && !slices.Contains(vars, key) {
+			vars = append(vars, key)
+		}
+	}
+	return vars
+}
+
+func (r *Resolver) env(env, only []string) (Result, error) {
+	// Just what Variables names, so a check of those names covers every value.
+	vars := Variables(env, only)
 	out := make([]string, len(env))
 	// One entry per distinct secret, so two variables referencing the same name
 	// cost one lookup. With the Keychain each lookup is a syscall, and may one day
@@ -118,7 +135,7 @@ func (r *Resolver) env(env []string, wanted func(key string) bool) (Result, erro
 
 	for i, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
-		if !ok || !handle.IsRef(value) || !wanted(key) {
+		if !ok || !handle.IsRef(value) || !slices.Contains(vars, key) {
 			out[i] = entry
 			continue
 		}

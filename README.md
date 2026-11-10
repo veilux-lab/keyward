@@ -42,6 +42,14 @@ keyward doctor                            # check your setup
   it gets the values.
 - `keyward run` resolves every reference in its environment. Name just the ones a
   command needs with `--only`: `keyward run --only GITHUB_TOKEN -- gh pr list`.
+- Any process can read a program's command line, and security tools log it. So
+  `keyward run` refuses a script given to `sh -c`, `bash -c`, `dash -c` or
+  `zsh -c` that would put a value it resolves in another program's arguments, as
+  `curl -H "Authorization: Bearer $API_TOKEN" URL` would. It names the variable,
+  the program and the line, and shows the safe form, here
+  `printf 'header = "Authorization: Bearer %s"\n' "$API_TOKEN" | curl -K - ...`,
+  which sends the value on curl's stdin: `printf` is built into the shell, so it
+  has no command line of its own. `--allow-command-line` runs the script anyway.
 - If the command prints a value it was given, to an agent, a pipe or a file rather
   than a terminal, `keyward run` shows `cap://name#masked` in its place, also when
   the value is JSON-, URL- or base64-encoded (base64 only on one line), and says
@@ -134,12 +142,25 @@ config can't be detected; wrap it by hand the same way.
 
 A remote server starts through the mcp-remote bridge, which unwrap leaves in
 place. The bridge puts the server's URL in its command line, which any process
-can read, and in its log. So wrap will not newly put a migrated token from a
-server's URL in a command line unless given `--allow-command-line`, after which
-`keyward mcp` and `doctor` list the server as a warning, and doctor reports the
-token while the server runs; use header authentication if the server supports it.
-They also warn of a server that takes a token as an argument, which stays in its
-command line; pass it in env instead if the server reads it from there.
+can read, and in its log. `keyward run` refuses to start a server whose URL holds
+a migrated token, or that passes one to its program as an argument. `keyward mcp`
+says why, as `keyward run` does, with the fix: header authentication if the
+server supports it, or the token in env if the server reads it from there.
+`keyward mcp wrap` skips such a server unless given `--allow-command-line`,
+which it also writes into the server's `keyward run`; a bridge an earlier
+keyward wrote it rewrites as before, saying if `keyward run` still refuses it.
+`keyward mcp` and `doctor` then list an allowed server as a warning, and doctor
+reports the token while the server runs.
+
+After upgrading from 1.4 or earlier, run `keyward mcp`: it lists each server
+`keyward run` now refuses to start, with the fix. A server you wrapped with
+`--allow-command-line` before needs only `keyward mcp wrap`, which makes the
+fixes for Claude Code. For Codex and Cursor, make the edits it prints by hand.
+`keyward mcp` reads a Cursor project's servers only in the folder it runs in
+and in those of Claude Code's projects, so run it in each other folder you open
+in Cursor too. It does not check a server of another client, or one that starts
+`keyward run` in a way it cannot read, as from a script file: start such a
+server once to see that it still runs.
 
 ## Uninstall
 
@@ -165,6 +186,24 @@ Keyward prevents accidental exposure, not deliberate theft: any process running 
 you can ask for a value. `keyward run` hides values in a command's output, within
 the limits under [Use](#use), but not in what it writes to its own files or sends
 over the network. It makes no network connections and logs names, never values.
+
+The check that keeps values out of command lines reads only a script given to
+`sh`, `bash`, `dash` or `zsh` with `-c`, also when another program starts the
+shell, as in `time sh -c` or `find -exec sh -c`. If it cannot read a script, as
+with some of zsh's syntax, or follow it to its end, as with one too long or
+complex, it refuses the script if the script names a variable `keyward run`
+resolves, and otherwise lets it run unchecked. A value can still reach a command
+line through a script a shell reads from a file, a pipe or `keyward run`'s own
+stdin, as in `sh f`, `source f`, `cat f | sh` or `keyward run -- bash <<'EOF'`,
+or code made as the script runs, as for `eval "$(cat f)"`; code that `python -c`
+or `node -e` runs; a tool that puts its environment in its children's arguments,
+such as `env -S`, `make`, `npm run` or `docker compose`; a file the script
+writes it to and reads back; or startup files and exported functions that
+redefine a builtin, such as `BASH_ENV`, `BASH_FUNC_*` and `~/.zshenv`. Nor does
+the check follow output a script sends through a descriptor other than 1 or 2,
+as with `>&3`, an alias the script defines again, zsh's global aliases, or what
+`trap` code writes. It guards against mistakes, not against someone working
+around it on purpose.
 
 Report vulnerabilities privately ([SECURITY.md](SECURITY.md)). MIT licensed
 ([LICENSE](LICENSE)).

@@ -34,6 +34,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/mcpconfig"
 	"github.com/veilux-lab/keyward/internal/migrate"
 	"github.com/veilux-lab/keyward/internal/resolve"
+	"github.com/veilux-lab/keyward/internal/shell"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
@@ -136,6 +137,9 @@ type CLI struct {
 
 	Record    func(activity.Event)
 	cancelled bool
+	// refused is set when run refuses a script: it exits 2, but is recorded as
+	// denied rather than as a usage error.
+	refused bool
 	// ranCommand is set once run has run a command and is returning its exit code.
 	ranCommand bool
 	// endedBy is the signal that ended that command, if one did.
@@ -171,7 +175,7 @@ options:
   --purge                uninstall: also delete the vault and its Keychain key
   --only VAR,...         run: resolve only these variables
   --no-mask              run: do not hide the values in the command's output
-  --allow-command-line   mcp wrap: also wrap a server whose URL reads a migrated secret
+  --allow-command-line   run, mcp wrap: allow a migrated secret in a program's command line
 
 examples:
   keyward setup
@@ -209,7 +213,7 @@ func (c *CLI) Run(args []string) int {
 	}
 	start := time.Now()
 	store := c.Store
-	c.cancelled, c.ranCommand = false, false
+	c.cancelled, c.refused, c.ranCommand = false, false, false
 	if store != nil {
 		c.Store = &activity.Store{Store: store, Command: command, Record: c.Record}
 	}
@@ -221,6 +225,8 @@ func (c *CLI) Run(args []string) int {
 		if code != exitOK {
 			outcome = "error"
 		}
+	} else if c.refused {
+		outcome = "denied"
 	} else if code == exitUsage {
 		outcome = "usage"
 	} else if c.cancelled {
@@ -441,17 +447,26 @@ func (c *CLI) daemon(args []string) int {
 // parent and hides the resolved values in that output, unless --no-mask, or no
 // value it resolved is worth hiding.
 //
+// Before resolving, unless --allow-command-line, it refuses a shell's script, as
+// in sh -c SCRIPT, that would put one of those values in another program's
+// command line, where other programs and security logs can read it. The check
+// needs only the variables' names, so a refused command never reads the vault.
+//
 // Resolution happens before anything is executed. If any reference fails, nothing
 // runs — a command started with a literal cap:// value where a credential belongs
 // fails in a way that looks like a bad token rather than a missing one.
 func (c *CLI) run(args []string) int {
-	const runUsage = "usage: keyward run [--only VAR,...] [--no-mask] [--] <command> [arguments]\n"
+	const runUsage = "usage: keyward run [--only VAR,...] [--no-mask] [--allow-command-line] [--] <command> [arguments]\n"
 	// Options are read only before the command; after it, they are the command's.
 	var only []string
-	noMask := false
-	for len(args) > 0 && (args[0] == "--no-mask" || args[0] == "--only" || strings.HasPrefix(args[0], "--only=")) {
+	noMask, allowCommandLine := false, false
+	for len(args) > 0 && (args[0] == "--no-mask" || args[0] == "--allow-command-line" || args[0] == "--only" || strings.HasPrefix(args[0], "--only=")) {
 		if args[0] == "--no-mask" {
 			noMask, args = true, args[1:]
+			continue
+		}
+		if args[0] == "--allow-command-line" {
+			allowCommandLine, args = true, args[1:]
 			continue
 		}
 		value, inline := strings.CutPrefix(args[0], "--only=")
@@ -481,21 +496,18 @@ func (c *CLI) run(args []string) int {
 	}
 
 	env := c.Environ()
-	resolver := resolve.New(c.Store)
-	var result resolve.Result
-	var err error
-	if only != nil {
-		// A misspelled name would otherwise run the command without its secret.
-		for _, key := range only {
-			if !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, key+"=") }) {
-				fmt.Fprintf(c.Stderr, "keyward run: --only names %s, which is not set\n", key)
-				return exitUsage
-			}
+	// A misspelled name would otherwise run the command without its secret.
+	for _, key := range only {
+		if !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, key+"=") }) {
+			fmt.Fprintf(c.Stderr, "keyward run: --only names %s, which is not set\n", key)
+			return exitUsage
 		}
-		result, err = resolver.EnvOnly(env, only)
-	} else {
-		result, err = resolver.Env(env)
 	}
+	if !allowCommandLine && c.refuseScript(args, resolve.Variables(env, only)) {
+		c.refused = true
+		return exitUsage
+	}
+	result, err := resolve.New(c.Store).EnvOnly(env, only)
 	if err != nil {
 		return c.failResolve(err)
 	}
@@ -520,6 +532,35 @@ func (c *CLI) run(args []string) int {
 	}
 	// Reached only when Exec is a test double; the real one does not return.
 	return exitOK
+}
+
+// refuseScript says why, and returns true, when argv starts a shell whose script
+// would put the value of one of vars in another program's command line, or run it
+// as code, or names one in a script it cannot read. It never shows what the
+// script holds, which could be a credential written into it.
+func (c *CLI) refuseScript(argv, vars []string) bool {
+	name, script, ok := shell.Command(argv)
+	if !ok {
+		return false
+	}
+	found, err := shell.Check(name, script, vars)
+	if err == nil && len(found) == 0 {
+		return false
+	}
+	// Run records the refusal after these writes.
+	stop := catchSIGPIPE()
+	defer stop()
+	if err != nil {
+		fmt.Fprintf(c.Stderr, "keyward run: cannot read the script %s -c runs, to check where its values go: %v\n  %s\n", name, err, shell.Hint(err))
+	}
+	for _, f := range found {
+		fmt.Fprintf(c.Stderr, "keyward run: %s\n", f.Message())
+		if advice := shell.Advice(f, found); advice != "" {
+			fmt.Fprintf(c.Stderr, "  %s\n", advice)
+		}
+	}
+	fmt.Fprint(c.Stderr, "  --allow-command-line runs it anyway, which an AI agent must not add unless the user asks.\n")
+	return true
 }
 
 // runMasked runs a command with the values it was given hidden in its output,
@@ -556,11 +597,8 @@ func (c *CLI) runMasked(path string, args, env []string, secrets []mask.Secret) 
 // maskNotice says on stderr what could not be passed on of a command's output,
 // and which values were hidden in it.
 func (c *CLI) maskNotice(command string, exit mask.Exit) {
-	// A reader that has gone away must fail these writes, not end keyward before it
-	// records the command. Caught, not ignored: signal.Reset cannot undo Ignore.
-	pipe := make(chan os.Signal, 1)
-	signal.Notify(pipe, syscall.SIGPIPE)
-	defer signal.Stop(pipe)
+	stop := catchSIGPIPE()
+	defer stop()
 	if exit.MidLine && (exit.Err != nil || len(exit.Masked) > 0) {
 		fmt.Fprintln(c.Stderr)
 	}
@@ -577,6 +615,15 @@ func (c *CLI) maskNotice(command string, exit mask.Exit) {
 		"  password, or is told to show it. If it was not meant to print it, change the command;\n"+
 		"  do not look for the value. Output meant to carry the value, like a credential helper's,\n"+
 		"  needs keyward run --no-mask, which an AI agent must not add unless the user asks.\n")
+}
+
+// catchSIGPIPE makes a write to a reader that has gone away fail, rather than end
+// keyward before Run records the command, until the function it returns is called.
+// Caught, not ignored: signal.Reset cannot undo Ignore.
+func catchSIGPIPE() (stop func()) {
+	pipe := make(chan os.Signal, 1)
+	signal.Notify(pipe, syscall.SIGPIPE)
+	return func() { signal.Stop(pipe) }
 }
 
 // plainValues returns the values in env that are not references.
@@ -767,18 +814,18 @@ func (c *CLI) doctor(args []string) int {
 		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
 	}
 	c.remindRecovery()
-	here, elsewhere, allowed, passed, gone := c.checkServers(servers)
+	here, elsewhere, allowed, gone := c.checkServers(servers, false)
 	for _, problem := range mcpProblems(append(here, elsewhere...)) {
 		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+problem+"; see keyward mcp"))
 		problems = append(problems, problem)
 	}
 	if len(allowed) > 0 {
-		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+allowedProblem(len(allowed))+"; see keyward mcp"))
-	}
-	if len(passed) > 0 {
-		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+passedProblem(len(passed))+"; see keyward mcp"))
+		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+allowedProblem(allowed)+"; see keyward mcp"))
 	}
 	if note := c.skippedNote(gone); note != "" {
+		fmt.Fprintln(c.Stdout, "\n"+note)
+	}
+	if note := c.cursorNote(); note != "" {
 		fmt.Fprintln(c.Stdout, "\n"+note)
 	}
 	if n := c.unlinkedAgents(); n > 0 {
@@ -807,13 +854,12 @@ func (c *CLI) doctor(args []string) int {
 	return exitOK
 }
 
-// mcpServers reads the MCP servers of every client keyward knows, in every Claude
-// Code project, and says which configs it could not read.
+// mcpServers is loadAll, saying which configs it could not read.
 func (c *CLI) mcpServers() []mcpconfig.Server {
 	if c.Home == "" {
 		return nil
 	}
-	servers, errs := mcpconfig.LoadAll(c.Home, c.Workdir)
+	servers, errs := c.loadAll()
 	c.reportUnreadable(errs)
 	return servers
 }
