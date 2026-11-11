@@ -15,7 +15,8 @@ exists locally:
 2. `doc/design.md` for why things are the way they are, and `doc/obstacles.md`
    for what was hard or failed. Read the section you need, not the whole file.
 
-Without it, start from the README, `keyward help`, and the package comments.
+Without it, start from the README, `docs/details.md`, `keyward help`, and the
+package comments.
 
 ## How work is done
 
