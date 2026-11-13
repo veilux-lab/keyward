@@ -17,6 +17,9 @@ type Literal struct {
 	// Project is the folder of the Claude Code project a local or project server
 	// is in.
 	Project string
+	// Copilot marks a server Copilot CLI starts, by its own rules: one of its own,
+	// or one in a project's .mcp.json once it is installed.
+	Copilot bool
 	// Field is the key that holds it: env.NAME, headers.NAME, http_headers.NAME,
 	// url, or args[N]. In a bridge keyward wrote, it also says which of the remote
 	// server's headers, or its URL, the text is, as in "args[6] (its mcp-remote
@@ -26,8 +29,9 @@ type Literal struct {
 }
 
 // LoadAll is Load plus the servers of every Claude Code project, not just the
-// current folder's: its local servers, and those in its folder's .mcp.json and
-// .cursor/mcp.json, and in those of each of folders, which no tool may list.
+// current folder's: its local servers, and those in its folder's .mcp.json,
+// .cursor/mcp.json and .github/mcp.json, and in those of each of folders, which no
+// tool may list.
 // keyward changes a Claude Code project's only from its folder, but a token in
 // any of them is plaintext on this Mac all the same.
 func LoadAll(home, workdir string, folders ...string) ([]Server, []error) {
@@ -55,7 +59,7 @@ func Literals(servers []Server) []Literal {
 				field = name
 			}
 			if d.Secret || d.Possible {
-				found = append(found, Literal{Client: s.Client, Config: s.Config, Server: s.Name, Project: s.Project, Field: field, Detection: d})
+				found = append(found, Literal{Client: s.Client, Config: s.Config, Server: s.Name, Project: s.Project, Copilot: s.byCopilot(), Field: field, Detection: d})
 			}
 		}
 		// A placeholder holds no credential. An argument is not judged so, as a

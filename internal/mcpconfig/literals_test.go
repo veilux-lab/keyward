@@ -587,6 +587,42 @@ func TestLoadAllReadsTheCursorConfigOfEveryProjectFolder(t *testing.T) {
 	}
 }
 
+// Copilot CLI keeps its own servers in ~/.copilot and a project's in its
+// .github/mcp.json, which it ignores in a folder whose .mcp.json, Claude Code's
+// project file and read as that, it reads instead.
+func TestLoadReadsCopilotsServersAsCopilotStartsThem(t *testing.T) {
+	home, workdir, root := t.TempDir(), t.TempDir(), t.TempDir()
+	other, both := filepath.Join(root, "other"), filepath.Join(root, "both")
+	write(t, filepath.Join(home, ".claude.json"), `{"projects": {"`+other+`": {}, "`+both+`": {}}}`)
+	write(t, filepath.Join(home, ".copilot", "mcp-config.json"), `{"mcpServers": {"global": {"type": "local", "command": "srv"}}}`)
+	for dir, name := range map[string]string{workdir: "mine", other: "theirs", both: "shadowed"} {
+		write(t, filepath.Join(dir, ".github", "mcp.json"), `{"mcpServers": {"`+name+`": {"type": "local", "command": "srv"}}}`)
+	}
+	write(t, filepath.Join(both, ".mcp.json"), `{"mcpServers": {"team": {"command": "srv"}}}`)
+	copilot := func(servers []mcpconfig.Server) string {
+		var out []string
+		for _, s := range servers {
+			if s.Client == "Copilot CLI" {
+				out = append(out, s.Name+"@"+s.Config)
+			}
+		}
+		slices.Sort(out)
+		return strings.Join(out, ", ")
+	}
+	current, errs := mcpconfig.Load(home, workdir)
+	all, more := mcpconfig.LoadAll(home, workdir)
+	if len(errs)+len(more) != 0 {
+		t.Fatal(errs, more)
+	}
+	user, project := filepath.Join(home, ".copilot", "mcp-config.json"), func(dir string) string { return filepath.Join(dir, ".github", "mcp.json") }
+	if got, want := copilot(current), "global@"+user+", mine@"+project(workdir); got != want {
+		t.Errorf("Load's Copilot servers = %s, want %s", got, want)
+	}
+	if got, want := copilot(all), "global@"+user+", mine@"+project(workdir)+", theirs@"+project(other); got != want {
+		t.Errorf("LoadAll's Copilot servers = %s, want %s", got, want)
+	}
+}
+
 // Codex's static http_headers are read so Literals can see them. A suggestion
 // moves their text into env, as it does any header's, so the bridge still sends
 // them and none reaches a command line, where any process could read it. The

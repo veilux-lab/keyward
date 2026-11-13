@@ -838,6 +838,10 @@ func TestTheAdviceForACredentialInAURLSaysToSendItInAHeader(t *testing.T) {
 	for client, want := range map[string]string{
 		"Claude Code": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header as ${VAR}, if the server takes it there" + otherwise,
 		"Codex":       "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header with env_http_headers = { \"HEADER\" = \"VAR\" }, if the server takes it there" + otherwise,
+		// mcp-remote takes the URL as an argument, where Copilot fills a ${VAR} in
+		// itself, so there is no otherwise.
+		"Copilot CLI": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header as ${VAR}, if the server takes it there, " +
+			"as keyward starts a remote server through mcp-remote, which takes the URL as an argument, where Copilot CLI fills in a ${VAR} itself; then run keyward mcp wrap\n",
 	} {
 		servers := []mcpconfig.Server{{Client: client, Config: "/home/someone/config", Name: "exa", URL: "https://mcp.example.com/mcp?token=" + githubToken}}
 		r, err := doctor.Run(vault.NewMemory(), nil, servers)
@@ -861,6 +865,7 @@ func TestTheAdviceForACredentialInArgsSaysToPassItInEnv(t *testing.T) {
 	for client, want := range map[string]string{
 		"Claude Code": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it in env as VAR" + otherwise,
 		"Codex":       "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it with env_vars = [\"VAR\"]" + otherwise,
+		"Copilot CLI": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it in env as VAR, if the server reads it from there, as Copilot CLI fills in a ${VAR} in its command itself; then run keyward mcp wrap\n",
 	} {
 		servers := []mcpconfig.Server{{Client: client, Config: "/home/someone/config", Name: "slack", Command: "npx", Args: []string{"-y", "slack-mcp", "--token", githubToken}}}
 		r, err := doctor.Run(vault.NewMemory(), nil, servers)
@@ -869,6 +874,39 @@ func TestTheAdviceForACredentialInArgsSaysToPassItInEnv(t *testing.T) {
 		}
 		if out := r.String(); !strings.Contains(out, "server slack, args[3]\n") || !strings.Contains(out, want) {
 			t.Errorf("%s: the report lacks %q:\n%s", client, want, out)
+		}
+	}
+}
+
+// Copilot CLI, once installed, starts the servers in a project's .mcp.json too, so
+// the advice for a credential in one's URL or args is the advice for Copilot's.
+func TestTheAdviceForAProjectsServerIsCopilotsOnceItIsInstalled(t *testing.T) {
+	home, workdir := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".copilot"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, ".mcp.json"), []byte(`{"mcpServers": {
+  "slack": {"command": "npx", "args": ["-y", "slack-mcp", "--token", "`+githubToken+`"]},
+  "exa": {"type": "http", "url": "https://mcp.example.com/mcp?token=`+githubToken+`"}
+}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	servers, errs := mcpconfig.Load(home, workdir)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	r, err := doctor.Run(vault.NewMemory(), nil, servers)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	const shared = "Copilot CLI, which starts a project's .mcp.json servers too,"
+	for _, want := range []string{
+		"and pass it in env as VAR, if the server reads it from there, as " + shared + " fills in a ${VAR} in its command itself; then run keyward mcp wrap in " + workdir + "\n",
+		"and send it in a header as ${VAR}, if the server takes it there, as keyward starts a remote server through mcp-remote, which takes the URL as an argument, " +
+			"where " + shared + " fills in a ${VAR} itself; then run keyward mcp wrap in " + workdir + "\n",
+	} {
+		if out := r.String(); !strings.Contains(out, want) {
+			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
 	}
 }

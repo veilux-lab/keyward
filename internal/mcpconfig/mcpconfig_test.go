@@ -1802,6 +1802,31 @@ func TestCodexSuggestionsAreTOMLThatReadsBack(t *testing.T) {
 	}
 }
 
+// A key named like a credential, as Codex's old bearer_token, holds one whole, so
+// the table keyward prints hides its value as env's, whatever it looks like, as a
+// string: a multi-line string, or an inline table it does not read, too. A
+// number holds none, and stays.
+func TestACodexKeyNamedLikeACredentialIsHidden(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.github]\nurl = \"https://api.example.com/mcp/\"\n"+
+		"bearer_token_env_var = \"GITHUB_TOKEN\"\nbearer_token = \"plain-bearer-value\"\nstartup_timeout_sec = 20\n"+
+		"password = \"\"\"\nplain-pass-value-x\"\"\"\nclient_secret = { a = \"plain-inline-secret\", n = 1 }\ntoken_ttl_sec = 3600\n")
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	findings := mcpconfig.Check(servers, refs)
+	if len(errs) != 0 || len(findings) != 1 {
+		t.Fatalf("findings = %+v, errors %v", findings, errs)
+	}
+	f := findings[0]
+	for _, line := range []string{"bearer_token = \"<18 bytes hidden>\"\n", "password = \"<25 bytes hidden>\"\n", "client_secret = \"<36 bytes hidden>\"\n", "token_ttl_sec = 3600\n", "startup_timeout_sec = 20\n"} {
+		if !strings.Contains(f.Suggestion, line) {
+			t.Errorf("table lacks %q:\n%s", line, f.Suggestion)
+		}
+	}
+	if strings.Contains(f.Suggestion, "plain-") || !strings.Contains(f.Note, "Copy each hidden value") {
+		t.Errorf("table:\n%s\nnote %q", f.Suggestion, f.Note)
+	}
+}
+
 func TestCodexKeepsTheStartupTimeout(t *testing.T) {
 	if f := finding(t, "Codex", "pagerduty"); !strings.Contains(f.Suggestion, "startup_timeout_sec = 60") {
 		t.Errorf("suggestion lost the timeout:\n%s", f.Suggestion)
@@ -2103,6 +2128,297 @@ func TestUndoKeepsTheShellBridgeForARemoteServer(t *testing.T) {
 func TestUndoUsesCursorsPlaceholderSyntax(t *testing.T) {
 	if s := parseJSON(t, undone(t, "Cursor", "gh")); s.Env["GITHUB_TOKEN"] != "${env:GITHUB_TOKEN}" || s.Command != "npx" {
 		t.Errorf("undo = %+v", s)
+	}
+}
+
+// A printed entry replaces the server's own, so it keeps each key keyward does not
+// read, as Copilot CLI's tools and timeout or Cursor's envFile, with what may be a
+// secret hidden: one a key named like a credential holds, or an object, as env
+// does. A number is printed as written. A bridge is a local server, so a remote
+// one's type goes.
+func TestAPrintedEntryKeepsTheKeysKeywardDoesNotRead(t *testing.T) {
+	home, workdir := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(home, ".copilot", "mcp-config.json"), `{"mcpServers": {
+  "pd": {"type": "local", "command": "uvx", "args": ["pagerduty-mcp"], "env": {"PD_KEY": "${PD_KEY}"}, "tools": ["list_incidents"], "timeout": 12345678901234567890},
+  "remote": {"type": "http", "url": "https://mcp.example.com/mcp", "headers": {"Authorization": "Bearer ${JIRA}"}, "tools": ["*"],
+    "password": "plain-password-value", "settings": {"owner": "plain-owner-value"}}
+}}`)
+	write(t, filepath.Join(home, ".cursor", "mcp.json"), `{"mcpServers": {"gh": {"command": "gh-mcp", "env": {"GITHUB_TOKEN": "${env:GITHUB_TOKEN}"}, "envFile": "./.env.mcp", "comment": "`+argToken+`",
+  "auth": {"CLIENT_SECRET": "plain-client-secret"}}}}`)
+	servers, errs := mcpconfig.Load(home, workdir)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	entries, suggestions, notes := map[string]map[string]any{}, map[string]string{}, map[string]string{}
+	for _, f := range mcpconfig.Check(servers, refs) {
+		var wrapper map[string]map[string]any
+		if err := json.Unmarshal([]byte("{"+f.Suggestion+"}"), &wrapper); err != nil {
+			t.Fatalf("%s: suggestion is not a JSON member: %v\n%s", f.Name, err, f.Suggestion)
+		}
+		key := f.Client + "/" + f.Name
+		entries[key], suggestions[key], notes[key] = wrapper[f.Name], f.Suggestion, f.Note
+	}
+	pd, remote, gh := entries["Copilot CLI/pd"], entries["Copilot CLI/remote"], entries["Cursor/gh"]
+	if pd["command"] != "keyward" || fmt.Sprint(pd["tools"]) != "[list_incidents]" || !strings.Contains(suggestions["Copilot CLI/pd"], `"timeout": 12345678901234567890`) {
+		t.Errorf("Copilot pd = %s", suggestions["Copilot CLI/pd"])
+	}
+	if remote["type"] != nil || remote["command"] != "keyward" || remote["url"] != nil || remote["headers"] != nil || fmt.Sprint(remote["tools"]) != "[*]" ||
+		remote["password"] != "<20 bytes hidden>" || fmt.Sprint(remote["settings"]) != "map[owner:<17 bytes hidden>]" {
+		t.Errorf("Copilot remote = %v", remote)
+	}
+	if gh["type"] != nil || gh["envFile"] != "./.env.mcp" || gh["comment"] == argToken || fmt.Sprint(gh["auth"]) != "map[CLIENT_SECRET:<19 bytes hidden>]" || !strings.Contains(notes["Cursor/gh"], "hidden value") {
+		t.Errorf("Cursor gh = %v, note %q", gh, notes["Cursor/gh"])
+	}
+	if strings.Contains(notes["Copilot CLI/pd"], "hidden value") {
+		t.Errorf("pd's note speaks of a hidden value it lacks: %q", notes["Copilot CLI/pd"])
+	}
+}
+
+// Copilot CLI fills in $VAR and ${VAR} in a server's command itself, from its own
+// environment, before keyward run or a shell can: a migrated variable as its
+// reference, and GITHUB_TOKEN as Copilot's own token. So a server that would read
+// one there is changed by hand, but a header mcp-remote fills in, or env, is not.
+// The note says how a script that reads the value itself can do so.
+func TestCopilotFillsInTheVariablesAServersCommandReadsItself(t *testing.T) {
+	const script = "A script that reads the value itself, as to pass it on stdin, can instead read a name only env sets, " +
+		"such as KW_VAR set there to VAR's reference and named in --only: Copilot leaves a name its environment lacks as written."
+	for _, tc := range []struct {
+		what, client, server string
+		byHand               bool
+	}{
+		{"a token as an argument", "Copilot CLI", `{"command": "tool-mcp", "args": ["--token", "${PD_KEY}"]}`, true},
+		{"the same as $PD_KEY", "Copilot CLI", `{"command": "tool-mcp", "args": ["--token", "$PD_KEY"]}`, true},
+		{"the same, wrapped with nothing in env", "Copilot CLI", `{"command": "keyward", "args": ["run", "--", "tool-mcp", "--token", "$PD_KEY"]}`, true},
+		{"its own token as an argument", "Copilot CLI", `{"command": "tool-mcp", "args": ["--token", "$GITHUB_TOKEN"]}`, true},
+		{"a script that sets the server's variable", "Copilot CLI", `{"command": "sh", "args": ["-c", "GITHUB_PERSONAL_ACCESS_TOKEN=\"$GITHUB_TOKEN\" exec github-mcp-server"]}`, true},
+		{"the same, wrapped", "Copilot CLI", `{"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "sh", "-c", "GITHUB_PERSONAL_ACCESS_TOKEN=\"$GITHUB_TOKEN\" exec github-mcp-server"], "env": {"GITHUB_TOKEN": "cap://github-token"}}`, true},
+		{"a remote server's header", "Copilot CLI", `{"type": "http", "url": "https://mcp.example.com/mcp", "headers": {"Authorization": "Bearer ${JIRA}"}}`, false},
+		{"a variable in env", "Copilot CLI", `{"command": "pd-mcp", "env": {"PD_KEY": "${PD_KEY}"}}`, false},
+		{"the script, under Claude Code", "Claude Code", `{"command": "sh", "args": ["-c", "GITHUB_PERSONAL_ACCESS_TOKEN=\"$GITHUB_TOKEN\" exec github-mcp-server"]}`, false},
+	} {
+		home := t.TempDir()
+		config := filepath.Join(home, ".copilot", "mcp-config.json")
+		if tc.client == "Claude Code" {
+			config = filepath.Join(home, ".claude.json")
+		}
+		write(t, config, `{"mcpServers": {"srv": `+tc.server+`}}`)
+		servers, errs := mcpconfig.Load(home, t.TempDir())
+		findings := mcpconfig.Check(servers, refs)
+		if len(errs) != 0 || len(findings) != 1 {
+			t.Fatalf("%s: findings = %+v, errors %v", tc.what, findings, errs)
+		}
+		f := findings[0]
+		if f.ByHand != tc.byHand || tc.byHand && (!strings.Contains(f.Note, "Copilot CLI fills in") || !strings.Contains(f.Note, script)) {
+			t.Errorf("%s: by hand %v, note %q", tc.what, f.ByHand, f.Note)
+		}
+		if !tc.byHand && slices.ContainsFunc(f.Want.Args, func(a string) bool { return regexp.MustCompile(`\$\{?(PD_KEY|GITHUB_TOKEN|JIRA)\b`).MatchString(a) }) && tc.client == "Copilot CLI" {
+			t.Errorf("%s: wrapped as %q, which Copilot fills in", tc.what, f.Want.Args)
+		}
+	}
+}
+
+// Copilot CLI fills in only what its environment holds: each migrated variable,
+// as its reference, and GITHUB_TOKEN, migrated or not, as its own token, even
+// where env sets it. It passes a server no GITHUB_TOKEN but one env sets. So a
+// server whose fix would read GITHUB_TOKEN in its command, or leave it to
+// mcp-remote without its reference in env, is changed by hand, but a variable
+// only the server's env sets is left for sh to fill in once keyward run resolves
+// it.
+func TestCopilotFillsInOnlyWhatItsEnvironmentHolds(t *testing.T) {
+	unmigrated := map[string]string{"PD_KEY": "pagerduty-key"}
+	for _, tc := range []struct {
+		what, server string
+		refs         map[string]string
+		// byHand is the finding wanted; want, if any, is how one not by hand starts.
+		byHand bool
+		want   string
+	}{
+		{"an unmigrated GITHUB_TOKEN as an argument", `{"command": "srv", "args": ["--token", "${GITHUB_TOKEN}"], "env": {"PD_KEY": "${PD_KEY}"}}`, unmigrated, true, ""},
+		{"the same as $GITHUB_TOKEN", `{"command": "srv", "args": ["--token", "$GITHUB_TOKEN"], "env": {"PD_KEY": "${PD_KEY}"}}`, unmigrated, true, ""},
+		{"an unmigrated GITHUB_TOKEN in a wrapped bridge's URL", `{"command": "keyward", "args": ["run", "--only", "PD_KEY", "--", "npx", "-y", "mcp-remote",
+      "https://mcp.example.com/mcp?u=${GITHUB_TOKEN}", "--header", "Authorization: Bearer ${PD_KEY}"], "env": {"PD_KEY": "cap://pagerduty-key"}}`, unmigrated, true, ""},
+		{"a script that reads its own env, unwrapped", `{"command": "sh", "args": ["-c", "PAGERDUTY_TOKEN=\"$KW_PD\" exec pd-mcp"], "env": {"KW_PD": "cap://pagerduty-key"}}`,
+			refs, false, `run --only KW_PD -- sh -c PAGERDUTY_TOKEN="$KW_PD" exec pd-mcp`},
+		{"an unmigrated GITHUB_TOKEN in an mcp-remote header", `{"command": "npx", "args": ["-y", "mcp-remote", "https://mcp.example.com/mcp",
+      "--header", "Authorization: Bearer ${GITHUB_TOKEN}"], "env": {"PD_KEY": "${PD_KEY}"}}`, unmigrated, true, ""},
+		{"the same, wrapped", `{"command": "keyward", "args": ["run", "--only", "PD_KEY", "--", "npx", "-y", "mcp-remote", "https://mcp.example.com/mcp",
+      "--header", "Authorization: Bearer ${GITHUB_TOKEN}", "--header", "X-Pd: ${PD_KEY}"], "env": {"PD_KEY": "cap://pagerduty-key"}}`, unmigrated, true, ""},
+		{"the header, with its reference in env", `{"command": "npx", "args": ["-y", "mcp-remote", "https://mcp.example.com/mcp",
+      "--header", "Authorization: Bearer ${GITHUB_TOKEN}"], "env": {"GITHUB_TOKEN": "cap://github-token"}}`, unmigrated, false,
+			`run --only GITHUB_TOKEN -- sh -c exec npx -y mcp-remote https://mcp.example.com/mcp --header "Authorization: Bearer "'$''{GITHUB_TOKEN}'""`},
+		{"an argument, with its reference in env", `{"command": "srv", "args": ["--token", "${GITHUB_TOKEN}"], "env": {"GITHUB_TOKEN": "cap://github-token"}}`, unmigrated, true, ""},
+		// Copilot fills GITHUB_TOKEN in with its own token whatever env holds.
+		{"the argument, wrapped", `{"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "srv", "--token", "${GITHUB_TOKEN}"], "env": {"GITHUB_TOKEN": "cap://github-token"}}`, unmigrated, true, ""},
+		{"a wrapped script, with its reference in env", `{"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "sh", "-c", "GH_PAT=${GITHUB_TOKEN} exec srv"], "env": {"GITHUB_TOKEN": "cap://github-token"}}`, unmigrated, true, ""},
+		{"the same as $GITHUB_TOKEN", `{"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "sh", "-c", "GH_PAT=$GITHUB_TOKEN exec srv"], "env": {"GITHUB_TOKEN": "cap://github-token"}}`, unmigrated, true, ""},
+		// keyward wrote this bridge for Claude Code, where mcp-remote got GITHUB_TOKEN from the client.
+		{"a wrapped bridge whose header reads an unmigrated GITHUB_TOKEN", `{"command": "keyward", "args": ["run", "--only", "PD_KEY", "--", "sh", "-c",
+      "exec npx -y mcp-remote https://mcp.example.com/mcp --header \"Authorization: Bearer \"'$''{GITHUB_TOKEN}'\"\" --header \"X-Pd: \"'$''{PD_KEY}'\"\" --transport http-only"],
+      "env": {"PD_KEY": "cap://pagerduty-key"}}`, unmigrated, true, ""},
+	} {
+		home := t.TempDir()
+		write(t, filepath.Join(home, ".copilot", "mcp-config.json"), `{"mcpServers": {"srv": `+tc.server+`}}`)
+		servers, errs := mcpconfig.Load(home, t.TempDir())
+		findings := mcpconfig.Check(servers, tc.refs)
+		if len(errs) != 0 || len(findings) != 1 {
+			t.Fatalf("%s: findings = %+v, errors %v", tc.what, findings, errs)
+		}
+		if f := findings[0]; f.ByHand != tc.byHand || !tc.byHand && strings.Join(f.Want.Args, " ") != tc.want {
+			t.Errorf("%s: by hand %v, started as %q, note %q", tc.what, f.ByHand, f.Want.Args, f.Note)
+		}
+	}
+	// Wrapped with the variable in env, the script is as it should be, as $KW_PD or
+	// ${KW_PD}. Claude Code fills in ${KW_PD} from that env, so a project's server
+	// both start reads it in its arguments.
+	for _, tc := range []struct {
+		script string
+		found  []string
+	}{{`PAGERDUTY_TOKEN=\"$KW_PD\" exec pd-mcp`, nil}, {`PAGERDUTY_TOKEN=${KW_PD} exec pd-mcp`, []string{"shared"}}} {
+		server := `{"command": "keyward", "args": ["run", "--only", "KW_PD", "--", "sh", "-c", "` + tc.script + `"], "env": {"KW_PD": "cap://pagerduty-key"}}`
+		home, workdir := t.TempDir(), t.TempDir()
+		write(t, filepath.Join(home, ".copilot", "mcp-config.json"), `{"mcpServers": {"srv": `+server+`}}`)
+		write(t, filepath.Join(workdir, ".mcp.json"), `{"mcpServers": {"shared": `+server+`}}`)
+		servers, _ := mcpconfig.Load(home, workdir)
+		var found []string
+		for _, f := range mcpconfig.Check(servers, refs) {
+			found = append(found, f.Name)
+		}
+		if !slices.Equal(found, tc.found) {
+			t.Errorf("a wrapped script that reads its own env as %s: findings for %v, want %v", tc.script, found, tc.found)
+		}
+	}
+}
+
+// Copilot CLI passes a server no GITHUB_TOKEN, and leaves ${GITHUB_TOKEN} in its
+// env as written, so a wrapped server with neither gets no reference to resolve,
+// nor one to put in a command line, and one without keyward cannot get the token
+// from Copilot's environment.
+func TestCopilotPassesAServerNoGitHubToken(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".copilot", "mcp-config.json"), `{"mcpServers": {
+  "env": {"command": "gh-mcp", "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}},
+  "wrapped": {"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "gh-mcp"], "env": {"GITHUB_TOKEN": "cap://github-token"}},
+  "script": {"command": "keyward", "args": ["run", "--", "sh", "-c", "srv --token \"$(printenv GITHUB_TOKEN)\""]}
+}}`)
+	servers, _ := mcpconfig.Load(home, t.TempDir())
+	findings := mcpconfig.Check(servers, refs)
+	if len(findings) != 1 || findings[0].Name != "env" || parseJSON(t, findings[0]).Env["GITHUB_TOKEN"] != "cap://github-token" {
+		t.Fatalf("findings = %+v", findings)
+	}
+	undone := mcpconfig.Undo(servers)
+	if len(undone) != 2 || undone[1].Name != "wrapped" || !strings.HasSuffix(undone[1].Note, " Copilot CLI passes a server no GITHUB_TOKEN and fills in no ${GITHUB_TOKEN} in env, so without keyward it starts this server without it.") {
+		t.Errorf("undo = %+v", undone)
+	}
+}
+
+// Copilot CLI passes a server no GITHUB_TOKEN and leaves ${GITHUB_TOKEN} in env as
+// written, so a wrapped server that would get it from either gets the fix that
+// sets its reference in env, and names it in --only if the server has one. Claude
+// Code fills it in, so the same fix, merged with its own, covers a project's
+// server both start.
+func TestCopilotGivesAWrappedServerNoGitHubToken(t *testing.T) {
+	const withOnly = `{"command": "keyward", "args": ["run", "--only", "PD_KEY", "--", "gh-mcp"], "env": {"PD_KEY": "cap://pagerduty-key", "GITHUB_TOKEN": "${GITHUB_TOKEN}"}}`
+	const both = `In args, change "PD_KEY" to "PD_KEY,GITHUB_TOKEN".` + "\n" + `In env, change "GITHUB_TOKEN": "${GITHUB_TOKEN}" to "GITHUB_TOKEN": "cap://github-token".`
+	for _, tc := range []struct {
+		what, config, server, key, changes string
+		unresolved                         bool
+	}{
+		{"one with --only", ".copilot/mcp-config.json", withOnly, "GITHUB_TOKEN", both, false},
+		{"one without", ".copilot/mcp-config.json", `{"command": "keyward", "args": ["run", "--", "gh-mcp"], "env": {"GH": "${GITHUB_TOKEN}"}}`,
+			"GH", `In env, change "GH": "${GITHUB_TOKEN}" to "GH": "cap://github-token".`, false},
+		{"one whose --only names it, with nothing in env", ".copilot/mcp-config.json", `{"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "gh-mcp"]}`,
+			"GITHUB_TOKEN", `In env, add "GITHUB_TOKEN": "cap://github-token".`, false},
+		{"a project's", ".mcp.json", withOnly, "GITHUB_TOKEN", both, true},
+	} {
+		home, workdir := t.TempDir(), t.TempDir()
+		os.MkdirAll(filepath.Join(home, ".copilot"), 0o755)
+		dir := home
+		if tc.config == ".mcp.json" {
+			dir = workdir
+		}
+		write(t, filepath.Join(dir, tc.config), `{"mcpServers": {"gh": `+tc.server+`}}`)
+		servers, errs := mcpconfig.Load(home, workdir)
+		findings := mcpconfig.Check(servers, refs)
+		if len(errs) != 0 || len(findings) != 1 {
+			t.Fatalf("%s: findings = %+v, errors %v", tc.what, findings, errs)
+		}
+		f := findings[0]
+		if f.Suggestion != tc.changes || !slices.Equal(f.Withheld, []string{tc.key}) || len(f.Unresolved) > 0 != tc.unresolved || f.Want.Env[tc.key] != "cap://github-token" {
+			t.Errorf("%s: withheld %v, unresolved %v, env %v, changes:\n%s", tc.what, f.Withheld, f.Unresolved, f.Want.Env, f.Suggestion)
+		}
+	}
+}
+
+// Copilot CLI starts the servers in a project's .mcp.json too, so once it is
+// installed they are checked by its rules as well as Claude Code's: one whose
+// command reads a migrated variable, or a GITHUB_TOKEN its fix would not give
+// it, is changed by hand, and unwrap says Copilot gives one no GITHUB_TOKEN.
+// Claude Code still hands a server GITHUB_TOKEN, so keyward run refuses a script
+// that passes it on.
+func TestCopilotsRulesApplyToAProjectsServersOnceItIsInstalled(t *testing.T) {
+	unmigrated := map[string]string{"PD_KEY": "pagerduty-key"}
+	for _, tc := range []struct {
+		what, server    string
+		refs            map[string]string
+		byHand, refused bool
+	}{
+		{"a script that sets the server's variable", `{"command": "sh", "args": ["-c", "PAGERDUTY_TOKEN=\"$PD_KEY\" exec pd-mcp"]}`, refs, true, false},
+		{"one that reads GITHUB_TOKEN", `{"command": "sh", "args": ["-c", "GITHUB_PERSONAL_ACCESS_TOKEN=\"$GITHUB_TOKEN\" exec github-mcp-server"]}`, refs, true, false},
+		{"a wrapped script that passes GITHUB_TOKEN on", `{"command": "keyward", "args": ["run", "--", "sh", "-c", "srv --token \"$(printenv GITHUB_TOKEN)\""]}`, refs, false, true},
+		{"one whose mcp-remote header reads an unmigrated GITHUB_TOKEN", `{"command": "npx", "args": ["-y", "mcp-remote", "https://mcp.example.com/mcp",
+      "--header", "Authorization: Bearer ${GITHUB_TOKEN}", "--header", "X-Pd: ${PD_KEY}"]}`, unmigrated, true, false},
+	} {
+		for _, installed := range []bool{false, true} {
+			home, workdir := t.TempDir(), t.TempDir()
+			if installed {
+				os.MkdirAll(filepath.Join(home, ".copilot"), 0o755)
+			}
+			write(t, filepath.Join(workdir, ".mcp.json"), `{"mcpServers": {"srv": `+tc.server+`}}`)
+			servers, errs := mcpconfig.Load(home, workdir)
+			findings := mcpconfig.Check(servers, tc.refs)
+			if len(errs) != 0 || len(findings) != 1 {
+				t.Fatalf("%s, Copilot installed %v: findings = %+v, errors %v", tc.what, installed, findings, errs)
+			}
+			f := findings[0]
+			if byHand := tc.byHand && installed; f.ByHand != byHand || byHand && !strings.Contains(f.Note, "this project's .mcp.json too. Copilot CLI fills in") || f.Refused != tc.refused {
+				t.Errorf("%s, Copilot installed %v: by hand %v, refused %v, note %q", tc.what, installed, f.ByHand, f.Refused, f.Note)
+			}
+		}
+	}
+	home, workdir := t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".copilot"), 0o755)
+	write(t, filepath.Join(workdir, ".mcp.json"), `{"mcpServers": {"gh": {"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "gh-mcp"], "env": {"GITHUB_TOKEN": "cap://github-token"}}}}`)
+	servers, _ := mcpconfig.Load(home, workdir)
+	if undone := mcpconfig.Undo(servers); len(undone) != 1 || !strings.Contains(undone[0].Note, "Copilot CLI passes a server no GITHUB_TOKEN") {
+		t.Errorf("undo = %+v", undone)
+	}
+	// The bridge keyward writes for Claude Code leaves GITHUB_TOKEN to the client,
+	// which Copilot keeps from it, unless its env sets the token's reference.
+	bridge := func(env string) string {
+		return `{"mcpServers": {"srv": {"command": "keyward", "args": ["run", "--only", "PD_KEY", "--", "sh", "-c",
+      "exec npx -y mcp-remote https://mcp.example.com/mcp --header \"Authorization: Bearer \"'$''{GITHUB_TOKEN}'\"\" --header \"X-Pd: \"'$''{PD_KEY}'\"\" --transport http-only"],
+      "env": {"PD_KEY": "cap://pagerduty-key"` + env + `}}}}`
+	}
+	for _, tc := range []struct {
+		env       string
+		installed bool
+		byHand    int
+	}{{"", false, 0}, {"", true, 1}, {`, "GITHUB_TOKEN": "cap://github-token"`, true, 0}} {
+		home, workdir := t.TempDir(), t.TempDir()
+		if tc.installed {
+			os.MkdirAll(filepath.Join(home, ".copilot"), 0o755)
+		}
+		write(t, filepath.Join(workdir, ".mcp.json"), bridge(tc.env))
+		servers, _ := mcpconfig.Load(home, workdir)
+		var byHand int
+		for _, f := range mcpconfig.Check(servers, unmigrated) {
+			if f.ByHand && strings.Contains(f.Note, "this project's .mcp.json too") {
+				byHand++
+			}
+		}
+		if byHand != tc.byHand {
+			t.Errorf("a bridge with env %q, Copilot installed %v: %d left by hand, want %d", tc.env, tc.installed, byHand, tc.byHand)
+		}
 	}
 }
 

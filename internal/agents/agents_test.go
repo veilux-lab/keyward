@@ -191,6 +191,20 @@ func TestCodexAndGeminiReadTheGuideBeforeAnyWorkWithCredentials(t *testing.T) {
 	}
 }
 
+// Copilot CLI follows no @ import, so it is asked to read the guide from its
+// personal instructions, the file it loads in every session.
+func TestCopilotReadsTheGuideFromItsPersonalInstructions(t *testing.T) {
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".copilot"), 0o755)
+	got := agents.Unlinked(home)
+	if len(got) != 1 || got[0].Name != "Copilot CLI" || got[0].Config != filepath.Join(home, ".copilot", "copilot-instructions.md") {
+		t.Fatalf("Unlinked = %+v, want only Copilot CLI", got)
+	}
+	if got[0].Line != "Before working with credentials or running keyward, read ~/.agents/keyward.md." || !strings.Contains(got[0].Command, ">> ~/.copilot/copilot-instructions.md") {
+		t.Errorf("line = %q, command = %q", got[0].Line, got[0].Command)
+	}
+}
+
 func TestRemoveDeletesOnlyAFileKeywardWrote(t *testing.T) {
 	f := agents.Default(t.TempDir())
 	if removed, err := f.Remove(); err != nil || removed {

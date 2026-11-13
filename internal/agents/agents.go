@@ -158,6 +158,7 @@ var known = []struct{ name, dir, file, line string }{
 	{"Claude Code", ".claude", "CLAUDE.md", "@" + Display},
 	{"Codex", ".codex", "AGENTS.md", "Before working with credentials or running keyward, read " + Display + "."},
 	{"Gemini CLI", ".gemini", "GEMINI.md", "Before working with credentials or running keyward, read " + Display + "."},
+	{"Copilot CLI", ".copilot", "copilot-instructions.md", "Before working with credentials or running keyward, read " + Display + "."},
 }
 
 // Unlinked returns installed agents whose global instructions never mention the
