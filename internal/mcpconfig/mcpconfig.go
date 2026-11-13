@@ -16,6 +16,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -49,8 +50,12 @@ type Server struct {
 	toml     bool
 	disabled bool
 
-	// other holds the keys of a Codex table that keyward does not change, as cwd
-	// and the tool settings, written again as they are in a table it prints.
+	// copilot marks a server in a project's .mcp.json, which Copilot CLI, being
+	// installed, starts too, by its own rules.
+	copilot bool
+
+	// other holds the keys keyward does not change, as Codex's tool settings or
+	// Copilot CLI's tools, written again as they are in a definition it prints.
 	other map[string]any
 
 	// transport is the --transport a bridge gives mcp-remote, if any, kept when it
@@ -101,6 +106,11 @@ type Finding struct {
 	// keyward run is not told to resolve, as --only leaves them out, sorted. The
 	// server would get each as cap://NAME, not the value.
 	Unresolved []string
+	// Withheld names the variables a server that runs through keyward would get no
+	// GITHUB_TOKEN reference in from Copilot CLI, sorted: each its env sets to
+	// ${GITHUB_TOKEN}, which Copilot passes on as written, and GITHUB_TOKEN if its
+	// --only names it but env does not set it, as Copilot passes a server none.
+	Withheld []string
 	// InArgs names the references a server that runs through keyward reads in its
 	// command or args, sorted. Its client fills them in there before keyward run
 	// starts, which resolves only its environment.
@@ -180,13 +190,15 @@ func load(home, workdir string, everyProject bool, folders []string) ([]Server, 
 	if everyProject {
 		dirs = slices.Concat(dirs, projects, folders)
 	}
+	info, err := os.Stat(filepath.Join(home, ".copilot"))
+	copilot := err == nil && info.IsDir()
 	seen := map[string]bool{}
 	var read []string
 	for _, dir := range dirs {
 		if !seen[dir] {
 			seen[dir] = true
 			read = append(read, dir)
-			add(loadProject(dir))
+			add(loadProject(dir, copilot))
 		}
 	}
 	add(loadCodex(filepath.Join(home, ".codex", "config.toml")))
@@ -197,7 +209,86 @@ func load(home, workdir string, everyProject bool, folders []string) ([]Server, 
 			add(loadJSON("Cursor", filepath.Join(dir, ".cursor", "mcp.json"), ""))
 		}
 	}
+	add(loadJSON(Copilot, filepath.Join(home, ".copilot", "mcp-config.json"), ""))
+	// Copilot CLI reads a project's .mcp.json, read above as Claude Code's, and its
+	// .github/mcp.json only in a folder without one.
+	for _, dir := range read {
+		if _, err := os.Stat(filepath.Join(dir, ".mcp.json")); errors.Is(err, fs.ErrNotExist) {
+			add(loadJSON(Copilot, filepath.Join(dir, ".github", "mcp.json"), ""))
+		}
+	}
 	return servers, errs
+}
+
+// Copilot is GitHub Copilot CLI's name as a client. It fills in a variable a
+// server's command reads as $VAR or ${VAR}, even in single quotes, from its own
+// environment, and GITHUB_TOKEN as its own token; it passes a server no
+// GITHUB_TOKEN, and leaves ${GITHUB_TOKEN} in env as written.
+const Copilot = "Copilot CLI"
+
+// byCopilot reports whether Copilot CLI starts s: one of its own, or one in a
+// project's .mcp.json, which it reads as Claude Code does.
+func (s Server) byCopilot() bool {
+	return s.Client == Copilot || s.copilot
+}
+
+// copilotToken is the variable Copilot CLI keeps from a server.
+const copilotToken = "GITHUB_TOKEN"
+
+var dollarName = regexp.MustCompile(`\$\{?([A-Za-z_][A-Za-z0-9_]*)`)
+
+// copilotFills names the variables of refs that Copilot CLI fills in itself where
+// words read them, sorted. A header as keyward writes one, with a quote after its
+// $, it leaves alone.
+func copilotFills(words []string, refs map[string]string) []string {
+	var found []string
+	for _, w := range words {
+		for _, m := range dollarName.FindAllStringSubmatch(w, -1) {
+			if _, ok := refs[m[1]]; ok {
+				found = append(found, m[1])
+			}
+		}
+	}
+	slices.Sort(found)
+	return slices.Compact(found)
+}
+
+// copilotLeaks reports whether Copilot CLI would fill in a variable words read
+// before keyward run starts them: a migrated one, as its reference, or
+// GITHUB_TOKEN, migrated or not, as its own token, then in a command line. Any
+// other it leaves alone, as its environment does not hold it.
+func copilotLeaks(words []string, refs map[string]string) bool {
+	return len(copilotFills(words, refs)) > 0 || len(copilotFills(words, map[string]string{copilotToken: ""})) > 0
+}
+
+// copilotWithholds reports whether inner, a command Copilot CLI starts, reads
+// GITHUB_TOKEN, which Copilot fills in there with its own token, and used does
+// not set it in the change's env. Copilot passes a server no other, so a header
+// the change leaves to mcp-remote would go out without it.
+func copilotWithholds(inner []string, used map[string]string) bool {
+	_, given := used[copilotToken]
+	return !given && len(copilotFills(inner, map[string]string{copilotToken: ""})) > 0
+}
+
+// copilotByHand is the note for a server Copilot CLI would fill a variable in.
+const copilotByHand = `Copilot CLI fills in $VAR and ${VAR} in a server's command itself, before keyward run starts it: ` +
+	`a migrated variable as its cap:// reference, and GITHUB_TOKEN as Copilot's own GitHub token, which is then in a command line. ` +
+	`So change it by hand: set the variable the server reads in env to VAR's cap:// reference, or write VAR as '$''{VAR}' in an mcp-remote --header, ` +
+	`and start the server with keyward run --only VAR. A script that reads the value itself, as to pass it on stdin, can instead read a name only env sets, ` +
+	`such as KW_VAR set there to VAR's reference and named in --only: Copilot leaves a name its environment lacks as written.`
+
+// copilotNoToken is the note for a bridge whose header mcp-remote would fill with
+// the GITHUB_TOKEN Copilot CLI keeps from it.
+const copilotNoToken = `Copilot CLI passes a server no GITHUB_TOKEN, so mcp-remote would send the header that reads it without one. ` +
+	`So change it by hand: store the token with keyward add NAME, set GITHUB_TOKEN to cap://NAME in the server's env, and add GITHUB_TOKEN to its --only.`
+
+// copilotNote is note for s, saying first why Copilot CLI's rules apply when s is a
+// project's .mcp.json server.
+func copilotNote(s Server, note string) string {
+	if s.Client != Copilot {
+		return "Copilot CLI starts the servers in this project's .mcp.json too. " + note
+	}
+	return note
 }
 
 type jsonServer struct {
@@ -207,6 +298,32 @@ type jsonServer struct {
 	Env     map[string]string `json:"env"`
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers"`
+
+	other map[string]any
+}
+
+// jsonKeys are the keys of a JSON server keyward reads, and writes itself.
+var jsonKeys = []string{"type", "command", "args", "env", "url", "headers"}
+
+func (j *jsonServer) UnmarshalJSON(data []byte) error {
+	type fields jsonServer
+	if err := json.Unmarshal(data, (*fields)(j)); err != nil {
+		return err
+	}
+	// A number is kept as written, as float64 would round a large one.
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var all map[string]any
+	if err := dec.Decode(&all); err != nil {
+		return err
+	}
+	for _, k := range jsonKeys {
+		delete(all, k)
+	}
+	if len(all) > 0 {
+		j.other = all
+	}
+	return nil
 }
 
 func readJSON(path string, into any) (bool, error) {
@@ -231,7 +348,7 @@ func fromJSON(client, config, scope string, servers map[string]jsonServer) []Ser
 			transport = "sse-only"
 		}
 		out = append(out, Server{Client: client, Config: config, Name: name, Scope: scope,
-			Command: s.Command, Args: s.Args, Env: s.Env, URL: s.URL, Headers: s.Headers, transport: transport})
+			Command: s.Command, Args: s.Args, Env: s.Env, URL: s.URL, Headers: s.Headers, transport: transport, other: s.other})
 	}
 	return out
 }
@@ -263,11 +380,11 @@ func loadClaude(path, workdir string, everyProject bool) ([]Server, []string, er
 }
 
 // loadProject reads the project servers in dir's .mcp.json, which Claude Code's
-// CLI changes only when run in dir.
-func loadProject(dir string) ([]Server, error) {
+// CLI changes only when run in dir, and copilot says Copilot CLI starts too.
+func loadProject(dir string, copilot bool) ([]Server, error) {
 	servers, err := loadJSON("Claude Code", filepath.Join(dir, ".mcp.json"), "project")
 	for i := range servers {
-		servers[i].Project = dir
+		servers[i].Project, servers[i].copilot = dir, copilot
 	}
 	return servers, err
 }
@@ -434,9 +551,15 @@ func CheckAllowing(servers []Server, refs map[string]string, allow func(s Server
 		for _, a := range s.Args {
 			note(a)
 		}
+		command := append([]string{s.Command}, s.Args...)
+		// Copilot CLI fills in a migrated $VAR there too.
+		if s.byCopilot() {
+			for _, v := range copilotFills(command, refs) {
+				used[v] = refs[v]
+			}
+		}
 		// sh fills in a variable a script expands, as "$VAR", from the environment
 		// the client starts it with, which holds the reference.
-		command := append([]string{s.Command}, s.Args...)
 		at, _ := scriptAt(command)
 		if at >= 0 && len(inArgs) == 0 {
 			words, _ := readScript(command[at])
@@ -475,6 +598,14 @@ func CheckAllowing(servers []Server, refs map[string]string, allow func(s Server
 			url = remoteURL(append([]string{s.Command}, s.Args...))
 		}
 		f := Finding{Server: s, InURL: secretsIn(url, used), WrittenInURL: writtenInURL(url), InArgs: inArgs, Refused: refused(configured, refs)}
+		// A bridge leaves GITHUB_TOKEN in a header to the client, which Copilot keeps
+		// from it, unless the bridge's env sets the token's reference.
+		if bridged && configured.byCopilot() && copilotWithholds(slices.Collect(maps.Values(s.Headers)), used) {
+			f.Vars, f.ByHand, f.Note = slices.Sorted(maps.Keys(used)), true, copilotNote(configured, copilotNoToken)
+			findings = append(findings, f)
+			reported[i] = true
+			continue
+		}
 		if bridged {
 			if f.Exposed = commandLine(s, expanded, used); len(f.Exposed) == 0 {
 				continue
@@ -488,7 +619,7 @@ func CheckAllowing(servers []Server, refs map[string]string, allow func(s Server
 		if len(inArgs) > 0 {
 			f.Suggestion, f.Note, f.Want, ok = rewrap(configured, inArgs, refs, used, allowed)
 		} else {
-			f.Suggestion, f.Note, f.Want, ok = suggest(s, configured, used, allowed)
+			f.Suggestion, f.Note, f.Want, ok = suggest(s, configured, refs, used, allowed)
 		}
 		if ok {
 			f.CommandLine, f.Unreadable = commandLineOf(f.Want, s, refs)
@@ -519,20 +650,34 @@ func CheckAllowing(servers []Server, refs map[string]string, allow func(s Server
 
 // readInArgs names the references a server that runs through keyward reads in the
 // command it runs, sorted: variables migrated in a shell file, or holding one in
-// its env. Its client fills each ${VAR} in before keyward run starts, so keyward
-// run, which resolves only its environment, cannot.
+// its env but for Copilot CLI's own server, as Copilot fills in only what its
+// environment holds, and GITHUB_TOKEN always. Its client fills each ${VAR} in, and
+// Copilot CLI a migrated $VAR too, before keyward run starts, so keyward run,
+// which resolves only its environment, cannot.
 func readInArgs(s Server, refs map[string]string) []string {
 	if s.disabled || !runsThroughKeyward(s) {
 		return nil
 	}
 	held := handed(s, refs)
+	if s.Client == Copilot {
+		held = slices.DeleteFunc(held, func(v string) bool { return v != copilotToken })
+	}
+	reads := func(v string) bool { _, ok := refs[v]; return ok || slices.Contains(held, v) }
 	var names []string
 	for _, word := range wrappedCommand(s) {
 		for _, m := range placeholder.FindAllStringSubmatch(word, -1) {
-			if _, ok := refs[m[1]]; ok || slices.Contains(held, m[1]) {
+			if reads(m[1]) {
 				names = append(names, m[1])
 			}
 		}
+	}
+	if s.byCopilot() {
+		fills := map[string]string{}
+		maps.Copy(fills, refs)
+		if slices.Contains(held, copilotToken) {
+			fills[copilotToken] = ""
+		}
+		names = append(names, copilotFills(wrappedCommand(s), fills)...)
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
@@ -550,6 +695,9 @@ func rewrap(s Server, inArgs []string, refs, used map[string]string, allowed fun
 	words, shown, ok := starts(inner, used)
 	if !ok {
 		return "", byHand, Definition{}, false
+	}
+	if s.byCopilot() && (copilotLeaks(words, refs) || copilotWithholds(inner, used)) {
+		return "", copilotNote(s, copilotByHand), Definition{}, false
 	}
 	want := Definition{Command: s.Command, Args: slices.Concat(s.Args[:len(s.Args)-len(inner)], words)}
 	needs := inArgs
@@ -591,34 +739,50 @@ func rewrap(s Server, inArgs []string, refs, used map[string]string, allowed fun
 }
 
 // unresolved reports a server that runs through keyward with a reference in its
-// env that its --only leaves out. The fix is the same server with each such
-// variable added to its first --only, and --allow-command-line as allowing
-// gives it, printed as the changes it makes, so a setting keyward does not read
-// stays as it is.
+// env that its --only leaves out, or that Copilot CLI would give no GITHUB_TOKEN
+// reference. The fix is the same server with each such variable added to its
+// first --only, GITHUB_TOKEN's reference set where Copilot gives none, and
+// --allow-command-line as allowing gives it, printed as the changes it makes, so
+// a setting keyward does not read stays as it is.
 func unresolved(s Server, refs map[string]string, allowed func([]string) bool) (Finding, bool) {
 	if s.disabled || !runsThroughKeyward(s) {
 		return Finding{}, false
 	}
+	f := Finding{Server: s, Vars: handed(s, refs), Withheld: withheld(s, refs)}
 	// Without --only, keyward run resolves every reference.
 	only := onlyOf(s.Args)
-	if len(only) == 0 {
-		return Finding{}, false
-	}
-	f := Finding{Server: s, Vars: handed(s, refs)}
-	for _, v := range f.Vars {
-		if !slices.Contains(only, v) {
-			f.Unresolved = append(f.Unresolved, v)
+	var missing []string
+	if len(only) > 0 {
+		for _, v := range f.Vars {
+			if !slices.Contains(only, v) {
+				f.Unresolved = append(f.Unresolved, v)
+			}
+		}
+		missing = slices.Clone(f.Unresolved)
+		for _, v := range f.Withheld {
+			if !slices.Contains(only, v) && !slices.Contains(missing, v) {
+				missing = append(missing, v)
+			}
 		}
 	}
-	if len(f.Unresolved) == 0 {
+	if len(missing) == 0 && len(f.Withheld) == 0 {
 		return Finding{}, false
 	}
 	f.Want = Definition{Command: s.Command, Args: slices.Clone(s.Args)}
-	at := firstOnly(s.Args)
-	f.Want.Args[at] += "," + strings.Join(f.Unresolved, ",")
-	changes := []string{"In args, change " + quoteJSON(s.Args[at]) + " to " + quoteJSON(f.Want.Args[at]) + "."}
+	var changes []string
+	if len(missing) > 0 {
+		at := firstOnly(s.Args)
+		f.Want.Args[at] += "," + strings.Join(missing, ",")
+		changes = append(changes, "In args, change "+quoteJSON(s.Args[at])+" to "+quoteJSON(f.Want.Args[at])+".")
+	}
 	var given, added []string
-	f.Want.Env, given = referenced(s, f.Unresolved, refs)
+	f.Want.Env, given = referenced(s, slices.Concat(missing, f.Withheld), refs)
+	for _, k := range f.Withheld {
+		if v, set := s.Env[k]; set {
+			f.Want.Env[k] = handle.Prefix + refs[copilotToken]
+			changes = append(changes, "In env, change "+quoteJSON(k)+": "+quoteJSON(v)+" to "+quoteJSON(k)+": "+quoteJSON(f.Want.Env[k])+".")
+		}
+	}
 	f.Want, added = allowing(f.Want, s, refs, allowed)
 	changes = slices.Concat(changes, given, added)
 	f.CommandLine, f.Unreadable = commandLineOf(f.Want, s, refs)
@@ -736,12 +900,13 @@ func inCommandLine(command, vars []string) (secrets []string, reasons []Reason, 
 // it: each that holds a reference as s starts, but those its --only leaves out,
 // sorted. Codex gives a server only its env and the variables env_vars names;
 // the other clients start one in their own environment, which holds each
-// migrated variable.
+// migrated variable, but Copilot CLI's without GITHUB_TOKEN, which Claude Code
+// still hands a project's server they both start.
 func resolves(s Server, refs map[string]string) []string {
 	vars := handed(s, refs)
 	if !s.toml {
 		for v := range refs {
-			if _, set := s.Env[v]; !set {
+			if _, set := s.Env[v]; !set && !(s.Client == Copilot && v == copilotToken) {
 				vars = append(vars, v)
 			}
 		}
@@ -825,14 +990,34 @@ func changesNote(s Server, n int) string {
 	return "Make " + these + " to " + where + ", and leave the rest of it as it is."
 }
 
+// withheld is a Finding's Withheld for s, which runs through keyward, if
+// GITHUB_TOKEN is migrated.
+func withheld(s Server, refs map[string]string) []string {
+	if _, ok := refs[copilotToken]; !ok || !s.byCopilot() {
+		return nil
+	}
+	var vars []string
+	for k, v := range s.Env {
+		if m := placeholder.FindStringSubmatch(v); m != nil && m[0] == v && m[1] == copilotToken {
+			vars = append(vars, k)
+		}
+	}
+	if _, set := s.Env[copilotToken]; !set && slices.Contains(onlyOf(s.Args), copilotToken) {
+		vars = append(vars, copilotToken)
+	}
+	slices.Sort(vars)
+	return vars
+}
+
 // handed names the variables that hold a reference in a server's env when it
 // starts, sorted: one written there, one its client fills in from a migrated
 // variable, and one Codex passes through.
 func handed(s Server, refs map[string]string) []string {
 	var vars []string
 	for k, v := range s.Env {
-		// The client fills in a value that is one placeholder; Codex fills none in env.
-		if m := placeholder.FindStringSubmatch(v); m != nil && m[0] == v && !s.toml {
+		// The client fills in a value that is one placeholder; Codex fills none in env,
+		// and Copilot CLI no ${GITHUB_TOKEN}.
+		if m := placeholder.FindStringSubmatch(v); m != nil && m[0] == v && !s.toml && !(s.Client == Copilot && m[1] == copilotToken) {
 			if ref, ok := refs[m[1]]; ok {
 				v = handle.Prefix + ref
 			}
@@ -856,7 +1041,7 @@ func handed(s Server, refs map[string]string) []string {
 // the remote server it stands for. keyward run is given --allow-command-line if
 // the server would put secrets in a command line that allowed accepts. It is
 // false, with a note, for a server whose script keyward cannot rewrite safely.
-func suggest(s, current Server, used map[string]string, allowed func([]string) bool) (string, string, Definition, bool) {
+func suggest(s, current Server, refs, used map[string]string, allowed func([]string) bool) (string, string, Definition, bool) {
 	env := map[string]string{}
 	for k, v := range s.Env {
 		env[k] = v
@@ -917,6 +1102,9 @@ func suggest(s, current Server, used map[string]string, allowed func([]string) b
 	if !ok {
 		return "", byHand, Definition{}, false
 	}
+	if current.byCopilot() && (copilotLeaks(words, refs) || copilotWithholds(inner, used)) {
+		return "", copilotNote(current, copilotByHand), Definition{}, false
+	}
 	run := []string{"run", "--only", strings.Join(only, ","), "--"}
 	// keyward run resolves only these, each set to its reference in env.
 	if secrets, _, _ := inCommandLine(words, only); len(secrets) > 0 && allowed(secrets) {
@@ -936,7 +1124,8 @@ func suggest(s, current Server, used map[string]string, allowed func([]string) b
 		table, kept := tomlServer(s, "keyward", printed, env, passEnv)
 		return table, tomlNote(s) + hiddenNote(env, moved, fields, kept), want, true
 	}
-	return jsonServerText(s.Name, "keyward", printed, env), "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + "." + hiddenNote(env, moved, fields, false), want, true
+	entry, kept := jsonServerText(s, "keyward", printed, env)
+	return entry, "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + "." + hiddenNote(env, moved, fields, kept), want, true
 }
 
 // byHand is the note for a server whose script keyward cannot rewrite safely.
@@ -1241,8 +1430,12 @@ func Undo(servers []Server) []Finding {
 			f.Suggestion, kept = tomlServer(s, printed[0], printed[1:], env, passEnv)
 			f.Note = tomlNote(s) + hiddenNote(env, nil, hiddenFields(s), kept)
 		} else {
-			f.Suggestion = jsonServerText(s.Name, printed[0], printed[1:], env)
-			f.Note = "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + "." + hiddenNote(env, nil, hiddenFields(s), false)
+			var kept bool
+			f.Suggestion, kept = jsonServerText(s, printed[0], printed[1:], env)
+			f.Note = "Replace the " + quoteJSON(s.Name) + " entry in " + s.Config + "." + hiddenNote(env, nil, hiddenFields(s), kept)
+			if s.byCopilot() && slices.Contains(f.Vars, copilotToken) {
+				f.Note += " Copilot CLI passes a server no GITHUB_TOKEN and fills in no ${GITHUB_TOKEN} in env, so without keyward it starts this server without it."
+			}
 		}
 		findings = append(findings, f)
 	}
@@ -2122,21 +2315,65 @@ func quoteJSON(s string) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func jsonServerText(name, command string, args []string, env map[string]string) string {
+// jsonServerText is s's entry started as command and args with env, keeping each
+// key of s that keyward does not read, with what may be a secret hidden, and
+// reports whether it hid one there. A remote server's type, url and headers go,
+// as every client starts an entry with a command as a local server.
+func jsonServerText(s Server, command string, args []string, env map[string]string) (string, bool) {
 	printed := map[string]string{}
 	for k, v := range env {
 		printed[k] = shown(v)
 	}
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	enc.Encode(struct {
-		Command string            `json:"command"`
-		Args    []string          `json:"args"`
-		Env     map[string]string `json:"env,omitempty"`
-	}{command, args, printed})
-	return quoteJSON(name) + ": " + strings.TrimSuffix(b.String(), "\n")
+	type field struct {
+		key   string
+		value any
+	}
+	fields := []field{{"command", command}, {"args", args}}
+	if len(printed) > 0 {
+		fields = append(fields, field{"env", printed})
+	}
+	hides := false
+	for _, k := range slices.Sorted(maps.Keys(s.other)) {
+		hide := shownArg
+		if migrate.NamesCredential(k) {
+			hide = shown
+		}
+		value := jsonShown(s.other[k], hide)
+		hides = hides || !reflect.DeepEqual(value, s.other[k])
+		fields = append(fields, field{k, value})
+	}
+	lines := make([]string, len(fields))
+	for i, f := range fields {
+		var b bytes.Buffer
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("  ", "  ")
+		enc.Encode(f.value)
+		lines[i] = "  " + quoteJSON(f.key) + ": " + strings.TrimSuffix(b.String(), "\n")
+	}
+	return quoteJSON(s.Name) + ": {\n" + strings.Join(lines, ",\n") + "\n}", hides
+}
+
+// jsonShown is v, as encoding/json read it, with each string that may be a
+// secret hidden, as hide hides it, or a value in an object, as an env value is.
+func jsonShown(v any, hide func(string) string) any {
+	switch v := v.(type) {
+	case string:
+		return hide(v)
+	case []any:
+		items := make([]any, len(v))
+		for i, item := range v {
+			items[i] = jsonShown(item, hide)
+		}
+		return items
+	case map[string]any:
+		values := map[string]any{}
+		for k, item := range v {
+			values[k] = jsonShown(item, shown)
+		}
+		return values
+	}
+	return v
 }
 
 // quoteWords is words as a JSON or TOML array lists them.
@@ -2182,28 +2419,35 @@ func tomlServer(s Server, command string, args []string, env map[string]string, 
 	}
 	hides := false
 	for _, k := range slices.Sorted(maps.Keys(s.other)) {
-		value := tomlValue(s.other[k], true)
-		hides = hides || value != tomlValue(s.other[k], false)
+		value := tomlValue(k, s.other[k], true)
+		hides = hides || value != tomlValue(k, s.other[k], false)
 		fmt.Fprintf(&b, "%s = %s\n", tomlKey(k), value)
 	}
 	return b.String(), hides
 }
 
-// tomlValue writes v, as readTOML read it, as TOML, with what may be a secret
-// hidden if hide is set: Codex reads none in the keys it is for, but a key it
-// does not read, as a header written as Claude Code writes one, can hold one.
-func tomlValue(v any, hide bool) string {
+// tomlValue writes key's value v, as readTOML read it, as TOML, with what may be
+// a secret hidden if hide is set: Codex reads none in the keys it is for, but a
+// key it does not read, as a header written as Claude Code writes one, or one
+// named like a credential, can hold one.
+func tomlValue(key string, v any, hide bool) string {
 	arg, literal := func(s string) string { return s }, func(s string) string { return s }
 	if hide {
 		arg, literal = shownArg, shown
 	}
+	// A credential's text is hidden whole.
+	credential := hide && migrate.NamesCredential(key)
+	text := arg
+	if credential {
+		text = shown
+	}
 	switch v := v.(type) {
 	case string:
-		return quoteJSON(arg(v))
+		return quoteJSON(text(v))
 	case []string:
 		items := make([]string, len(v))
 		for i, item := range v {
-			items[i] = arg(item)
+			items[i] = text(item)
 		}
 		return "[" + quoteWords(items) + "]"
 	case map[string]string:
@@ -2213,8 +2457,17 @@ func tomlValue(v any, hide bool) string {
 		}
 		return "{ " + strings.Join(pairs, ", ") + " }"
 	}
-	return arg(string(v.(rawValue)))
+	// A credential readTOML keeps raw, as a multi-line string, is printed hidden
+	// as a string, which is TOML, but a bare value, as a number, holds none.
+	raw := string(v.(rawValue))
+	if credential && !bareTOML.MatchString(raw) {
+		return quoteJSON(shown(raw))
+	}
+	return arg(raw)
 }
+
+// bareTOML matches a TOML number, boolean or date.
+var bareTOML = regexp.MustCompile(`^(?:true|false|[+-]?(?:inf|nan|[0-9][0-9A-Za-z_.:+-]*))$`)
 
 func tomlNote(s Server) string {
 	note := "Replace the [mcp_servers." + tomlKey(s.Name) + "] table in " + s.Config

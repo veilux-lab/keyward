@@ -78,11 +78,11 @@ what `trap` code writes.
 ## MCP servers
 
 An MCP server that uses a migrated token must start through `keyward run`.
-`keyward mcp` prints the fix for each affected server in Claude Code, Codex and
-Cursor. It hides literal env and header values, and in its arguments and URL a
-token with a known prefix or shaped like a key, user info, query values, header
-text, and the value after an option such as `--api-key`; anything else there is
-printed as written.
+`keyward mcp` prints the fix for each affected server in Claude Code, Codex,
+Cursor and Copilot CLI. It hides literal env and header values, and in its
+arguments and URL a token with a known prefix or shaped like a key, user info,
+query values, header text, and the value after an option such as `--api-key`;
+anything else there is printed as written.
 
 `keyward mcp wrap` makes the changes for Claude Code after a "yes", through its
 own `claude mcp` command, and `keyward mcp unwrap` starts the servers without
@@ -94,6 +94,31 @@ again.
 For a server of another Claude Code project, run wrap in that project's folder,
 which keyward names. A server that reads a variable without naming it in its
 config can't be detected; wrap it by hand the same way.
+
+### Copilot CLI
+
+Copilot CLI starts the servers in `~/.copilot/mcp-config.json` and in a project's
+`.mcp.json`, which Claude Code starts too, or without one, its `.github/mcp.json`.
+Once Copilot is installed, `keyward mcp` checks a `.mcp.json` server by the rules
+of both.
+
+Copilot fills in `$VAR` and `${VAR}` in a server's command itself, from its own
+environment, before `keyward run` or a shell sees them, even in single quotes: a
+migrated variable as its `cap://` text, and `GITHUB_TOKEN`, migrated or not, as
+Copilot's own GitHub token, which is then in a command line. A name its
+environment lacks, as one only the server's env sets, stays as written. So
+`keyward mcp` leaves a server whose command would read a migrated variable or
+`GITHUB_TOKEN` for you to change: set the variable the server reads to its
+`cap://` reference in env, or have a script that reads the value itself read a
+name only env sets. The `'$''{VAR}'` spelling keyward writes in an mcp-remote
+header passes through unchanged.
+
+Copilot also passes a server no `GITHUB_TOKEN`, and leaves `${GITHUB_TOKEN}` in
+env as written. So the fix sets its reference in the server's env, and for a
+server that already runs through `keyward run` and would not get it,
+`keyward mcp` prints that change. A server that reads `GITHUB_TOKEN` unmigrated
+in an mcp-remote header, which Copilot fills with its own token, is left for you
+to change too, as mcp-remote would have no token to fill it with.
 
 ### Remote servers
 
@@ -113,12 +138,13 @@ while the server runs.
 
 Run `keyward mcp`: it lists each server `keyward run` now refuses to start, with
 the fix. A server you wrapped with `--allow-command-line` before needs only
-`keyward mcp wrap`, which makes the fixes for Claude Code. For Codex and Cursor,
-make the edits it prints by hand. `keyward mcp` reads a Cursor project's servers
-only in the folder it runs in and in those of Claude Code's projects, so run it in
-each other folder you open in Cursor too. It does not check a server of another
-client, or one that starts `keyward run` in a way it cannot read, as from a script
-file: start such a server once to see that it still runs.
+`keyward mcp wrap`, which makes the fixes for Claude Code. For Codex, Cursor and
+Copilot CLI, make the edits it prints by hand. `keyward mcp` reads a Cursor or
+Copilot CLI project's servers only in the folder it runs in and in those of
+Claude Code's projects, so run it in each other folder you open in Cursor or
+Copilot CLI too. It does not check a server of another client, or one that starts
+`keyward run` in a way it cannot read, as from a script file: start such a server
+once to see that it still runs.
 
 ## Moving to a new Mac
 

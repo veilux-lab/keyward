@@ -825,7 +825,7 @@ func (c *CLI) doctor(args []string) int {
 	if note := c.skippedNote(gone); note != "" {
 		fmt.Fprintln(c.Stdout, "\n"+note)
 	}
-	if note := c.cursorNote(); note != "" {
+	if note := c.projectsNote(); note != "" {
 		fmt.Fprintln(c.Stdout, "\n"+note)
 	}
 	if n := c.unlinkedAgents(); n > 0 {

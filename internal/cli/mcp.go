@@ -81,7 +81,7 @@ func (c *CLI) mcp(args []string) int {
 			fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("  %s (%s, %s): %s.", f.Name, f.Client, c.tilde(f.Config), strings.Join(warnings(f), "; "))))
 		}
 	}
-	if note := c.cursorNote(); note != "" {
+	if note := c.projectsNote(); note != "" {
 		fmt.Fprintln(c.Stdout, "\n"+note)
 	}
 	if len(findings) > 0 || len(elsewhere) > 0 {
@@ -335,6 +335,9 @@ func (c *CLI) manualReason(manual []mcpconfig.Finding, haveClaude bool, command 
 	if clients["Cursor"] {
 		reasons = append(reasons, "Cursor has no command for this")
 	}
+	if clients[mcpconfig.Copilot] {
+		reasons = append(reasons, "Copilot CLI's mcp command takes env values as arguments, where any process can read them")
+	}
 	return "Change these yourself (" + strings.Join(reasons, "; ") + "):"
 }
 
@@ -357,6 +360,8 @@ func (c *CLI) printFindings(findings []mcpconfig.Finding, verb string, allowComm
 				references += "s"
 			}
 			reason = "would receive the cap:// " + references + " in " + strings.Join(f.Unresolved, ", ") + ", which keyward run is not told to resolve"
+		case len(f.Withheld) > 0:
+			reason = withheldReason(f)
 		case len(f.InArgs) > 0:
 			reason = "reads " + strings.Join(f.InArgs, ", ") + " in its arguments, which keyward run does not resolve"
 		}
@@ -386,6 +391,20 @@ func (c *CLI) printFindings(findings []mcpconfig.Finding, verb string, allowComm
 		}
 		fmt.Fprintf(c.Stdout, "\n  %s\n", c.tilde(note))
 	}
+}
+
+// withheldReason says why f's server would not get GITHUB_TOKEN, and in which
+// keys of its env, unless the only one is GITHUB_TOKEN.
+func withheldReason(f mcpconfig.Finding) string {
+	in := ""
+	if !slices.Equal(f.Withheld, []string{"GITHUB_TOKEN"}) {
+		in = " in " + strings.Join(f.Withheld, ", ")
+	}
+	if f.Client != mcpconfig.Copilot {
+		return "Copilot CLI starts the servers in this project's .mcp.json too, and would not give this one GITHUB_TOKEN" + in +
+			", as it passes a server none and fills in no ${GITHUB_TOKEN} in env"
+	}
+	return "would not get GITHUB_TOKEN" + in + ", as Copilot CLI passes a server none and fills in no ${GITHUB_TOKEN} in env"
 }
 
 // stillRefused reports whether keyward run would refuse to start f's server once
@@ -556,7 +575,7 @@ func credentialsReason(fields []string) string {
 
 // mcpProblems counts findings by kind: the fix is the same, the reason is not.
 func mcpProblems(findings []mcpconfig.Finding) []string {
-	refused, unread, exposed, unchecked := 0, 0, 0, 0
+	refused, unread, exposed, unchecked, withheld := 0, 0, 0, 0, 0
 	for _, f := range findings {
 		switch {
 		case f.Refused && f.Unreadable:
@@ -567,11 +586,16 @@ func mcpProblems(findings []mcpconfig.Finding) []string {
 			unchecked++
 		case len(f.Exposed) > 0:
 			exposed++
+		case len(f.Withheld) > 0 && len(f.Unresolved) == 0:
+			withheld++
 		}
 	}
 	var problems []string
-	if n := len(findings) - refused - unread - exposed - unchecked; n > 0 {
+	if n := len(findings) - refused - unread - exposed - unchecked - withheld; n > 0 {
 		problems = append(problems, fmt.Sprintf("%d MCP server(s) would receive cap:// references instead of values", n))
+	}
+	if withheld > 0 {
+		problems = append(problems, fmt.Sprintf("%d MCP server(s) would not get GITHUB_TOKEN, as Copilot CLI passes a server none and fills in no ${GITHUB_TOKEN} in env", withheld))
 	}
 	if refused > 0 {
 		problems = append(problems, fmt.Sprintf("%d MCP server(s) would put a secret in a command line, so keyward run refuses to start them", refused))
@@ -654,7 +678,7 @@ func (c *CLI) loadAll() ([]mcpconfig.Server, []error) {
 
 // ledgerFolders names the project folders but home that records name servers
 // in, which no tool may list: each whose .mcp.json wrap changed, and each whose
-// Cursor server the user allowed to put a secret in a command line.
+// Cursor or Copilot CLI server the user allowed to put a secret in a command line.
 func ledgerFolders(records []ledger.Record, home string) []string {
 	var folders []string
 	for _, r := range records {
@@ -662,7 +686,7 @@ func ledgerFolders(records []ledger.Record, home string) []string {
 		switch {
 		case r.Kind == ledger.Server && filepath.Base(r.Path) == ".mcp.json":
 			dir = filepath.Dir(r.Path)
-		case r.Kind == ledger.Allowed && filepath.Base(r.Path) == "mcp.json" && filepath.Base(filepath.Dir(r.Path)) == ".cursor":
+		case r.Kind == ledger.Allowed && filepath.Base(r.Path) == "mcp.json" && slices.Contains([]string{".cursor", ".github"}, filepath.Base(filepath.Dir(r.Path))):
 			dir = filepath.Dir(filepath.Dir(r.Path))
 		}
 		if dir != "" && dir != home {
@@ -672,14 +696,27 @@ func ledgerFolders(records []ledger.Record, home string) []string {
 	return folders
 }
 
-// cursorNote says which Cursor projects keyward reads the servers of, as Cursor
-// lists its projects nowhere keyward reads, or is empty if Cursor is not
-// installed.
-func (c *CLI) cursorNote() string {
-	if info, err := os.Stat(filepath.Join(c.Home, ".cursor")); err != nil || !info.IsDir() {
+// projectsNote says which Cursor and Copilot CLI projects keyward reads the
+// servers of, as neither lists its projects anywhere keyward reads, or is empty
+// if neither is installed.
+func (c *CLI) projectsNote() string {
+	var files, clients []string
+	for _, p := range []struct{ dir, file, client string }{
+		{".cursor", "a Cursor project's .cursor/mcp.json", "Cursor"},
+		{".copilot", "a Copilot CLI project's .github/mcp.json", mcpconfig.Copilot},
+	} {
+		if info, err := os.Stat(filepath.Join(c.Home, p.dir)); err == nil && info.IsDir() {
+			files, clients = append(files, p.file), append(clients, p.client)
+		}
+	}
+	if len(files) == 0 {
 		return ""
 	}
-	return "keyward reads a Cursor project's .cursor/mcp.json only in this folder and in those of Claude Code's projects, so run keyward mcp in any other folder you open in Cursor."
+	opened := clients[0]
+	if len(clients) > 1 {
+		opened = "either"
+	}
+	return "keyward reads " + strings.Join(files, " and ") + " only in this folder and in those of Claude Code's projects, so run keyward mcp in any other folder you open in " + opened + "."
 }
 
 // checkServers returns the servers that need a change, and apart from them those

@@ -71,7 +71,7 @@ keyward help                              # commands and options
 ## MCP servers
 
 MCP servers that use a migrated token must start through keyward too.
-`keyward mcp` covers Claude Code, Codex and Cursor.
+`keyward mcp` covers Claude Code, Codex, Cursor and Copilot CLI.
 
 ```sh
 keyward mcp          # list each server that needs a change, with the fix
@@ -79,11 +79,11 @@ keyward mcp wrap     # make the changes for Claude Code, after a "yes"
 keyward mcp unwrap   # start them without keyward again
 ```
 
-For Codex and Cursor, make the edits `keyward mcp` prints. It cannot see a server
-that reads a variable its config does not name; wrap that one by hand.
-`keyward run` refuses to start a server that would put a token in a command line,
-in its URL or as an argument, and `keyward mcp` says how to fix it. After
-upgrading keyward, run `keyward mcp` again.
+For Codex, Cursor and Copilot CLI, make the edits `keyward mcp` prints. It cannot
+see a server that reads a variable its config does not name; wrap that one by
+hand. `keyward run` refuses to start a server that would put a token in a
+command line, in its URL or as an argument, and `keyward mcp` says how to fix it.
+After upgrading keyward, run `keyward mcp` again.
 [More on MCP servers](docs/details.md#mcp-servers).
 
 ## Save your recovery code

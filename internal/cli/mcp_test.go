@@ -1271,6 +1271,52 @@ func TestMCPAndDoctorReadTheCursorServersOfEveryKnownFolder(t *testing.T) {
 	}
 }
 
+// Copilot CLI keeps its servers in ~/.copilot and a project's in its folder's
+// .github/mcp.json, read as Cursor's are, in each folder keyward knows of. wrap
+// prints the changes, saying why, and keyward mcp says which projects it reads.
+func TestMCPReadsCopilotsServersInEveryKnownFolder(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"pagerduty-key": "fake-pagerduty-value"}, nil)
+	home := homed(t, h)
+	project, allowed := filepath.Join(home, "dev", "project"), filepath.Join(home, "dev", "allowed")
+	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"projects": {"`+project+`": {}}}`), 0o600)
+	os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export PD_KEY='cap://pagerduty-key'\n"), 0o644)
+	server := `{"mcpServers": {"pd": {"command": "pd-mcp", "env": {"PD_KEY": "${PD_KEY}"}}}}`
+	for _, config := range []string{filepath.Join(home, ".copilot", "mcp-config.json"), filepath.Join(project, ".github", "mcp.json"), filepath.Join(allowed, ".github", "mcp.json")} {
+		os.MkdirAll(filepath.Dir(config), 0o755)
+		os.WriteFile(config, []byte(server), 0o600)
+	}
+	h.cli.Ledger.Add(ledger.Record{Kind: ledger.Allowed, Path: filepath.Join(allowed, ".github", "mcp.json"), Name: "pd", Text: "PD_KEY"})
+	fakeTools(t, h, home)
+	var printed strings.Builder
+	run := runner(h, &printed)
+	const unread = "keyward reads a Copilot CLI project's .github/mcp.json only in this folder and in those of Claude Code's projects, so run keyward mcp in any other folder you open in Copilot CLI."
+
+	code, out := run("mcp")
+	for _, want := range []string{"(Copilot CLI, ~/.copilot/mcp-config.json)", "(Copilot CLI, ~/dev/project/.github/mcp.json)", "(Copilot CLI, ~/dev/allowed/.github/mcp.json)", "\n" + unread + "\n"} {
+		if code != 1 || !strings.Contains(out, want) {
+			t.Errorf("mcp exit %d, want 1 and %q:\n%s", code, want, out)
+		}
+	}
+	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Change these yourself (Copilot CLI's mcp command takes env values as arguments, where any process can read them):") {
+		t.Errorf("wrap exit %d, want 1 and why it prints the changes:\n%s", code, out)
+	}
+}
+
+// With Cursor and Copilot CLI both installed, one note names the project files of
+// each that keyward reads.
+func TestTheProjectsNoteNamesCursorsAndCopilotsFilesTogether(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	home := homed(t, h)
+	os.Mkdir(filepath.Join(home, ".cursor"), 0o755)
+	os.Mkdir(filepath.Join(home, ".copilot"), 0o755)
+	var printed strings.Builder
+	const note = "keyward reads a Cursor project's .cursor/mcp.json and a Copilot CLI project's .github/mcp.json only in this folder and in those of " +
+		"Claude Code's projects, so run keyward mcp in any other folder you open in either."
+	if code, out := runner(h, &printed)("mcp"); code != 0 || !strings.HasSuffix(out, "\n"+note+"\n") {
+		t.Errorf("mcp exit %d, want 0 and %q:\n%s", code, note, out)
+	}
+}
+
 // Claude Code's CLI cannot run in the folder of a project that no longer exists,
 // as a removed worktree's, and Claude Code would not start its servers. So doctor,
 // keyward mcp and wrap pass over such a project, saying so in one line.
@@ -1869,6 +1915,8 @@ func TestMCPWrapPrintsAVariableAddedToOnly(t *testing.T) {
 			"references in GITHUB_TOKEN, OTHER_KEY", `"--only=PD_KEY,GITHUB_TOKEN,OTHER_KEY"`},
 		{"Cursor", ".cursor/mcp.json", `{"mcpServers": {"pd": {"command": "keyward", "args": ["run", "--only", "PD_KEY", "--", "uvx", "pd-mcp"],
       "env": {"PD_KEY": "cap://pagerduty-key", "OTHER": "${env:OTHER_KEY}"}}}}`, "reference in OTHER", `"PD_KEY,OTHER"`},
+		{"Copilot CLI", ".copilot/mcp-config.json", `{"mcpServers": {"pd": {"command": "keyward", "args": ["run", "--only", "PD_KEY", "--", "uvx", "pd-mcp"],
+      "env": {"PD_KEY": "cap://pagerduty-key", "OTHER": "${OTHER_KEY}"}}}}`, "reference in OTHER", `"PD_KEY,OTHER"`},
 	} {
 		why := "  would receive the cap:// " + tc.references + ", which keyward run is not told to resolve (" + tc.client + ", ~/" + tc.path + ")\n"
 		h := newHarness(t, "", map[string]string{"pagerduty-key": "v", "other-key": "v", "github-token": "v"}, nil)
@@ -1888,6 +1936,44 @@ func TestMCPWrapPrintsAVariableAddedToOnly(t *testing.T) {
 		}
 		if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
 			t.Errorf("%s: doctor exit %d, want 1 and the server reported:\n%s", tc.client, code, out)
+		}
+	}
+}
+
+// Copilot CLI passes a server no GITHUB_TOKEN and leaves ${GITHUB_TOKEN} in env
+// as written, so keyward mcp and doctor say a wrapped server that reads it there
+// would not get it, naming any other key it reads it in, and print the change
+// that sets its reference instead. For a project's server, they say Copilot
+// starts it too.
+func TestMCPSaysACopilotServerWouldNotGetGitHubToken(t *testing.T) {
+	const because = ", as Copilot CLI passes a server none and fills in no ${GITHUB_TOKEN} in env"
+	for _, tc := range []struct{ path, server, why, change string }{
+		{".copilot/mcp-config.json", `{"command": "keyward", "args": ["run", "--", "gh-mcp"], "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}}`,
+			"would not get GITHUB_TOKEN" + because + " (Copilot CLI, ~/.copilot/mcp-config.json)",
+			`In env, change "GITHUB_TOKEN": "${GITHUB_TOKEN}" to "GITHUB_TOKEN": "cap://github-token".`},
+		{".copilot/mcp-config.json", `{"command": "keyward", "args": ["run", "--", "gh-mcp"], "env": {"GH": "${GITHUB_TOKEN}"}}`,
+			"would not get GITHUB_TOKEN in GH" + because + " (Copilot CLI, ~/.copilot/mcp-config.json)",
+			`In env, change "GH": "${GITHUB_TOKEN}" to "GH": "cap://github-token".`},
+		{".mcp.json", `{"command": "keyward", "args": ["run", "--only", "GITHUB_TOKEN", "--", "gh-mcp"]}`,
+			"Copilot CLI starts the servers in this project's .mcp.json too, and would not give this one GITHUB_TOKEN, as it passes a server none " +
+				"and fills in no ${GITHUB_TOKEN} in env (Claude Code, ~/.mcp.json)",
+			`In env, add "GITHUB_TOKEN": "cap://github-token".`},
+	} {
+		h := newHarness(t, "", map[string]string{"github-token": "fake-github-value"}, nil)
+		home := homed(t, h)
+		os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export GITHUB_TOKEN='cap://github-token'\n"), 0o644)
+		os.MkdirAll(filepath.Join(home, ".copilot"), 0o755)
+		os.WriteFile(filepath.Join(home, tc.path), []byte(`{"mcpServers": {"gh": `+tc.server+`}}`), 0o600)
+		fakeTools(t, h, home)
+		var printed strings.Builder
+		run := runner(h, &printed)
+		const problem = "1 MCP server(s) would not get GITHUB_TOKEN" + because
+
+		if code, out := run("mcp"); code != 1 || !strings.Contains(out, problem+".\n") || !strings.Contains(out, "\n  "+tc.why+"\n") || !strings.Contains(out, "\n    "+tc.change+"\n") {
+			t.Errorf("%s: mcp exit %d, want 1, %q, %q and %q:\n%s", tc.path, code, problem, tc.why, tc.change, out)
+		}
+		if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: "+problem+"." {
+			t.Errorf("%s: doctor exit %d, want 1 and the server reported:\n%s", tc.path, code, out)
 		}
 	}
 }

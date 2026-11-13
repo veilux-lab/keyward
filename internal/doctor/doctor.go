@@ -484,6 +484,10 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 	// changes a project's server in its folder, which must still exist.
 	for _, l := range r.Literals {
 		field, _, _ := strings.Cut(l.Field, " (")
+		copilot := "Copilot CLI"
+		if l.Client != mcpconfig.Copilot {
+			copilot += ", which starts a project's .mcp.json servers too,"
+		}
 		fix := "store it with keyward add NAME, write ${VAR} in its place, add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"
 		key, inEnv := strings.CutPrefix(field, "env.")
 		switch name, inHTTPHeaders := strings.CutPrefix(field, "http_headers."); {
@@ -512,6 +516,10 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 			}
 			fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header " + header + ", if the server takes it there, " +
 				"or else write ${VAR} in its place, which wrap puts in mcp-remote's command line and log only if given --allow-command-line; then run keyward mcp wrap"
+			if l.Copilot {
+				fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header as ${VAR}, if the server takes it there, " +
+					"as keyward starts a remote server through mcp-remote, which takes the URL as an argument, where " + copilot + " fills in a ${VAR} itself; then run keyward mcp wrap"
+			}
 		case strings.HasPrefix(l.Field, "args[") && !strings.Contains(l.Field, " ("):
 			// keyward run refuses a secret as an argument unless given
 			// --allow-command-line, but wrap leaves one in a header to mcp-remote.
@@ -522,6 +530,10 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 			fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it " + env + ", if the server reads it from there, " +
 				"or else write ${VAR} in its place, which wrap puts in the server's command line only if given --allow-command-line, unless it is in an mcp-remote --header; " +
 				"then run keyward mcp wrap"
+			if l.Copilot {
+				fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it in env as VAR, if the server reads it from there, " +
+					"as " + copilot + " fills in a ${VAR} in its command itself; then run keyward mcp wrap"
+			}
 		}
 		switch config, _, _ := strings.Cut(l.Config, " (project "); {
 		case mcpconfig.Gone(l.Project):

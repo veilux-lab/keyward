@@ -24,7 +24,7 @@
   <text x="200" y="152" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">📄 ~/.zshrc</text>
   <text x="200" y="182" text-anchor="middle" font-size="13" font-family="Menlo, monospace" fill="#b45309">TOKEN='cap://github-token'</text>
   <text x="200" y="294" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">🤖 AI agent</text>
-  <text x="200" y="322" text-anchor="middle" font-size="14" fill="#64748b">Claude Code · Codex · Cursor</text>
+  <text x="200" y="322" text-anchor="middle" font-size="13" fill="#64748b">Claude Code · Codex · Cursor · Copilot CLI</text>
   <text x="200" y="434" text-anchor="middle" font-size="18" font-weight="700" fill="#0f172a">🔌 MCP client</text>
   <text x="200" y="462" text-anchor="middle" font-size="14" fill="#64748b">starts the MCP servers</text>
 
