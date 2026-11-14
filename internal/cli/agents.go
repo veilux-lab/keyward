@@ -191,13 +191,14 @@ func (c *CLI) printUnlinked() bool {
 	return true
 }
 
-// unlinkedAgents is doctor's count of agents that would miss the instructions.
-func (c *CLI) unlinkedAgents() int {
+// unlinkedAgents is doctor's count of agents that would miss the instructions,
+// and false where there is nothing to count: no home, or no instructions yet.
+func (c *CLI) unlinkedAgents() (int, bool) {
 	if c.Home == "" {
-		return 0
+		return 0, false
 	}
 	if st, err := agents.Default(c.Home).Status(); err != nil || st == agents.Missing {
-		return 0
+		return 0, false
 	}
-	return len(agents.Unlinked(c.Home))
+	return len(agents.Unlinked(c.Home)), true
 }

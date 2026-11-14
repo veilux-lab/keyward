@@ -3,6 +3,7 @@ package cli_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -112,7 +113,7 @@ func TestDoctorMentionsRemainingBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.cli.Run([]string{"doctor"})
-	if !strings.Contains(h.out(), "1 backup(s)") || !strings.Contains(h.out(), "keyward backups") {
+	if !slices.Contains(checklist(h.out()), "! Backups 1 backup(s) from migrate still hold old values; review them with keyward backups") {
 		t.Errorf("doctor did not mention the backup:\n%s", h.out())
 	}
 }

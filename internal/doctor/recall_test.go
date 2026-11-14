@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand/v2"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -520,16 +519,17 @@ func TestDoctorStillListsEveryShapeOfSecretItListed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	listed := map[string]bool{}
+	// holder names what holds each line listed, which its row shows before its label.
+	holder := map[string]string{}
 	for _, p := range r.Plaintext {
-		listed[fmt.Sprintf("%s:%d", p.File, p.Line)] = true
+		holder[fmt.Sprintf("%s:%d", p.File, p.Line)] = p.Name
 	}
 	for _, u := range r.Unmovable {
-		listed[fmt.Sprintf("%s:%d", u.File, u.Line)] = true
+		holder[fmt.Sprintf("%s:%d", u.File, u.Line)] = u.Kind
 	}
 	missed := map[string]int{}
 	for where, p := range at {
-		if !listed[where] {
+		if holder[where] == "" {
 			missed[p.shape+", as "+p.form]++
 		}
 	}
@@ -537,19 +537,20 @@ func TestDoctorStillListsEveryShapeOfSecretItListed(t *testing.T) {
 		t.Errorf("%d of %d fake secrets are not listed: %s", n, perShape, what)
 	}
 
-	// Each entry's label is the line after where it is.
-	entry := regexp.MustCompile(`(?m)^  (/[^\n]*?:[0-9]+)  [^\n]*\n      ([^\n]*)\n`)
+	// Each entry's label follows its tag and what holds it.
+	out := r.Render(doctor.Format{})
 	labelled := 0
-	for _, m := range entry.FindAllStringSubmatch(r.String(), -1) {
-		if p, ok := at[m[1]]; ok {
+	for where, holds := range holder {
+		_, label, ok := strings.Cut(row(out, where+" "), " "+holds+" ")
+		if p, placed := at[where]; ok && placed {
 			labelled++
-			if sharesFour(p.value, m[2]) {
+			if sharesFour(p.value, label) {
 				t.Errorf("the label for %s, as %s, holds part of its value", p.shape, p.form)
 			}
 		}
 	}
-	if labelled != len(listed) {
-		t.Errorf("read the labels of %d entries, want one for each of the %d lines listed", labelled, len(listed))
+	if labelled != len(holder) {
+		t.Errorf("read the labels of %d entries, want one for each of the %d lines listed", labelled, len(holder))
 	}
 }
 

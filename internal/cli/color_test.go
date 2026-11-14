@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -63,5 +65,35 @@ func TestFailuresAreRedOnAColourTerminal(t *testing.T) {
 	h.cli.Run([]string{"service", "status"})
 	if !strings.HasPrefix(h.err(), escape+"31m") || !strings.Contains(h.err(), "launchctl failed") {
 		t.Errorf("stderr = %q, want a red failure", h.err())
+	}
+}
+
+// doctor colours its stdout only on a terminal: each check's icon by how it came
+// out, headings in bold, and locations in cyan.
+func TestDoctorIsColouredOnlyWhenEnabled(t *testing.T) {
+	for _, colour := range []bool{false, true} {
+		h := newHarness(t, "", map[string]string{"alpha": "v"}, nil)
+		home := homed(t, h)
+		h.cli.ColorOut = colour
+		os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export A='cap://alpha'\nexport GITHUB_TOKEN="+leftoverToken+"\nexport BUILD_ID=Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i\n"), 0o644)
+
+		if code := h.cli.Run([]string{"doctor"}); code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
+		}
+		if strings.Contains(h.err(), escape) {
+			t.Errorf("stderr was coloured although only stdout is a terminal:\n%q", h.err())
+		}
+		if !colour {
+			if strings.Contains(h.out(), escape) {
+				t.Errorf("colour without a terminal:\n%q", h.out())
+			}
+			continue
+		}
+		for _, want := range []string{escape + "32m✓" + escape + "0m", escape + "33m!" + escape + "0m", escape + "31m✗" + escape + "0m",
+			"  " + escape + "36m~/.zshrc:2" + escape + "0m  ", escape + "2ma GitHub token" + escape + "0m", escape + "1mkeyward doctor" + escape + "0m"} {
+			if !strings.Contains(h.out(), want) {
+				t.Errorf("stdout lacks %q:\n%q", want, h.out())
+			}
+		}
 	}
 }

@@ -13,6 +13,7 @@
 package doctor
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -98,17 +99,55 @@ type Report struct {
 // range in it as one. Orphans, unknowns and the other values that only may be
 // credentials do not count: they cost a line of output, not a failure.
 func (r *Report) Problems() []string {
-	var problems []string
-	if n := len(r.Dangling); n > 0 {
-		problems = append(problems, fmt.Sprintf("%d reference(s) to secrets that are not in the vault", n))
-	}
-	if n := len(r.Malformed); n > 0 {
-		problems = append(problems, fmt.Sprintf("%d malformed reference(s)", n))
-	}
+	problems := r.brokenReferences()
 	if certain, _ := r.plaintextEntries(); certain.lines > 0 {
 		problems = append(problems, fmt.Sprintf("%d credential(s) in plaintext", certain.lines))
 	}
 	return problems
+}
+
+// brokenReferences names each kind of reference that fails when used, with its
+// count.
+func (r *Report) brokenReferences() []string {
+	var broken []string
+	if n := len(r.Dangling); n > 0 {
+		broken = append(broken, fmt.Sprintf("%d reference(s) to secrets that are not in the vault", n))
+	}
+	if n := len(r.Malformed); n > 0 {
+		broken = append(broken, fmt.Sprintf("%d malformed reference(s)", n))
+	}
+	return broken
+}
+
+// Checks says how each of the report's checks came out, in the order the
+// checklist shows them.
+func (r *Report) Checks() []Check {
+	certain, possible := r.plaintextEntries()
+	stored := fmt.Sprintf("%d secret(s) stored and referenced", len(r.Referenced))
+	references := Check{Pass, "References", stored}
+	if broken := r.brokenReferences(); len(broken) > 0 {
+		references = Check{Fail, "References", stored + "; " + strings.Join(broken, "; ") + ", listed above"}
+	}
+	known := Check{Pass, "Known secrets", "none in plaintext"}
+	if certain.lines > 0 {
+		known = Check{Fail, "Known secrets", fmt.Sprintf("%d credential(s) in plaintext, listed above", certain.lines)}
+	}
+	maybe := Check{Pass, "Maybe secrets", "nothing else looks like one"}
+	if possible.lines > 0 {
+		maybe = Check{Attention, "Maybe secrets", fmt.Sprintf("%d value(s) that may be credentials, listed above", possible.lines)}
+	}
+	var unused []string
+	if n := len(r.Orphaned); n > 0 {
+		unused = append(unused, fmt.Sprintf("%d secret(s) whose source no longer references them", n))
+	}
+	if n := len(r.Unknown); n > 0 {
+		unused = append(unused, fmt.Sprintf("%d secret(s) nothing scanned refers to", n))
+	}
+	unreferenced := Check{Pass, "Unused", "none"}
+	if len(unused) > 0 {
+		unreferenced = Check{Attention, "Unused", strings.Join(unused, "; ") + ", listed above"}
+	}
+	return []Check{references, known, maybe, unreferenced}
 }
 
 // Run scans paths and the configs servers were read from, compares what they
@@ -385,13 +424,35 @@ func sortFindings(f []Finding) {
 	sort.Slice(f, func(i, j int) bool { return f[i].Name < f[j].Name })
 }
 
+// The tags of a row in a list of credentials say how to fix it: migrate moves its
+// value, add stores it, edit means removing it by hand, and an MCP server's fix
+// follows its row.
+const (
+	tagMigrate = "migrate"
+	tagAdd     = "add"
+	tagEdit    = "edit"
+	tagMCP     = "mcp"
+)
+
+// entry is a row of a list of credentials: where it is, its tag, what holds it
+// and why it looks like one. An MCP server's carries its fix, which differs from
+// server to server. file and line place a line's entry, lines counts the lines it
+// names, and paired marks one whose line is listed twice, for its value and for
+// the comment beside it.
+type entry struct {
+	where, tag, what, reason, fix string
+	file                          string
+	line, lines                   int
+	paired                        bool
+}
+
 // listing is the entries of one list in the report, how many lines or MCP fields
-// they name, whether one is a range of lines the user may mark, and whether one is
-// a line the user may mark as holding no secret.
+// they name, whether one is a range of lines the user may mark, whether one is a
+// line the user may mark as holding no secret, and whether one is paired.
 type listing struct {
-	entries          []string
-	lines            int
-	ranges, markable bool
+	entries                  []entry
+	lines                    int
+	ranges, markable, paired bool
 }
 
 // eachLine is what the advice to mark a line adds where l lists a range of lines
@@ -407,30 +468,25 @@ func (l listing) eachLine() string {
 // range.
 const maxGap = 3
 
-// plaintextEntries renders each value that looks like a credential, with how to
-// move it out: those of a known shape, and those that only may be credentials.
-// Nearby text migrate cannot move is listed as one range, as stretches merges it,
-// with those of a known shape if one of its lines is.
+// plaintextEntries lists each value that looks like a credential: those of a
+// known shape, and those that only may be credentials. Nearby text migrate cannot
+// move is listed as one range, as stretches merges it, with those of a known
+// shape if one of its lines is. Lines are listed in file order, and MCP servers
+// after them.
 func (r *Report) plaintextEntries() (certain, possible listing) {
 	// add lists an entry naming lines with those of a known shape if known says one
 	// of them holds one. Marking such an entry's lines would hide a credential, so
 	// that is never advised.
-	add := func(lines int, known, markable bool, where, reason, fix string) {
+	add := func(e entry, known, markable bool) {
 		list := &possible
 		if known {
 			list, markable = &certain, false
 		}
-		list.entries = append(list.entries, fmt.Sprintf("  %s\n      %s\n      %s\n", where, reason, fix))
-		list.lines += lines
-		list.ranges = list.ranges || lines > 1 && markable
+		list.entries = append(list.entries, e)
+		list.lines += e.lines
+		list.ranges = list.ranges || e.lines > 1 && markable
 		list.markable = list.markable || markable
-	}
-	// What only may be a credential is fixed if it is one.
-	unsure := func(known bool, fix string) string {
-		if known {
-			return fix
-		}
-		return "if it is one, " + fix
+		list.paired = list.paired || e.paired
 	}
 	// Marking a line whose comment is listed too would hide the comment as well.
 	type line struct {
@@ -444,40 +500,34 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 		}
 	}
 	for _, p := range r.Plaintext {
-		ref, err := migrate.RefName(p.Name)
-		if err != nil {
-			ref = "NAME"
-		}
-		// keyward add only stores a copy, so the variable is set to the reference too.
-		fix := fmt.Sprintf("store it with keyward add %s and set %s to 'cap://%s'", ref, p.Name, ref)
+		tag := tagAdd
 		if p.Secret {
-			fix = "move it with keyward migrate " + p.File + " (preview with --dry-run), or " + fix
-		} else {
-			fix += "; migrate moves only values it is sure of"
+			tag = tagMigrate
 		}
-		markable := !commented[line{p.File, p.Line}]
-		if !markable && !p.KnownShape {
-			fix += "; before marking its line as holding no secret, remove the comment beside it by hand, which marking would leave alone too"
-		}
-		add(1, p.KnownShape, markable, fmt.Sprintf("%s:%d  %s", p.File, p.Line, p.Name), p.Reason, unsure(p.KnownShape, fix))
+		paired := commented[line{p.File, p.Line}]
+		add(entry{where: fmt.Sprintf("%s:%d", p.File, p.Line), tag: tag, what: p.Name, reason: p.Reason, file: p.File, line: p.Line, lines: 1, paired: paired},
+			p.KnownShape, !paired)
 	}
 	for _, s := range stretches(r.Unmovable, r.Plaintext) {
-		where, reason, fix := fmt.Sprintf("%s:%d  (%s)", s.File, s.Line, s.Kind), migrate.Describe(s.Labels), unsure(s.KnownShape, "remove it by hand in an editor")
+		e := entry{where: fmt.Sprintf("%s:%d", s.File, s.Line), tag: tagEdit, what: s.Kind, reason: migrate.Describe(s.Labels), file: s.File, line: s.Line, lines: s.lines, paired: s.valued}
 		if s.lines > 1 {
-			where, reason = fmt.Sprintf("%s:%d-%d  (%d %s lines)", s.File, s.Line, s.last, s.lines, s.Kind), migrate.Describe(migrate.Kinds(s.Labels))
+			e.where, e.what, e.reason = fmt.Sprintf("%s:%d-%d", s.File, s.Line, s.last), fmt.Sprintf("%d %s lines", s.lines, s.Kind), migrate.Describe(migrate.Kinds(s.Labels))
 		}
-		switch {
-		case s.valued && s.KnownShape:
-			fix = "remove the comment by hand in an editor"
-		case s.valued:
-			fix = "if it is one, remove the comment by hand in an editor; marking the line would leave its value alone too"
-		case s.lines > 1 && s.KnownShape:
-			fix = "remove them by hand in an editor"
-		case s.lines > 1:
-			fix = "for each that is one, remove it by hand in an editor"
-		}
-		add(s.lines, s.KnownShape, !s.valued, where, reason, fix)
+		add(e, s.KnownShape, !s.valued)
 	}
+	// Files keep the order they were read in. A stable sort keeps a value, added
+	// first, before the comment beside it.
+	rank := func(file string) int {
+		if i := slices.Index(r.Scanned, file); i >= 0 {
+			return i
+		}
+		return len(r.Scanned)
+	}
+	byPlace := func(a, b entry) int {
+		return cmp.Or(cmp.Compare(rank(a.file), rank(b.file)), strings.Compare(a.file, b.file), cmp.Compare(a.line, b.line))
+	}
+	slices.SortStableFunc(certain.entries, byPlace)
+	slices.SortStableFunc(possible.entries, byPlace)
 	// keyward run resolves only its environment, so a field outside env reads a
 	// reference through a variable. One in env does too, of its own name: unwrap
 	// and uninstall read it from that, which restoring ~/.zshrc then sets. wrap
@@ -535,13 +585,20 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 					"as " + copilot + " fills in a ${VAR} in its command itself; then run keyward mcp wrap"
 			}
 		}
-		switch config, _, _ := strings.Cut(l.Config, " (project "); {
+		config, _, _ := strings.Cut(l.Config, " (project ")
+		switch {
 		case mcpconfig.Gone(l.Project):
 			fix = "remove the server from " + config + " by hand, with Claude Code closed, as its project's folder no longer exists"
 		case l.Project != "":
 			fix += " in " + l.Project
 		}
-		add(1, l.KnownShape, false, fmt.Sprintf("%s  %s server %s, %s", l.Config, l.Client, l.Server, l.Field), l.Reason, unsure(l.KnownShape, fix))
+		// What only may be a credential is fixed if it is one.
+		if !l.KnownShape {
+			fix = "if it is one, " + fix
+		}
+		// The project Config names after the path follows what holds the value.
+		what := fmt.Sprintf("%s server %s, %s%s", l.Client, l.Server, l.Field, l.Config[len(config):])
+		add(entry{where: config, tag: tagMCP, what: what, reason: l.Reason, fix: fix, lines: 1}, l.KnownShape, false)
 	}
 	return certain, possible
 }
@@ -583,71 +640,6 @@ func stretches(found []Unmovable, plain []Plaintext) []stretch {
 		merged = append(merged, stretch{Unmovable: u, last: u.Line, lines: 1, valued: valued})
 	}
 	return merged
-}
-
-// String renders the report. Problems come first, because a dangling reference
-// breaks a command now while an orphan costs a line of output. The verdict is
-// left to the caller, which has checks of its own to print first.
-func (r *Report) String() string {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "scanned %d file(s):\n", len(r.Scanned))
-	for _, p := range r.Scanned {
-		fmt.Fprintf(&b, "  %s\n", p)
-	}
-	if len(r.Absent) > 0 {
-		fmt.Fprintf(&b, "not read (missing or unreadable):\n")
-		for _, p := range r.Absent {
-			fmt.Fprintf(&b, "  %s\n", p)
-		}
-	}
-
-	if len(r.Dangling) > 0 {
-		fmt.Fprintf(&b, "\n%d reference(s) point at secrets that are not in the vault:\n", len(r.Dangling))
-		for _, d := range r.Dangling {
-			fmt.Fprintf(&b, "  %s:%d  cap://%s\n      keyward add %s\n", d.File, d.Line, d.Name, d.Name)
-		}
-	}
-
-	if len(r.Malformed) > 0 {
-		fmt.Fprintf(&b, "\n%d malformed reference(s), which will fail when used:\n", len(r.Malformed))
-		for _, m := range r.Malformed {
-			fmt.Fprintf(&b, "  %s:%d  cap://%s\n", m.File, m.Line, m.Name)
-		}
-	}
-
-	certain, possible := r.plaintextEntries()
-	if certain.lines > 0 {
-		fmt.Fprintf(&b, "\n%d credential(s) in plaintext:\n%s", certain.lines, strings.Join(certain.entries, ""))
-		// Rotating leaves the vault with the old value. The user makes these changes;
-		// an agent that opens a line reads the secret.
-		b.WriteString("Then rotate each one, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to fix them.\n")
-	}
-	if possible.lines > 0 {
-		fmt.Fprintf(&b, "\n%d value(s) that may be credentials:\n%s", possible.lines, strings.Join(possible.entries, ""))
-		b.WriteString("Rotate each one that is a credential, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to judge them.\n")
-		if possible.markable {
-			b.WriteString("If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, " + possible.eachLine() +
-				"and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n")
-		}
-	}
-
-	if len(r.Orphaned) > 0 {
-		fmt.Fprintf(&b, "\n%d secret(s) whose source no longer references them:\n", len(r.Orphaned))
-		for _, f := range r.Orphaned {
-			fmt.Fprintf(&b, "  %s\n      %s\n      keyward rm %s\n", f.Name, f.Detail, f.Name)
-		}
-	}
-
-	if len(r.Unknown) > 0 {
-		fmt.Fprintf(&b, "\n%d secret(s) nothing scanned refers to. These may still be in use:\n", len(r.Unknown))
-		for _, f := range r.Unknown {
-			fmt.Fprintf(&b, "  %s\n      %s\n", f.Name, f.Detail)
-		}
-	}
-
-	fmt.Fprintf(&b, "\n%d secret(s) stored and referenced.\n", len(r.Referenced))
-	return b.String()
 }
 
 // DefaultPaths returns the files doctor reads when none are given: the shell

@@ -2,7 +2,7 @@ package cli_test
 
 import (
 	"errors"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/veilux-lab/keyward/internal/vault"
@@ -23,7 +23,7 @@ func TestDoctorFailsWhenTheVaultDoesNotOpen(t *testing.T) {
 	if code := h.cli.Run([]string{"doctor"}); code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}
-	if !strings.Contains(h.out(), "The vault does not open") || !strings.Contains(h.out(), "keyward recovery restore") {
+	if want := "✗ Vault does not open: keyward.vault does not match the vault key in your Keychain; if this vault came from another Mac, run: keyward recovery restore"; !slices.Contains(checklist(h.out()), want) {
 		t.Errorf("output:\n%s", h.out())
 	}
 }
@@ -32,7 +32,7 @@ func TestDoctorSaysTheVaultOpens(t *testing.T) {
 	h := newHarness(t, "", map[string]string{"github-token": "v"}, nil)
 	homed(t, h)
 	h.cli.Run([]string{"doctor"})
-	if !strings.Contains(h.out(), "The vault opens with its key") {
+	if !slices.Contains(checklist(h.out()), "✓ Vault opens with its key") {
 		t.Errorf("output:\n%s", h.out())
 	}
 }

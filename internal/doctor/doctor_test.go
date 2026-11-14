@@ -38,6 +38,11 @@ func store(t *testing.T, entries map[string]string) *vault.Memory {
 	return s
 }
 
+// printed is all doctor prints of r, plain.
+func printed(r *doctor.Report) string {
+	return r.Render(doctor.Format{}) + r.Summary(doctor.Format{}, r.Checks(), nil) + doctor.Format{}.Verdict(r.Checks(), r.Problems())
+}
+
 func names(findings []doctor.Finding) []string {
 	out := make([]string, 0, len(findings))
 	for _, f := range findings {
@@ -94,8 +99,8 @@ func TestReportNeverEchoesFileContents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if strings.Contains(r.String(), secret) {
-		t.Errorf("the report echoed a plaintext secret:\n%s", r.String())
+	if out := printed(r); strings.Contains(out, secret) {
+		t.Errorf("the report echoed a plaintext secret:\n%s", out)
 	}
 }
 
@@ -122,8 +127,8 @@ func TestDanglingReferences(t *testing.T) {
 	if len(r.Problems()) == 0 {
 		t.Error("Problems() is empty with a dangling reference")
 	}
-	if !strings.Contains(r.String(), "keyward add absent") {
-		t.Errorf("the report does not say how to fix it:\n%s", r.String())
+	if out := r.Render(doctor.Format{}); !strings.Contains(out, "keyward add absent") {
+		t.Errorf("the report does not say how to fix it:\n%s", out)
 	}
 }
 
@@ -177,16 +182,24 @@ func TestACredentialInPlaintextIsAProblem(t *testing.T) {
 	if got := strings.Join(r.Problems(), "; "); got != "2 credential(s) in plaintext" {
 		t.Errorf("Problems() = %q", got)
 	}
-	out := r.String()
+	out := printed(r)
+	if got, want := row(out, rc+":2 "), rc+":2 migrate GITHUB_TOKEN a GitHub token"; got != want {
+		t.Errorf("the row for GITHUB_TOKEN reads %q, want %q:\n%s", got, want, out)
+	}
+	if got, want := row(out, env+":1 "), env+":1 migrate DATABASE_URL the value is a URL containing credentials"; got != want {
+		t.Errorf("the row for DATABASE_URL reads %q, want %q:\n%s", got, want, out)
+	}
 	for _, want := range []string{
-		rc + ":2  GITHUB_TOKEN",
-		"move it with keyward migrate " + rc + " (preview with --dry-run), or store it with keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'\n",
-		env + ":1  DATABASE_URL",
-		"Then rotate each one, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to fix them.\n",
+		"move it with keyward migrate on the file it is in (preview with --dry-run), or store it with keyward add NAME and set the variable to 'cap://NAME' " +
+			"e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'",
 	} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(flat(out), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
+	}
+	if want := "\n  Then rotate each one, and store its new value with keyward add --force NAME.\n" +
+		"  AI agents must not open these lines or print these configs; ask the user to fix them.\n"; !strings.Contains(out, want) {
+		t.Errorf("the report lacks %q:\n%s", want, out)
 	}
 	if strings.Contains(out, migrate.IgnoreMarker) {
 		t.Errorf("the report advises marking a credential's line:\n%s", out)
@@ -223,8 +236,8 @@ func TestValuesThatMayBeCredentialsAreListedNotFailed(t *testing.T) {
 	if p := r.Problems(); len(p) > 0 {
 		t.Errorf("Problems() = %v, want none", p)
 	}
-	out := r.String()
-	if !strings.Contains(out, "6 value(s) that may be credentials") || !strings.Contains(out, "# "+migrate.IgnoreMarker+" yourself, and keyward leaves the line alone") {
+	out := r.Render(doctor.Format{})
+	if !strings.Contains(out, "! 6 value(s) that may be credentials\n") || !strings.Contains(flat(out), "# "+migrate.IgnoreMarker+" yourself, and keyward leaves the line alone") {
 		t.Errorf("the report does not list them with a way to mark one as no secret:\n%s", out)
 	}
 	if strings.Contains(out, "in plaintext") {
@@ -260,16 +273,19 @@ func TestACredentialMigrateCannotMoveIsAProblem(t *testing.T) {
 	if got := strings.Join(r.Problems(), "; "); got != "4 credential(s) in plaintext" {
 		t.Errorf("Problems() = %q", got)
 	}
-	out := r.String()
-	for _, want := range []string{
-		rc + ":1  (trailer)\n      a GitHub token\n      remove it by hand in an editor\n",
-		rc + ":2  (comment)",
-		rc + ":3  (alias)",
-		env + ":1  (unsupported syntax)",
+	out := printed(r)
+	for start, want := range map[string]string{
+		rc + ":1 ":  rc + ":1 edit trailer a GitHub token",
+		rc + ":2 ":  rc + ":2 edit comment a GitHub token",
+		rc + ":3 ":  rc + ":3 edit alias a GitHub token",
+		env + ":1 ": env + ":1 edit unsupported syntax a URL with a password",
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the report lacks %q:\n%s", want, out)
+		if got := row(out, start); got != want {
+			t.Errorf("the row reads %q, want %q:\n%s", got, want, out)
 		}
+	}
+	if want := "To fix each: edit remove it by hand in an editor Then rotate"; !strings.Contains(flat(out), want) {
+		t.Errorf("the report lacks %q:\n%s", want, out)
 	}
 	for _, value := range []string{githubToken, dbPassword} {
 		if strings.Contains(out, value) {
@@ -302,13 +318,20 @@ func TestTextMigrateCannotMoveIsListedWhenItOnlyMayBeACredential(t *testing.T) {
 	if p := r.Problems(); len(p) > 0 {
 		t.Errorf("Problems() = %v, want none", p)
 	}
-	out := r.String()
-	for _, want := range []string{"4 value(s) that may be credentials", rc + ":2  (alias)\n      a random 36-character token\n      if it is one, remove it by hand in an editor\n",
-		"Rotate each one that is a credential, and store its new value with keyward add --force NAME. AI agents must not open these lines or print these configs; ask the user to judge them.\n",
-		"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not.\n"} {
-		if !strings.Contains(out, want) {
+	out := r.Render(doctor.Format{})
+	if got, want := row(out, rc+":2 "), rc+":2 edit alias a random 36-character token"; got != want {
+		t.Errorf("the row reads %q, want %q:\n%s", got, want, out)
+	}
+	for _, want := range []string{"! 4 value(s) that may be credentials", "If one is a credential: edit remove it by hand in an editor Rotate",
+		"Rotate each one that is a credential, and store its new value with keyward add --force NAME. " +
+			"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not. " +
+			"AI agents must not open these lines or print these configs; ask the user to judge them."} {
+		if !strings.Contains(flat(out), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
+	}
+	if !strings.HasSuffix(out, "\n  AI agents must not open these lines or print these configs; ask the user to judge them.\n") {
+		t.Errorf("the report does not end with what AI agents must not do:\n%s", out)
 	}
 	if strings.Contains(out, "in plaintext") {
 		t.Errorf("the report calls them credentials:\n%s", out)
@@ -380,12 +403,11 @@ func TestDoctorSaysWhatEachLineHoldsWithoutShowingIt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		out := r.String()
-		if strings.Contains(out, tc.value) {
+		if strings.Contains(printed(r), tc.value) {
 			t.Errorf("the report for %s printed its value", tc.label)
 			continue
 		}
-		if !strings.Contains(out, "\n      "+tc.label+"\n") {
+		if out := r.Render(doctor.Format{Home: filepath.Dir(rc)}); !strings.Contains(out, "  "+tc.label+"\n") {
 			t.Errorf("the report does not say %q:\n%s", tc.label, out)
 		}
 	}
@@ -419,21 +441,23 @@ func TestNearbyLinesOfOneKindAreListedAsOneRange(t *testing.T) {
 	if got := strings.Join(r.Problems(), "; "); got != "5 credential(s) in plaintext" {
 		t.Errorf("Problems() = %q", got)
 	}
-	out := r.String()
+	out := printed(r)
 	for _, want := range []string{
-		"5 credential(s) in plaintext:\n" +
-			"  " + rc + ":1-4  (3 comment lines)\n      AWS access key IDs and AWS secret keys\n      remove them by hand in an editor\n" +
-			"  " + rc + ":5  (alias)\n      a GitHub token\n      remove it by hand in an editor\n" +
-			"  " + rc + ":11  (comment)\n      an AWS access key ID and an AWS secret key\n      remove it by hand in an editor\n",
-		"2 value(s) that may be credentials:\n" +
-			"  " + rc + ":6-7  (2 comment lines)\n      runs of 32 hex characters\n      for each that is one, remove it by hand in an editor\n",
+		"✗ 5 credential(s) in plaintext " +
+			rc + ":1-4 edit 3 comment lines AWS access key IDs and AWS secret keys " +
+			rc + ":5 edit alias a GitHub token " +
+			rc + ":11 edit comment an AWS access key ID and an AWS secret key " +
+			"To fix each: edit remove it by hand in an editor (in a range, every line) Then rotate",
+		"! 2 value(s) that may be credentials " +
+			rc + ":6-7 edit 2 comment lines runs of 32 hex characters " +
+			"If one is a credential: edit remove it by hand in an editor (in a range, each line that is one) Rotate",
 		"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, marking each line of a range,",
 	} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(flat(out), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
 	}
-	if n := strings.Count(out, "marking each line of a range"); n != 1 {
+	if n := strings.Count(flat(out), "marking each line of a range"); n != 1 {
 		t.Errorf("the report advises marking each line of a range %d times, want once, for the values that may be credentials:\n%s", n, out)
 	}
 	if n := strings.Count(out, migrate.IgnoreMarker); n != 1 {
@@ -467,10 +491,10 @@ func TestARangeHoldingACredentialIsListedWithTheCredentials(t *testing.T) {
 	if got := strings.Join(r.Problems(), "; "); got != "6 credential(s) in plaintext" {
 		t.Errorf("Problems() = %q, want each line of the range, as the heading counts them", got)
 	}
-	out := r.String()
-	want := "\n6 credential(s) in plaintext:\n  " + rc + ":1-10  (6 comment lines)\n      AWS access key IDs and AWS secret keys\n" +
-		"      remove them by hand in an editor\nThen rotate "
-	if !strings.Contains(out, want) {
+	out := r.Render(doctor.Format{})
+	want := "✗ 6 credential(s) in plaintext " + rc + ":1-10 edit 6 comment lines AWS access key IDs and AWS secret keys " +
+		"To fix each: edit remove it by hand in an editor (in a range, every line) Then rotate "
+	if !strings.Contains(flat(out), want) {
 		t.Errorf("the report does not list the pairs as one range of credentials:\n%s", out)
 	}
 	if n := strings.Count(out, "rotate"); n != 1 {
@@ -497,11 +521,11 @@ func TestNothingHoldingACredentialIsAdvisedToBeMarked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
+	out := printed(r)
 	if !strings.Contains(out, "2 comment lines") {
 		t.Fatalf("the report does not list the pair as one range:\n%s", out)
 	}
-	if strings.Contains(out, migrate.IgnoreMarker) || strings.Contains(out, "marking") {
+	if strings.Contains(out, migrate.IgnoreMarker) || strings.Contains(strings.ToLower(out), "marking") {
 		t.Errorf("the report advises marking a line holding a credential:\n%s", out)
 	}
 }
@@ -524,14 +548,14 @@ func TestARangeNamesEachKindItHoldsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
-	for _, want := range []string{
-		rc + ":1-5  (5 comment lines)\n      runs of 32 hex characters, a random 36-character token, a GitHub token and " +
-			"30 characters mixing letters, digits and symbols\n",
-		rc + ":9-10  (2 comment lines)\n      values named like credentials\n",
+	out := r.Render(doctor.Format{})
+	for start, want := range map[string]string{
+		rc + ":1-5 ": rc + ":1-5 edit 5 comment lines runs of 32 hex characters, a random 36-character token, a GitHub token and " +
+			"30 characters mixing letters, digits and symbols",
+		rc + ":9-10 ": rc + ":9-10 edit 2 comment lines values named like credentials",
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the report lacks %q:\n%s", want, out)
+		if got := row(out, start); got != want {
+			t.Errorf("the row reads %q, want %q:\n%s", got, want, out)
 		}
 	}
 }
@@ -550,8 +574,8 @@ func TestARangeNamesAKindOfSeveralLengthsWithoutThem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	want := rc + ":1-6  (6 comment lines)\n      random tokens, runs of hex characters and values mixing letters, digits and symbols\n"
-	if out := r.String(); !strings.Contains(out, want) {
+	want := rc + ":1-6 edit 6 comment lines random tokens, runs of hex characters and values mixing letters, digits and symbols"
+	if out := r.Render(doctor.Format{}); row(out, rc+":1-6 ") != want {
 		t.Errorf("the report lacks %q:\n%s", want, out)
 	}
 }
@@ -570,8 +594,8 @@ func TestARangeSpansNoLineListedApart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
-	entry := regexp.MustCompile(regexp.QuoteMeta(rc) + `:([0-9]+)(?:-([0-9]+))?  `)
+	out := r.Render(doctor.Format{})
+	entry := regexp.MustCompile(regexp.QuoteMeta(rc) + `:([0-9]+)(?:-([0-9]+))?\s`)
 	var spans [][2]int
 	for _, m := range entry.FindAllStringSubmatch(out, -1) {
 		first, _ := strconv.Atoi(m[1])
@@ -593,10 +617,11 @@ func TestARangeSpansNoLineListedApart(t *testing.T) {
 	}
 }
 
-// A comment beside a value that is listed is listed alone, in no range, and the
-// advice is to remove it whatever it holds: marking its line would leave the value
-// alone too. The value's advice says the same of the comment. Neither speaks of
-// marking where it holds a credential of a known shape.
+// A comment beside a value that is listed is listed alone, in no range, after the
+// value, and is removed by hand whatever it holds. Marking its line would leave
+// the value alone too, so the values that may be credentials say a line listed
+// twice is marked only once neither holds a secret. The credentials never speak of
+// marking.
 func TestACommentBesideAListedValueIsListedAlone(t *testing.T) {
 	rc := write(t, t.TempDir(), ".zshrc", "export A='cap://alpha' # was "+hex32+"\n"+
 		"export GITHUB_TOKEN="+githubToken+" # was "+hex32+"\n"+
@@ -608,33 +633,36 @@ func TestACommentBesideAListedValueIsListedAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
-	const alone = "remove the comment by hand in an editor; marking the line would leave its value alone too\n"
+	out := r.Render(doctor.Format{})
+	sure, unsure := section(out, "✗ "), section(out, "! ")
 	for _, want := range []string{
-		rc + ":1  (trailer)\n      32 hex characters\n      if it is one, remove it by hand in an editor\n",
-		rc + ":2  (trailer)\n      32 hex characters\n      if it is one, " + alone,
-		rc + ":2  GITHUB_TOKEN\n      a GitHub token\n      move it with keyward migrate " + rc + " (preview with --dry-run), " +
-			"or store it with keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'\n",
-		rc + ":3  (trailer)\n      a GitHub token\n      remove it by hand in an editor\n",
-		rc + ":4  (trailer)\n      a GitHub token\n      remove the comment by hand in an editor\n",
-		rc + ":4  BUILD_ID\n      a random 36-character token\n      if it is one, store it with keyward add build-id and set BUILD_ID " +
-			"to 'cap://build-id'; migrate moves only values it is sure of" + commentFirst,
-		rc + ":5  (trailer)\n      32 hex characters\n      if it is one, remove it by hand in an editor\n",
+		rc + ":2 migrate GITHUB_TOKEN a GitHub token " + rc + ":3 edit trailer a GitHub token " + rc + ":4 edit trailer a GitHub token " +
+			"To fix each: migrate move it with keyward migrate " + rc + " (preview with --dry-run), or store it with keyward add NAME and set the variable to 'cap://NAME' " +
+			"edit remove it by hand in an editor e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token' Then rotate",
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the report lacks %q:\n%s", want, out)
+		if !strings.Contains(flat(sure), want) {
+			t.Errorf("the credentials lack %q:\n%s", want, sure)
 		}
 	}
-	if sure, _, _ := strings.Cut(out, "may be credentials"); strings.Contains(sure, "marking") || strings.Contains(sure, migrate.IgnoreMarker) {
+	for _, want := range []string{
+		rc + ":1 edit trailer 32 hex characters " + rc + ":2 edit trailer 32 hex characters " + rc + ":4 add BUILD_ID a random 36-character token " +
+			rc + ":5 edit trailer 32 hex characters " +
+			"If one is a credential: add store it with keyward add NAME and set the variable to 'cap://NAME'; migrate moves only values it is sure of " +
+			"edit remove it by hand in an editor e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' Rotate",
+		listedTwice,
+	} {
+		if !strings.Contains(flat(unsure), want) {
+			t.Errorf("the values lack %q:\n%s", want, unsure)
+		}
+	}
+	if strings.Contains(strings.ToLower(sure), "marking") || strings.Contains(sure, migrate.IgnoreMarker) {
 		t.Errorf("the report advises marking a line that fails doctor:\n%s", out)
 	}
 }
 
-// commentFirst ends the advice for a value whose line's comment is listed too.
-const commentFirst = "; before marking its line as holding no secret, remove the comment beside it by hand, which marking would leave alone too\n"
-
 // Only a comment beside a listed value fails doctor here. Marking the line, for the
-// comment or the value, would hide both, so neither list advises it.
+// comment or the value, would hide both, so neither list advises it, and the
+// values say why.
 func TestNothingAdvisesMarkingACommentBesideAListedValue(t *testing.T) {
 	rc := write(t, t.TempDir(), ".zshrc", "export BUILD_ID="+mixedToken+" # was "+githubToken+"\n")
 
@@ -642,15 +670,16 @@ func TestNothingAdvisesMarkingACommentBesideAListedValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
-	if !strings.Contains(out, "1 credential(s) in plaintext") || !strings.Contains(out, "BUILD_ID\n") {
+	out := r.Render(doctor.Format{})
+	if !strings.Contains(out, "✗ 1 credential(s) in plaintext\n") || !strings.Contains(row(section(out, "! "), rc+":1 "), " add BUILD_ID ") {
 		t.Fatalf("the report does not list the line's comment and value:\n%s", out)
 	}
 	if strings.Contains(out, migrate.IgnoreMarker) {
 		t.Errorf("the report advises marking a line whose comment fails doctor:\n%s", out)
 	}
-	if !strings.Contains(out, "migrate moves only values it is sure of"+commentFirst) {
-		t.Errorf("the advice for the value does not say to remove the comment first:\n%s", out)
+	if !strings.Contains(flat(section(out, "! ")), "migrate moves only values it is sure of e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' Rotate each one that is a credential, "+
+		"and store its new value with keyward add --force NAME. "+listedTwice) {
+		t.Errorf("the advice for the value does not say to mark the line only once neither holds a secret:\n%s", out)
 	}
 }
 
@@ -714,9 +743,10 @@ func TestOnlyAJWTOfTheValuesStartingEyJFailsDoctor(t *testing.T) {
 	if got := strings.Join(r.Problems(), "; "); got != "1 credential(s) in plaintext" {
 		t.Errorf("Problems() = %q", got)
 	}
-	if want := "1 value(s) that may be credentials:\n  " + rc + ":2  SPLUNK_MCP_TOKEN\n      base64-encoded JSON\n" +
-		"      if it is one, move it with keyward migrate " + rc; !strings.Contains(r.String(), want) {
-		t.Errorf("the report lacks %q:\n%s", want, r.String())
+	out := r.Render(doctor.Format{})
+	if want := "! 1 value(s) that may be credentials " + rc + ":2 migrate SPLUNK_MCP_TOKEN base64-encoded JSON " +
+		"If one is a credential: migrate move it with keyward migrate " + rc + " (preview"; !strings.Contains(flat(out), want) {
+		t.Errorf("the report lacks %q:\n%s", want, out)
 	}
 }
 
@@ -730,13 +760,14 @@ func TestTheAdviceForAPossibleCredentialSaysHowToMoveIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
+	out := r.Render(doctor.Format{})
 	for _, want := range []string{
-		rc + ":1  MY_SERVICE_TOKEN\n      the variable name suggests a credential\n      if it is one, move it with keyward migrate " + rc +
-			" (preview with --dry-run), or store it with keyward add my-service-token and set MY_SERVICE_TOKEN to 'cap://my-service-token'\n",
-		"if it is one, store it with keyward add build-id and set BUILD_ID to 'cap://build-id'; migrate moves only values it is sure of\n",
+		rc + ":1 migrate MY_SERVICE_TOKEN the variable name suggests a credential " + rc + ":2 add BUILD_ID a random 36-character token " +
+			"If one is a credential: migrate move it with keyward migrate " + rc + " (preview with --dry-run), or store it with keyward add NAME and set the variable to 'cap://NAME' " +
+			"add store it with keyward add NAME and set the variable to 'cap://NAME'; migrate moves only values it is sure of " +
+			"e.g. keyward add my-service-token and set MY_SERVICE_TOKEN to 'cap://my-service-token' Rotate",
 	} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(flat(out), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
 	}
@@ -790,16 +821,17 @@ func TestCredentialsInMCPServersAreReported(t *testing.T) {
 	if got := strings.Join(r.Problems(), "; "); got != "1 credential(s) in plaintext" {
 		t.Errorf("Problems() = %q", got)
 	}
-	out := r.String()
-	for _, want := range []string{
-		"/home/someone/.claude.json  Claude Code server github, env.GITHUB_PERSONAL_ACCESS_TOKEN",
-		"store it with keyward add NAME, write ${GITHUB_PERSONAL_ACCESS_TOKEN} in its place, add export GITHUB_PERSONAL_ACCESS_TOKEN='cap://NAME' to ~/.zshrc, and run keyward mcp wrap\n",
-		"1 value(s) that may be credentials",
-		"Claude Code server github, env.API_KEY",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the report lacks %q:\n%s", want, out)
-		}
+	out := printed(r)
+	if got, want := row(out, "server github, env.GITHUB_PERSONAL_ACCESS_TOKEN"), "/home/someone/.claude.json mcp Claude Code server github, env.GITHUB_PERSONAL_ACCESS_TOKEN a GitHub token "+
+		"store it with keyward add NAME, write ${GITHUB_PERSONAL_ACCESS_TOKEN} in its place, add export GITHUB_PERSONAL_ACCESS_TOKEN='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"; got != want {
+		t.Errorf("the row reads %q, want %q:\n%s", got, want, out)
+	}
+	if !strings.Contains(section(out, "! 1 value(s) that may be credentials"), "Claude Code server github, env.API_KEY\n") {
+		t.Errorf("the report does not list env.API_KEY as a value that may be a credential:\n%s", out)
+	}
+	// Each server's fix is under its row, which leaves a legend nothing to list.
+	if strings.Contains(out, "To fix each:") || strings.Contains(out, "If one is a credential:") {
+		t.Errorf("a legend lists no fix:\n%s", out)
 	}
 	for _, value := range []string{githubToken, namedValue} {
 		if strings.Contains(out, value) {
@@ -814,16 +846,16 @@ func TestCredentialsInMCPServersAreReported(t *testing.T) {
 // uninstall then sets to the value, in each client's own way.
 func TestTheAdviceForACredentialInEnvUsesAVariableOfTheSameName(t *testing.T) {
 	for client, want := range map[string]string{
-		"Claude Code": "store it with keyward add NAME, write ${DD_APP_KEY} in its place, add export DD_APP_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap\n",
-		"Cursor":      "store it with keyward add NAME, write ${env:DD_APP_KEY} in its place, add export DD_APP_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap\n",
-		"Codex":       "store it with keyward add NAME, remove it and add \"DD_APP_KEY\" to env_vars, add export DD_APP_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap\n",
+		"Claude Code": "store it with keyward add NAME, write ${DD_APP_KEY} in its place, add export DD_APP_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap",
+		"Cursor":      "store it with keyward add NAME, write ${env:DD_APP_KEY} in its place, add export DD_APP_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap",
+		"Codex":       "store it with keyward add NAME, remove it and add \"DD_APP_KEY\" to env_vars, add export DD_APP_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap",
 	} {
 		servers := []mcpconfig.Server{{Client: client, Config: "/home/someone/config", Name: "datadog", Env: map[string]string{"DD_APP_KEY": githubToken}}}
 		r, err := doctor.Run(vault.NewMemory(), nil, servers)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		if out := r.String(); !strings.Contains(out, want) {
+		if out := r.Render(doctor.Format{}); !strings.HasSuffix(row(out, "server datadog, env.DD_APP_KEY"), " a GitHub token "+want) {
 			t.Errorf("%s: the report lacks %q:\n%s", client, want, out)
 		}
 	}
@@ -834,21 +866,21 @@ func TestTheAdviceForACredentialInEnvUsesAVariableOfTheSameName(t *testing.T) {
 // credential in a URL is to send it in a header, if the server takes it there, and
 // otherwise says what --allow-command-line exposes.
 func TestTheAdviceForACredentialInAURLSaysToSendItInAHeader(t *testing.T) {
-	const otherwise = ", or else write ${VAR} in its place, which wrap puts in mcp-remote's command line and log only if given --allow-command-line; then run keyward mcp wrap\n"
+	const otherwise = ", or else write ${VAR} in its place, which wrap puts in mcp-remote's command line and log only if given --allow-command-line; then run keyward mcp wrap"
 	for client, want := range map[string]string{
 		"Claude Code": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header as ${VAR}, if the server takes it there" + otherwise,
 		"Codex":       "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header with env_http_headers = { \"HEADER\" = \"VAR\" }, if the server takes it there" + otherwise,
 		// mcp-remote takes the URL as an argument, where Copilot fills a ${VAR} in
 		// itself, so there is no otherwise.
 		"Copilot CLI": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and send it in a header as ${VAR}, if the server takes it there, " +
-			"as keyward starts a remote server through mcp-remote, which takes the URL as an argument, where Copilot CLI fills in a ${VAR} itself; then run keyward mcp wrap\n",
+			"as keyward starts a remote server through mcp-remote, which takes the URL as an argument, where Copilot CLI fills in a ${VAR} itself; then run keyward mcp wrap",
 	} {
 		servers := []mcpconfig.Server{{Client: client, Config: "/home/someone/config", Name: "exa", URL: "https://mcp.example.com/mcp?token=" + githubToken}}
 		r, err := doctor.Run(vault.NewMemory(), nil, servers)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		if out := r.String(); !strings.Contains(out, "server exa, url\n") || !strings.Contains(out, want) {
+		if out := r.Render(doctor.Format{}); !strings.Contains(out, "server exa, url\n") || !strings.HasSuffix(row(out, "server exa, url"), " "+want) {
 			t.Errorf("%s: the report lacks %q:\n%s", client, want, out)
 		}
 	}
@@ -861,18 +893,18 @@ func TestTheAdviceForACredentialInAURLSaysToSendItInAHeader(t *testing.T) {
 // mcp-remote fills in one in a --header itself.
 func TestTheAdviceForACredentialInArgsSaysToPassItInEnv(t *testing.T) {
 	const otherwise = ", if the server reads it from there, or else write ${VAR} in its place, which wrap puts in the server's command line only if given " +
-		"--allow-command-line, unless it is in an mcp-remote --header; then run keyward mcp wrap\n"
+		"--allow-command-line, unless it is in an mcp-remote --header; then run keyward mcp wrap"
 	for client, want := range map[string]string{
 		"Claude Code": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it in env as VAR" + otherwise,
 		"Codex":       "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it with env_vars = [\"VAR\"]" + otherwise,
-		"Copilot CLI": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it in env as VAR, if the server reads it from there, as Copilot CLI fills in a ${VAR} in its command itself; then run keyward mcp wrap\n",
+		"Copilot CLI": "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it in env as VAR, if the server reads it from there, as Copilot CLI fills in a ${VAR} in its command itself; then run keyward mcp wrap",
 	} {
 		servers := []mcpconfig.Server{{Client: client, Config: "/home/someone/config", Name: "slack", Command: "npx", Args: []string{"-y", "slack-mcp", "--token", githubToken}}}
 		r, err := doctor.Run(vault.NewMemory(), nil, servers)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		if out := r.String(); !strings.Contains(out, "server slack, args[3]\n") || !strings.Contains(out, want) {
+		if out := r.Render(doctor.Format{}); !strings.Contains(out, "server slack, args[3]\n") || !strings.HasSuffix(row(out, "server slack, args[3]"), " "+want) {
 			t.Errorf("%s: the report lacks %q:\n%s", client, want, out)
 		}
 	}
@@ -900,12 +932,13 @@ func TestTheAdviceForAProjectsServerIsCopilotsOnceItIsInstalled(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	const shared = "Copilot CLI, which starts a project's .mcp.json servers too,"
-	for _, want := range []string{
-		"and pass it in env as VAR, if the server reads it from there, as " + shared + " fills in a ${VAR} in its command itself; then run keyward mcp wrap in " + workdir + "\n",
-		"and send it in a header as ${VAR}, if the server takes it there, as keyward starts a remote server through mcp-remote, which takes the URL as an argument, " +
-			"where " + shared + " fills in a ${VAR} itself; then run keyward mcp wrap in " + workdir + "\n",
+	out := r.Render(doctor.Format{})
+	for start, want := range map[string]string{
+		"server slack, args[3]": "and pass it in env as VAR, if the server reads it from there, as " + shared + " fills in a ${VAR} in its command itself; then run keyward mcp wrap in " + workdir,
+		"server exa, url": "and send it in a header as ${VAR}, if the server takes it there, as keyward starts a remote server through mcp-remote, which takes the URL as an argument, " +
+			"where " + shared + " fills in a ${VAR} itself; then run keyward mcp wrap in " + workdir,
 	} {
-		if out := r.String(); !strings.Contains(out, want) {
+		if !strings.HasSuffix(row(out, start), " "+want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
 	}
@@ -927,17 +960,15 @@ func TestTheAdviceForACredentialInAProjectsServerNamesWhereToChangeIt(t *testing
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
-	for _, want := range []string{
-		"add export GITHUB_PERSONAL_ACCESS_TOKEN='cap://NAME' to ~/.zshrc, and run keyward mcp wrap in " + project + "\n",
-		"server removed-worktree, env.GITHUB_PERSONAL_ACCESS_TOKEN\n      a GitHub token\n" +
-			"      remove the server from " + config + " by hand, with Claude Code closed, as its project's folder no longer exists\n",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the report lacks %q:\n%s", want, out)
-		}
+	out := r.Render(doctor.Format{})
+	if want := " add export GITHUB_PERSONAL_ACCESS_TOKEN='cap://NAME' to ~/.zshrc, and run keyward mcp wrap in " + project; !strings.HasSuffix(row(out, "(project "+project+")"), want) {
+		t.Errorf("the report lacks %q:\n%s", want, out)
 	}
-	if strings.Contains(out, "wrap in "+removed) {
+	if got, want := row(out, "server removed-worktree, "), config+" mcp Claude Code server removed-worktree, env.GITHUB_PERSONAL_ACCESS_TOKEN (project "+removed+") a GitHub token "+
+		"remove the server from "+config+" by hand, with Claude Code closed, as its project's folder no longer exists"; got != want {
+		t.Errorf("the row reads %q, want %q:\n%s", got, want, out)
+	}
+	if strings.Contains(flat(out), "wrap in "+removed) {
 		t.Errorf("the report says to run wrap in a folder that is gone:\n%s", out)
 	}
 }
@@ -980,7 +1011,7 @@ PD_FALLBACK_TOKEN = "`+githubToken+`"
 		len(r.Unmovable) != 1 || r.Unmovable[0].File != elsewhere {
 		t.Errorf("Literals %+v, Plaintext %+v, Unmovable %+v: want the servers' tokens, and the other files'", r.Literals, r.Plaintext, r.Unmovable)
 	}
-	if out := r.String(); strings.Contains(out, "migrate --dry-run "+codex) {
+	if out := r.Render(doctor.Format{}); strings.Contains(flat(out), "keyward migrate "+codex) || !strings.Contains(flat(out), "keyward migrate "+other) {
 		t.Errorf("the report suggests migrating Codex's config:\n%s", out)
 	}
 }
@@ -1000,11 +1031,11 @@ func TestTheAdviceForPossibleCredentialsSaysWhichFilesMigrateIsFor(t *testing.T)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
-	if !strings.Contains(out, "1 value(s) that may be credentials") || !strings.Contains(out, "Claude Code server team, headers.X-Team") {
+	out := r.Render(doctor.Format{})
+	if !strings.Contains(out, "! 1 value(s) that may be credentials") || !strings.Contains(out, "Claude Code server team, headers.X-Team") {
 		t.Fatalf("this test needs the header listed as a value that may be a credential:\n%s", out)
 	}
-	if want := "if it is one, store it with keyward add NAME, write ${VAR} in its place, add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap\n"; !strings.Contains(out, want) ||
+	if want := " if it is one, store it with keyward add NAME, write ${VAR} in its place, add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"; !strings.HasSuffix(row(out, "server team, headers.X-Team"), want) ||
 		strings.Contains(out, "keyward migrate") {
 		t.Errorf("the advice is not for an MCP config, or sends it to migrate:\n%s", out)
 	}
@@ -1031,16 +1062,14 @@ http_headers = { "X-Team" = "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i", Authorizatio
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
-	for _, want := range []string{
-		"Codex server team, http_headers.X-Team\n",
-		"if it is one, store it with keyward add NAME, move it to env_http_headers = { \"X-Team\" = \"VAR\" }, " +
-			"add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap\n",
-		"Codex server team, http_headers.Authorization\n",
-		"store it with keyward add NAME, move it to env_http_headers = { \"Authorization\" = \"VAR\" }, " +
-			"or for a Bearer token, store the token alone and use bearer_token_env_var = \"VAR\"; add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap\n",
+	out := r.Render(doctor.Format{})
+	for what, want := range map[string]string{
+		"Codex server team, http_headers.X-Team": " if it is one, store it with keyward add NAME, move it to env_http_headers = { \"X-Team\" = \"VAR\" }, " +
+			"add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap",
+		"Codex server team, http_headers.Authorization": " store it with keyward add NAME, move it to env_http_headers = { \"Authorization\" = \"VAR\" }, " +
+			"or for a Bearer token, store the token alone and use bearer_token_env_var = \"VAR\"; add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap",
 	} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(out, what+"\n") || !strings.HasSuffix(row(out, what), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
 	}
@@ -1095,8 +1124,8 @@ func TestOrphanedRequiresAScannedSourceThatNoLongerReferencesIt(t *testing.T) {
 	if p := r.Problems(); len(p) > 0 {
 		t.Errorf("Problems() = %v for an orphan alone", p)
 	}
-	if !strings.Contains(r.String(), "keyward rm removed") {
-		t.Errorf("the report does not offer the removal command:\n%s", r.String())
+	if out := r.Render(doctor.Format{}); !strings.HasPrefix(row(out, "removed "), "removed came from ") || !strings.Contains(row(out, "removed "), " keyward rm removed") {
+		t.Errorf("the report does not offer the removal command:\n%s", out)
 	}
 }
 
@@ -1260,11 +1289,11 @@ func TestReportStatesItsCoverage(t *testing.T) {
 	if strings.Join(r.Absent, ",") != missing {
 		t.Errorf("Absent = %v, want %s", r.Absent, missing)
 	}
-	out := r.String()
-	if !strings.Contains(out, rc) {
+	out := r.Summary(doctor.Format{}, nil, nil)
+	if !strings.Contains(out, "read "+rc+"\n") {
 		t.Errorf("the report does not list the file it scanned:\n%s", out)
 	}
-	if !strings.Contains(out, ".bashrc") {
+	if !strings.Contains(out, "not read "+missing+"\n") {
 		t.Errorf("the report does not mention the file it could not read:\n%s", out)
 	}
 }
@@ -1330,19 +1359,25 @@ func TestReportRendersEverySection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	out := r.String()
+	// The checklist repeats most headings, so each section is looked for in the
+	// sections alone.
+	out := r.Render(doctor.Format{Home: dir})
 	for _, want := range []string{
-		"not read",             // Absent
-		"not in the vault",     // Dangling
-		"malformed",            // Malformed
-		"in plaintext",         // Plaintext, a known shape
-		"may be credentials",   // Plaintext, only suggested
-		"no longer references", // Orphaned
-		"may still be in use",  // Unknown
-		"stored and referenced",
+		"✗ 1 reference(s) point at secrets that are not in the vault\n  ~/.zshrc:1  cap://absent ",
+		"✗ 1 malformed reference(s), which will fail when used\n  ~/.zshrc:2  cap://-malformed\n",
+		"✗ 1 credential(s) in plaintext\n  ~/.zshrc:4 ",
+		"! 1 value(s) that may be credentials\n  ~/.zshrc:5 ",
+		"! 1 secret(s) whose source no longer references them\n  orphan ",
+		"! 1 secret(s) nothing scanned refers to, which may still be in use\n  by-hand ",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("the report omits the %q section:\n%s", want, out)
+			t.Errorf("the report omits the section %q:\n%s", want, out)
+		}
+	}
+	out = r.Summary(doctor.Format{}, r.Checks(), nil)
+	for _, want := range []string{"not read " + missing + "\n", "1 secret(s) stored and referenced"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the summary omits %q:\n%s", want, out)
 		}
 	}
 }
@@ -1402,11 +1437,11 @@ func TestCleanReport(t *testing.T) {
 	if p := r.Problems(); len(p) > 0 {
 		t.Errorf("Problems() = %v for a healthy setup", p)
 	}
-	out := r.String()
-	for _, unwanted := range []string{"orphaned", "not in the vault", "malformed", "plaintext", "may be credentials"} {
-		if strings.Contains(strings.ToLower(out), unwanted) {
-			t.Errorf("a clean report mentions %q:\n%s", unwanted, out)
-		}
+	if out := r.Render(doctor.Format{}); out != "" {
+		t.Errorf("a clean report lists something:\n%s", out)
+	}
+	if out := (doctor.Format{}).Verdict(r.Checks(), r.Problems()); out != "✓ No problems found.\n" {
+		t.Errorf("a clean report ends %q", out)
 	}
 }
 

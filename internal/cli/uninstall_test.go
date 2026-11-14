@@ -345,7 +345,7 @@ func TestFollowingDoctorsAdviceForACredentialInEnvSurvivesUninstall(t *testing.T
 		t.Errorf("wrap exit %d, want 1 and datadog skipped:\n%s", code, out)
 	}
 	if _, out := run("doctor"); !strings.Contains(out, "Claude Code server datadog, env.DD_APP_KEY\n") ||
-		!strings.Contains(out, "store it with keyward add NAME, write ${DD_APP_KEY} in its place, add export DD_APP_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap") {
+		!strings.Contains(flat(out), "store it with keyward add NAME, write ${DD_APP_KEY} in its place, add export DD_APP_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap") {
 		t.Fatalf("doctor gives no advice for env.DD_APP_KEY:\n%s", out)
 	}
 	// The user follows it.
@@ -356,7 +356,7 @@ func TestFollowingDoctorsAdviceForACredentialInEnvSurvivesUninstall(t *testing.T
 	data, _ = os.ReadFile(config)
 	os.WriteFile(config, []byte(strings.Replace(string(data), appKey, "${DD_APP_KEY}", 1)), 0o600)
 	yes("mcp", "wrap")
-	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." {
+	if code, out := run("doctor"); code != 0 || verdict(out) != "✓ No problems found. 1 check needs attention." {
 		t.Errorf("doctor exit %d, want 0:\n%s", code, out)
 	}
 

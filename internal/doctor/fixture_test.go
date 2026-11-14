@@ -247,7 +247,7 @@ func TestDoctorJudgesRealisticLines(t *testing.T) {
 
 	// No piece of a line that could be a value is printed, though the name of a
 	// variable listed is.
-	out, shown := r.String(), map[string]bool{}
+	out, shown := printed(r), map[string]bool{}
 	for _, p := range r.Plaintext {
 		shown[p.Name] = true
 	}

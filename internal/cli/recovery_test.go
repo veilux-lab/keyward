@@ -105,8 +105,23 @@ func TestMigrateRemindsUntilARecoveryCodeIsShown(t *testing.T) {
 	os.WriteFile(h.cli.RecoveryMarker, nil, 0o600)
 	h.stdout.Reset()
 	h.cli.Run([]string{"doctor"})
-	if strings.Contains(h.out(), "keyward recovery show") {
+	if strings.Contains(flat(h.out()), "keyward recovery show") {
 		t.Errorf("reminded after the code was shown:\n%s", h.out())
+	}
+}
+
+// Only a marker that is there shows a recovery code was shown, so doctor reminds
+// where it cannot tell.
+func TestDoctorRemindsWhereTheMarkerCannotBeChecked(t *testing.T) {
+	h := newHarness(t, "", nil, nil)
+	homed(t, h)
+	file := filepath.Join(t.TempDir(), "file")
+	os.WriteFile(file, nil, 0o600)
+	h.cli.RecoveryMarker = filepath.Join(file, "recovery-shown")
+
+	h.cli.Run([]string{"doctor"})
+	if !strings.Contains(flat(h.out()), "! Recovery Save a recovery code for your vault") {
+		t.Errorf("doctor does not remind:\n%s", h.out())
 	}
 }
 
