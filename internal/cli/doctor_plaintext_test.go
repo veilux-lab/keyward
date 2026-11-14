@@ -26,11 +26,6 @@ const (
 	compactToken = "ghp_FakeSmitheryCompact0000000000000000"
 )
 
-func lastLine(s string) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	return lines[len(lines)-1]
-}
-
 // A token can outlast migration in a line migrate skipped, or in an MCP config it
 // never rewrites, here in another project's servers. doctor names each place and
 // fails, without printing either value.
@@ -51,16 +46,17 @@ func TestDoctorFailsOnACredentialInPlaintext(t *testing.T) {
 		t.Errorf("exit code = %d, want 1", code)
 	}
 	for _, want := range []string{
-		rc + ":2  GITHUB_TOKEN",
-		"move it with keyward migrate " + rc + " (preview with --dry-run), or store it with keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'",
-		"(project " + other + ")  Claude Code server openai, env.OPENAI_API_KEY",
+		"~/.zshrc:2 migrate GITHUB_TOKEN a GitHub token",
+		"move it with keyward migrate ~/.zshrc (preview with --dry-run), or store it with keyward add NAME and set the variable to 'cap://NAME' " +
+			"e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'",
+		"~/.claude.json mcp Claude Code server openai, env.OPENAI_API_KEY (project ~/other-project)",
 		"Then rotate each one, and store its new value with keyward add --force NAME.",
 	} {
-		if !strings.Contains(h.out(), want) {
+		if !strings.Contains(flat(h.out()), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, h.out())
 		}
 	}
-	if got, want := lastLine(h.out()), "Problems found: 2 credential(s) in plaintext."; got != want {
+	if got, want := verdict(h.out()), "✗ Problems found: 2 credential(s) in plaintext."; got != want {
 		t.Errorf("last line = %q, want %q", got, want)
 	}
 	for _, value := range []string{leftoverToken, mcpToken} {
@@ -80,7 +76,7 @@ func TestFollowingDoctorsAdviceForAShellVariableClearsIt(t *testing.T) {
 	var printed strings.Builder
 	run := runner(h, &printed)
 
-	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "store it with keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'") {
+	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'") {
 		t.Fatalf("doctor exit %d, want 1 and the advice:\n%s", code, out)
 	}
 	h.cli.ReadSecret = func() ([]byte, error) { return []byte(leftoverToken), nil }
@@ -92,7 +88,7 @@ func TestFollowingDoctorsAdviceForAShellVariableClearsIt(t *testing.T) {
 	if code, out := run("add", "--force", "github-token"); code != 0 {
 		t.Fatalf("add --force exit %d:\n%s", code, out)
 	}
-	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." {
+	if code, out := run("doctor"); code != 0 || verdict(out) != "✓ No problems found." {
 		t.Errorf("doctor exit %d, want 0:\n%s", code, out)
 	}
 	if strings.Contains(printed.String(), leftoverToken) {
@@ -132,15 +128,13 @@ func TestDoctorFailsOnACredentialMigrateCannotMove(t *testing.T) {
 			if code != 1 {
 				t.Errorf("exit code = %d, want 1", code)
 			}
-			for _, want := range []string{
-				rc + ":2  (" + tc.kind + ")",
-				rc + ":2  (" + tc.kind + ")\n      a GitHub token\n      remove it by hand in an editor\n",
-			} {
-				if !strings.Contains(h.out(), want) {
-					t.Errorf("stdout lacks %q:\n%s", want, h.out())
-				}
+			if got, want := row(h.out(), "~/.zshrc:2 "), "~/.zshrc:2 edit "+tc.kind+" a GitHub token"; got != want {
+				t.Errorf("the row reads %q, want %q:\n%s", got, want, h.out())
 			}
-			if got, want := lastLine(h.out()), "Problems found: 1 credential(s) in plaintext."; got != want {
+			if want := "To fix each: edit remove it by hand in an editor Then rotate"; !strings.Contains(flat(h.out()), want) {
+				t.Errorf("stdout lacks %q:\n%s", want, h.out())
+			}
+			if got, want := verdict(h.out()), "✗ Problems found: 1 credential(s) in plaintext."; got != want {
 				t.Errorf("last line = %q, want %q", got, want)
 			}
 		})
@@ -175,10 +169,10 @@ func TestDoctorFailsOnATokenMigrateLeftInARewrittenLine(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
-	if want := rc + ":1  (trailer)"; !strings.Contains(h.out(), want) {
-		t.Errorf("stdout lacks %q:\n%s", want, h.out())
+	if got, want := row(h.out(), "~/.zshrc:1 "), "~/.zshrc:1 edit trailer a GitHub token"; got != want {
+		t.Errorf("the row reads %q, want %q:\n%s", got, want, h.out())
 	}
-	if got, want := lastLine(h.out()), "Problems found: 1 credential(s) in plaintext."; got != want {
+	if got, want := verdict(h.out()), "✗ Problems found: 1 credential(s) in plaintext."; got != want {
 		t.Errorf("last line = %q, want %q", got, want)
 	}
 }
@@ -190,8 +184,8 @@ func TestDoctorFailsOnATokenMigrateLeftInARewrittenLine(t *testing.T) {
 // an argument, so wrap is given --allow-command-line.
 func TestDoctorStillReportsALiteralThatMCPWrapMoved(t *testing.T) {
 	const (
-		literalOnly   = "Problems found: 1 credential(s) in plaintext."
-		withReference = "Problems found: 1 credential(s) in plaintext; 1 MCP server(s) would receive cap:// references instead of values."
+		literalOnly   = "✗ Problems found: 1 credential(s) in plaintext."
+		withReference = "✗ Problems found: 1 credential(s) in plaintext; 1 MCP server(s) would receive cap:// references instead of values."
 	)
 	for _, tc := range []struct{ server, value, before, wrapped, unwrapped string }{
 		{`{"type": "http", "url": "https://bot:` + urlPassword + `@mcp.example.com/mcp", "headers": {"X-Org": "${ORG_TOKEN}"}}`, urlPassword,
@@ -209,10 +203,10 @@ func TestDoctorStillReportsALiteralThatMCPWrapMoved(t *testing.T) {
 		fakeTools(t, h, dir)
 		var printed strings.Builder
 		run := runner(h, &printed)
-		doctor := func(when, field, verdict string) {
+		doctor := func(when, field, want string) {
 			t.Helper()
-			if code, out := run("doctor"); code != 1 || !strings.Contains(out, "Claude Code server org, "+field+"\n") || lastLine(h.out()) != verdict {
-				t.Errorf("doctor %s exit %d, want 1, %s reported, and %q:\n%s", when, code, field, verdict, out)
+			if code, out := run("doctor"); code != 1 || !strings.Contains(out, "Claude Code server org, "+field+"\n") || verdict(h.out()) != want {
+				t.Errorf("doctor %s exit %d, want 1, %s reported, and %q:\n%s", when, code, field, want, out)
 			}
 		}
 
@@ -266,7 +260,7 @@ func TestFollowingDoctorsAdviceForAnMCPLiteralLeavesAServerThatResolvesIt(t *tes
 	}
 
 	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "Claude Code server org, env.KW_HDR_1 (from its Authorization header)\n") ||
-		!strings.Contains(out, "store it with keyward add NAME, write ${KW_HDR_1} in its place, add export KW_HDR_1='cap://NAME' to ~/.zshrc, and run keyward mcp wrap") {
+		!strings.Contains(flat(out), "store it with keyward add NAME, write ${KW_HDR_1} in its place, add export KW_HDR_1='cap://NAME' to ~/.zshrc, and run keyward mcp wrap") {
 		t.Fatalf("doctor exit %d, want 1 and its advice for env.KW_HDR_1:\n%s", code, out)
 	}
 	// The user follows it: keyward add, a variable set to the reference, and the
@@ -285,7 +279,7 @@ func TestFollowingDoctorsAdviceForAnMCPLiteralLeavesAServerThatResolvesIt(t *tes
 	data, _ = json.Marshal(doc)
 	os.WriteFile(config, data, 0o600)
 
-	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
+	if code, out := run("doctor"); code != 1 || verdict(out) != "✗ Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
 		t.Errorf("doctor exit %d, want 1 and the server reported:\n%s", code, out)
 	}
 	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "would receive the cap:// reference in KW_HDR_1, which keyward run is not told to resolve") {
@@ -298,7 +292,7 @@ func TestFollowingDoctorsAdviceForAnMCPLiteralLeavesAServerThatResolvesIt(t *tes
 	if args := org().Args; len(args) < 3 || args[1] != "--only" || !slices.Contains(strings.Split(args[2], ","), "KW_HDR_1") || !slices.Contains(strings.Split(args[2], ","), "ORG_TOKEN") {
 		t.Errorf("args after wrap = %q, want --only to name KW_HDR_1 and ORG_TOKEN", args)
 	}
-	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." {
+	if code, out := run("doctor"); code != 0 || verdict(out) != "✓ No problems found." {
 		t.Errorf("doctor exit %d, want 0:\n%s", code, out)
 	}
 	if code, out := run("mcp"); code != 0 || !strings.Contains(out, "No MCP server needs a change.") {
@@ -354,7 +348,7 @@ func TestFollowingDoctorsAdviceForALiteralInAWrappedServersArgsLeavesAServerThat
 		t.Fatalf("wrap exit %d:\n%s", code, out)
 	}
 	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "Claude Code server pd, args[7]\n") ||
-		!strings.Contains(out, "and pass it in env as VAR, if the server reads it from there, or else write ${VAR} in its place, which wrap puts in the server's command line only if given --allow-command-line") {
+		!strings.Contains(flat(out), "and pass it in env as VAR, if the server reads it from there, or else write ${VAR} in its place, which wrap puts in the server's command line only if given --allow-command-line") {
 		t.Fatalf("doctor exit %d, want 1 and the literal in args[7]:\n%s", code, out)
 	}
 	// The user follows it: keyward add, a variable set to the reference, and ${VAR}
@@ -369,7 +363,7 @@ func TestFollowingDoctorsAdviceForALiteralInAWrappedServersArgsLeavesAServerThat
 	data, _ := json.Marshal(doc)
 	os.WriteFile(config, data, 0o600)
 
-	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
+	if code, out := run("doctor"); code != 1 || verdict(out) != "✗ Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
 		t.Errorf("doctor exit %d, want 1 and the server reported:\n%s", code, out)
 	}
 	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "reads GH_TOKEN in its arguments, which keyward run does not resolve") {
@@ -382,7 +376,7 @@ func TestFollowingDoctorsAdviceForALiteralInAWrappedServersArgsLeavesAServerThat
 	if code, out := run("mcp", "wrap", "--allow-command-line"); code != 0 {
 		t.Fatalf("wrap --allow-command-line exit %d:\n%s", code, out)
 	}
-	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." {
+	if code, out := run("doctor"); code != 0 || verdict(out) != "✓ No problems found. 1 check needs attention." || !strings.Contains(flat(out), allowedSection+"; see keyward mcp") {
 		t.Errorf("doctor exit %d, want 0:\n%s", code, out)
 	}
 	if code, out := run("mcp"); code != 0 || !strings.Contains(out, "No MCP server needs a change.") {
@@ -451,7 +445,7 @@ func TestFollowingDoctorsAdviceForALiteralInABridgesURLRewritesItsScriptInPlace(
 		t.Fatalf("wrap exit %d:\n%s", code, out)
 	}
 	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "Claude Code server q, args[6] (its mcp-remote URL)\n") ||
-		!strings.Contains(out, "or else write ${VAR} in its place, which wrap puts in mcp-remote's command line and log only if given --allow-command-line; then run keyward mcp wrap") {
+		!strings.Contains(flat(out), "or else write ${VAR} in its place, which wrap puts in mcp-remote's command line and log only if given --allow-command-line; then run keyward mcp wrap") {
 		t.Fatalf("doctor exit %d, want 1 and its advice for the URL:\n%s", code, out)
 	}
 	// The user follows it: keyward add, a variable set to the reference, and ${VAR}
@@ -472,7 +466,7 @@ func TestFollowingDoctorsAdviceForALiteralInABridgesURLRewritesItsScriptInPlace(
 	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped q: keyward run would refuse to start it as wrap would change it.\n  npx would get Q_KEY") || len(*calls) != before+1 {
 		t.Errorf("wrap exit %d, want 1 and the server skipped (ran %q):\n%s", code, (*calls)[before:], out)
 	}
-	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
+	if code, out := run("doctor"); code != 1 || verdict(out) != "✗ Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
 		t.Errorf("doctor exit %d, want 1 and the server reported:\n%s", code, out)
 	}
 	h.cli.Stdin = strings.NewReader("yes\n")
@@ -486,7 +480,7 @@ func TestFollowingDoctorsAdviceForALiteralInABridgesURLRewritesItsScriptInPlace(
 	if code, out := run("mcp"); code != 0 || !strings.Contains(out, allowedSection+":") {
 		t.Errorf("mcp exit %d, want 0 and the server listed as allowed:\n%s", code, out)
 	}
-	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." || !strings.Contains(out, allowedSection+"; see keyward mcp") {
+	if code, out := run("doctor"); code != 0 || verdict(out) != "✓ No problems found. 1 check needs attention." || !strings.Contains(flat(out), allowedSection+"; see keyward mcp") {
 		t.Errorf("doctor exit %d, want 0 and the server listed as allowed:\n%s", code, out)
 	}
 	// Started as Claude Code starts it, mcp-remote gets the header to fill in itself.
@@ -526,7 +520,7 @@ func TestFollowingDoctorsAdviceForACredentialInAURLLeavesAServerWrapChanges(t *t
 	var printed strings.Builder
 	run := runner(h, &printed)
 
-	if _, out := run("doctor"); !strings.Contains(out, "Claude Code server exa, url\n") || !strings.Contains(out, "and send it in a header as ${VAR}, if the server takes it there") {
+	if _, out := run("doctor"); !strings.Contains(out, "Claude Code server exa, url\n") || !strings.Contains(flat(out), "and send it in a header as ${VAR}, if the server takes it there") {
 		t.Fatalf("doctor gives no advice for the URL:\n%s", out)
 	}
 	// The user follows it, as the server takes the key in a header.
@@ -540,7 +534,7 @@ func TestFollowingDoctorsAdviceForACredentialInAURLLeavesAServerWrapChanges(t *t
 	if code, out := run("mcp", "wrap"); code != 0 {
 		t.Fatalf("wrap exit %d:\n%s", code, out)
 	}
-	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." {
+	if code, out := run("doctor"); code != 0 || verdict(out) != "✓ No problems found." {
 		t.Errorf("doctor exit %d, want 0:\n%s", code, out)
 	}
 	if code, out := run("mcp"); code != 0 || !strings.Contains(out, "No MCP server needs a change.") || strings.Contains(out, "command line") {
@@ -565,7 +559,7 @@ func TestFollowingDoctorsAdviceForALiteralInCodexHTTPHeadersLeavesAServerKeyward
 	var printed strings.Builder
 	run := runner(h, &printed)
 
-	if code, out := run("doctor"); code != 1 || !strings.Contains(out, `move it to env_http_headers = { "X-Team-Key" = "VAR" }, add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap`) {
+	if code, out := run("doctor"); code != 1 || !strings.Contains(flat(out), `move it to env_http_headers = { "X-Team-Key" = "VAR" }, add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap`) {
 		t.Fatalf("doctor exit %d, want 1 and its advice for the header:\n%s", code, out)
 	}
 	// The user follows it, or writes the variable in http_headers.
@@ -579,7 +573,7 @@ func TestFollowingDoctorsAdviceForALiteralInCodexHTTPHeadersLeavesAServerKeyward
 		if code, out := run("mcp"); code != 1 || !strings.Contains(out, "uses TEAM_KEY") || !strings.Contains(out, `--header \"X-Team-Key: \"'$''{TEAM_KEY}'\"\"`) {
 			t.Errorf("%s: mcp exit %d, want 1 and the bridge:\n%s", headers, code, out)
 		}
-		if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
+		if code, out := run("doctor"); code != 1 || verdict(out) != "✗ Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
 			t.Errorf("%s: doctor exit %d, want 1 and the server reported:\n%s", headers, code, out)
 		}
 	}
@@ -605,8 +599,8 @@ func TestFollowingDoctorsAdviceForALiteralInAnotherProjectLeavesAServerThatResol
 	var printed strings.Builder
 	run := runner(h, &printed)
 
-	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "store it with keyward add NAME, write ${OPENAI_API_KEY} in its place, add export OPENAI_API_KEY='cap://NAME' to ~/.zshrc, "+
-		"and run keyward mcp wrap in "+other+"\n") {
+	if code, out := run("doctor"); code != 1 || !strings.HasSuffix(row(out, "server openai, env.OPENAI_API_KEY"), " store it with keyward add NAME, write ${OPENAI_API_KEY} in its place, "+
+		"add export OPENAI_API_KEY='cap://NAME' to ~/.zshrc, and run keyward mcp wrap in ~/other-project") {
 		t.Fatalf("doctor exit %d, want 1 and the folder to run wrap in:\n%s", code, out)
 	}
 	// The user follows it: keyward add, a variable set to the reference, and the
@@ -619,7 +613,7 @@ func TestFollowingDoctorsAdviceForALiteralInAnotherProjectLeavesAServerThatResol
 	data, _ := os.ReadFile(config)
 	os.WriteFile(config, []byte(strings.Replace(string(data), mcpToken, "${OPENAI_API_KEY}", 1)), 0o600)
 
-	if code, out := run("doctor"); code != 1 || lastLine(out) != "Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
+	if code, out := run("doctor"); code != 1 || verdict(out) != "✗ Problems found: 1 MCP server(s) would receive cap:// references instead of values." {
 		t.Errorf("doctor exit %d, want 1 and the server reported:\n%s", code, out)
 	}
 	for _, args := range [][]string{{"mcp"}, {"mcp", "wrap"}} {
@@ -640,7 +634,7 @@ func TestFollowingDoctorsAdviceForALiteralInAnotherProjectLeavesAServerThatResol
 		t.Fatalf("wrap in the project's folder exit %d:\n%s", code, out)
 	}
 	h.cli.Workdir = home
-	if code, out := run("doctor"); code != 0 || lastLine(out) != "No problems found." {
+	if code, out := run("doctor"); code != 0 || verdict(out) != "✓ No problems found." {
 		t.Errorf("doctor exit %d, want 0:\n%s", code, out)
 	}
 	if code, out := run("mcp"); code != 0 || !strings.Contains(out, "No MCP server needs a change.") {
@@ -667,16 +661,16 @@ func TestDoctorPrintsItsVerdictLast(t *testing.T) {
 		code             int
 		verdict          string
 	}{
-		{"clean", "export A='cap://alpha'\n", wrapped, nil, 0, "No problems found."},
+		{"clean", "export A='cap://alpha'\n", wrapped, nil, 0, "✓ No problems found. 2 checks need attention."},
 		{"problems", "export A='cap://alpha'\nexport GITHUB_TOKEN=" + leftoverToken + "\n", mcpIssue,
 			[]exposure.Exposure{{Secret: "alpha", PID: 42, Program: "node"}}, 1,
-			"Problems found: 1 credential(s) in plaintext; 1 MCP server(s) would receive cap:// references instead of values; " +
+			"✗ Problems found: 1 credential(s) in plaintext; 1 MCP server(s) would receive cap:// references instead of values; " +
 				"1 MCP server(s) would put a secret in a command line, so keyward run refuses to start them; 1 secret(s) in a running program's command line."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, "", map[string]string{"alpha": "v", "github-token": "v"}, nil)
 			dir := homed(t, h)
-			// The recovery reminder adds a section after the report.
+			// The recovery reminder needs attention, which the verdict counts.
 			h.cli.RecoveryMarker = filepath.Join(dir, "recovery-shown")
 			h.cli.Exposures = func() ([]exposure.Exposure, error) { return tc.exposed, nil }
 			os.WriteFile(filepath.Join(dir, ".zshrc"), []byte(tc.rc), 0o644)
@@ -685,10 +679,10 @@ func TestDoctorPrintsItsVerdictLast(t *testing.T) {
 			if code := h.cli.Run([]string{"doctor"}); code != tc.code {
 				t.Errorf("exit code = %d, want %d", code, tc.code)
 			}
-			if !strings.Contains(h.out(), "keyward recovery show") {
-				t.Fatalf("a section this test relies on is missing:\n%s", h.out())
+			if !strings.Contains(flat(h.out()), "keyward recovery show") {
+				t.Fatalf("a check this test relies on is missing:\n%s", h.out())
 			}
-			if got := lastLine(h.out()); got != tc.verdict {
+			if got := verdict(h.out()); got != tc.verdict {
 				t.Errorf("last line = %q, want %q\n%s", got, tc.verdict, h.out())
 			}
 		})
@@ -709,10 +703,10 @@ func TestDoctorListsPossibleCredentialsWithoutFailing(t *testing.T) {
 	if code := h.cli.Run([]string{"doctor"}); code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(h.out(), "GIT_AUTHOR_EMAIL") || !strings.Contains(h.out(), rc+":2  (comment)") || !strings.Contains(h.out(), "# keyward:ignore") {
+	if !strings.Contains(h.out(), "GIT_AUTHOR_EMAIL") || !strings.HasPrefix(row(h.out(), "~/.zshrc:2 "), "~/.zshrc:2 edit comment ") || !strings.Contains(h.out(), "# keyward:ignore") {
 		t.Errorf("stdout does not list the value with a way to silence it:\n%s", h.out())
 	}
-	if got := lastLine(h.out()); got != "No problems found." {
+	if got := verdict(h.out()); got != "✓ No problems found. 1 check needs attention." {
 		t.Errorf("last line = %q", got)
 	}
 }

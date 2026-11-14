@@ -1,14 +1,24 @@
 package cli
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/veilux-lab/keyward/internal/doctor"
+)
 
 const (
 	bold   = "1"
+	dim    = "2"
 	red    = "31"
 	green  = "32"
 	yellow = "33"
 	cyan   = "36"
 )
+
+// doctorCodes colour each part of doctor's output.
+var doctorCodes = map[doctor.Style]string{
+	doctor.Heading: bold, doctor.OK: green, doctor.Warning: yellow, doctor.Problem: red, doctor.Command: cyan, doctor.Quiet: dim,
+}
 
 // ColorEnabled follows the NO_COLOR convention and leaves dumb terminals plain.
 func ColorEnabled(terminal bool, getenv func(string) string) bool {
@@ -24,6 +34,16 @@ func paint(on bool, code, text string) string {
 
 func (c *CLI) out(code, text string) string  { return paint(c.ColorOut, code, text) }
 func (c *CLI) errs(code, text string) string { return paint(c.ColorErr, code, text) }
+
+// format lays doctor's output out for stdout, with home as ~ and colour only on a
+// terminal.
+func (c *CLI) format() doctor.Format {
+	f := doctor.Format{Home: c.Home}
+	if c.ColorOut {
+		f.Paint = func(s doctor.Style, text string) string { return paint(true, doctorCodes[s], text) }
+	}
+	return f
+}
 
 // paintLines colours each line whose prefix has a style, leaving the rest plain.
 func paintLines(on bool, text string, styles map[string]string) string {

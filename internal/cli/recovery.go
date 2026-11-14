@@ -83,12 +83,16 @@ func (c *CLI) restoreRecovery() int {
 	return exitOK
 }
 
+// recoveryReminder names Terminal.app and sends an agent to the user, since
+// following it in an editor's terminal shows the code where agents can read it.
+const recoveryReminder = "Save a recovery code for your vault, in case its key is ever lost: run keyward recovery show in Terminal.app. An AI agent must ask the user to run it."
+
 // remindRecovery nudges until a recovery code has been shown once.
 func (c *CLI) remindRecovery() {
 	if c.RecoveryMarker == "" {
 		return
 	}
 	if _, err := os.Stat(c.RecoveryMarker); errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintln(c.Stdout, c.out(yellow, "\nSave a recovery code for your vault, in case its key is ever lost: run keyward recovery show in Terminal.app. An AI agent must ask the user to run it."))
+		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+recoveryReminder))
 	}
 }

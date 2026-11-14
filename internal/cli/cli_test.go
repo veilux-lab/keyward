@@ -1148,8 +1148,11 @@ func TestDoctorReportsASecretInACommandLineAndFails(t *testing.T) {
 	if code := h.cli.Run([]string{"doctor"}); code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
-	if !strings.Contains(h.out(), "alpha is in the command line of node (pid 42)") {
-		t.Errorf("stdout does not name the exposure:\n%s", h.out())
+	// It fails, so it comes before the checklist that says it is listed above.
+	if want := "✗ alpha is in the command line of node (pid 42), where any process can read it.\n" +
+		"  Start that program without it there (keyward mcp shows how for MCP servers), then rotate the\n" +
+		"  secret.\n\nkeyward doctor  "; !strings.HasPrefix(h.out(), want) {
+		t.Errorf("stdout does not start with the exposure:\n%s", h.out())
 	}
 	if strings.Contains(h.out()+h.err(), "dummy-alpha-value") {
 		t.Errorf("doctor printed the value")

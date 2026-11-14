@@ -797,79 +797,122 @@ func (c *CLI) doctor(args []string) int {
 	// makes every "unreferenced" verdict more trustworthy.
 	paths = append(paths, args...)
 
-	servers := c.mcpServers()
+	servers, unread := c.mcpServers()
 	report, err := doctor.Run(c.Store, paths, servers)
 	if err != nil {
 		return c.fail("keyward doctor: %v", err)
 	}
 
-	fmt.Fprint(c.Stdout, report.String())
+	f := c.format()
 	problems := report.Problems()
-	if !c.checkVaultOpens() {
+	checks := report.Checks()
+	check := func(status doctor.Status, label, text string) {
+		checks = append(checks, doctor.Check{Status: status, Label: label, Text: text})
+	}
+	switch tried, err := c.checkVaultOpens(); {
+	case err != nil:
+		check(doctor.Fail, "Vault", fmt.Sprintf("does not open: %v", err))
 		problems = append(problems, "the vault does not open")
+	case tried:
+		check(doctor.Pass, "Vault", "opens with its key")
 	}
-	if found, err := c.knownBackups(); err != nil {
+	if c.RecoveryMarker != "" {
+		// Only a marker that is there shows a code was shown, as setup reads it.
+		if _, err := os.Stat(c.RecoveryMarker); err == nil {
+			check(doctor.Pass, "Recovery", "a recovery code has been shown")
+		} else {
+			check(doctor.Attention, "Recovery", recoveryReminder)
+		}
+	}
+	switch found, err := c.knownBackups(); {
+	case err != nil:
 		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check for backups: %v", err)))
-	} else if len(found) > 0 {
-		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d backup(s) from migrate still hold old values; review them with keyward backups", len(found))))
+		check(doctor.Attention, "Backups", "could not be checked")
+	case len(found) > 0:
+		check(doctor.Attention, "Backups", fmt.Sprintf("%d backup(s) from migrate still hold old values; review them with keyward backups", len(found)))
+	default:
+		check(doctor.Pass, "Backups", "none from migrate")
 	}
-	c.remindRecovery()
 	here, elsewhere, allowed, gone := c.checkServers(servers, false)
-	for _, problem := range mcpProblems(append(here, elsewhere...)) {
-		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+problem+"; see keyward mcp"))
-		problems = append(problems, problem)
+	// Without a home there is no MCP config to read.
+	if c.Home != "" {
+		found := mcpProblems(append(here, elsewhere...))
+		for _, problem := range found {
+			check(doctor.Fail, "MCP servers", problem+"; see keyward mcp")
+		}
+		problems = append(problems, found...)
+		if len(allowed) > 0 {
+			check(doctor.Attention, "MCP servers", allowedProblem(allowed)+"; see keyward mcp")
+		}
+		if unread > 0 {
+			check(doctor.Attention, "MCP servers", fmt.Sprintf("%d MCP config(s) could not be read, so their servers were not checked", unread))
+		}
+		if len(found) == 0 && len(allowed) == 0 && unread == 0 {
+			// Claims only what keyward mcp checks: Known secrets lists a credential
+			// written in a config.
+			check(doctor.Pass, "MCP servers", "keyward mcp finds nothing to change")
+		}
 	}
-	if len(allowed) > 0 {
-		fmt.Fprintln(c.Stdout, c.out(yellow, "\n"+allowedProblem(allowed)+"; see keyward mcp"))
+	switch n, counted := c.unlinkedAgents(); {
+	case n > 0:
+		check(doctor.Attention, "AI agents", fmt.Sprintf("%d installed AI agent(s) do not read %s; run keyward agents link", n, agents.Display))
+	case counted:
+		check(doctor.Pass, "AI agents", "each installed agent reads "+agents.Display)
 	}
-	if note := c.skippedNote(gone); note != "" {
-		fmt.Fprintln(c.Stdout, "\n"+note)
-	}
-	if note := c.projectsNote(); note != "" {
-		fmt.Fprintln(c.Stdout, "\n"+note)
-	}
-	if n := c.unlinkedAgents(); n > 0 {
-		fmt.Fprintln(c.Stdout, c.out(yellow, fmt.Sprintf("\n%d installed AI agent(s) do not read %s; run keyward agents link", n, agents.Display)))
-	}
-	var exposed []exposure.Exposure
+	var alerts []string
 	if c.Exposures != nil {
-		exposed, err = c.Exposures()
+		exposed, err := c.Exposures()
+		if err != nil {
+			fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check running programs for secrets: %v", err)))
+		}
+		for _, e := range exposed {
+			alerts = append(alerts, f.Alert(fmt.Sprintf("%s is in the command line of %s (pid %d), where any process can read it.", e.Secret, e.Program, e.PID),
+				"Start that program without it there (keyward mcp shows how for MCP servers), then rotate the secret."))
+		}
+		switch problem := fmt.Sprintf("%d secret(s) in a running program's command line", len(exposed)); {
+		case len(exposed) > 0:
+			check(doctor.Fail, "Processes", problem+", listed above")
+			problems = append(problems, problem)
+		case err != nil:
+			check(doctor.Attention, "Processes", "could not be checked")
+		default:
+			check(doctor.Pass, "Processes", "no secret in a running program's command line")
+		}
 	}
-	if err != nil {
-		fmt.Fprintln(c.Stderr, c.errs(yellow, fmt.Sprintf("Could not check running programs for secrets: %v", err)))
+
+	// What needs action comes first, and the checklist and verdict last, so a long
+	// report still ends with how each check came out.
+	var blocks []string
+	if sections := report.Render(f); sections != "" {
+		blocks = append(blocks, sections)
 	}
-	for _, e := range exposed {
-		fmt.Fprintln(c.Stdout, c.out(red, fmt.Sprintf("\n%s is in the command line of %s (pid %d), where any process can read it.\n"+
-			"Start that program without it there (keyward mcp shows how for MCP servers), then rotate the secret.", e.Secret, e.Program, e.PID)))
-	}
-	if len(exposed) > 0 {
-		problems = append(problems, fmt.Sprintf("%d secret(s) in a running program's command line", len(exposed)))
-	}
-	// Last, so it sums up every check above; the reminders are advice, not problems.
+	blocks = append(blocks, alerts...)
+	blocks = append(blocks, report.Summary(f, checks, []string{c.skippedNote(gone), c.projectsNote()}), f.Verdict(checks, problems))
+	fmt.Fprint(c.Stdout, strings.Join(blocks, "\n"))
 	if len(problems) > 0 {
-		fmt.Fprintln(c.Stdout, c.out(red, "\nProblems found: "+strings.Join(problems, "; ")+"."))
 		return exitFailure
 	}
-	fmt.Fprintln(c.Stdout, c.out(green, "\nNo problems found."))
 	return exitOK
 }
 
-// mcpServers is loadAll, saying which configs it could not read.
-func (c *CLI) mcpServers() []mcpconfig.Server {
+// mcpServers is loadAll, saying on stderr which configs it could not read, and
+// returning how many.
+func (c *CLI) mcpServers() ([]mcpconfig.Server, int) {
 	if c.Home == "" {
-		return nil
+		return nil, 0
 	}
 	servers, errs := c.loadAll()
 	c.reportUnreadable(errs)
-	return servers
+	return servers, len(errs)
 }
 
 // checkVaultOpens decrypts one stored value, since keyward ls lists names without
-// the key and so cannot tell a vault that opens from one whose key is wrong.
-func (c *CLI) checkVaultOpens() bool {
+// the key and so cannot tell a vault that opens from one whose key is wrong. It
+// tries nothing where no value is stored.
+func (c *CLI) checkVaultOpens() (tried bool, err error) {
 	entries, err := c.Store.Entries()
 	if err != nil {
-		return true // doctor.Run has already reported an unreachable store
+		return false, nil // doctor.Run has already reported an unreachable store
 	}
 	for _, e := range entries {
 		if backup.IsKey(e.Name) {
@@ -877,14 +920,12 @@ func (c *CLI) checkVaultOpens() bool {
 		}
 		secret, err := c.Store.Get(e.Name)
 		if err != nil {
-			fmt.Fprintln(c.Stdout, c.out(red, fmt.Sprintf("\nThe vault does not open: %v", err)))
-			return false
+			return true, err
 		}
 		secret.Destroy()
-		fmt.Fprintln(c.Stdout, "\nThe vault opens with its key.")
-		return true
+		return true, nil
 	}
-	return true
+	return false, nil
 }
 
 // failResolve renders resolution failures with a suggested fix.

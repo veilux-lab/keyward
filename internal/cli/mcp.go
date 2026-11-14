@@ -772,12 +772,8 @@ func (c *CLI) skippedNote(gone []string) string {
 		c.tilde(filepath.Join(c.Home, ".claude.json")) + " by hand, with Claude Code closed."
 }
 
-func (c *CLI) tilde(s string) string {
-	if c.Home == "" {
-		return s
-	}
-	return strings.ReplaceAll(s, c.Home+"/", "~/")
-}
+// tilde shows paths under home as ~/, as doctor does.
+func (c *CLI) tilde(s string) string { return doctor.Format{Home: c.Home}.Tilde(s) }
 
 func indent(s, prefix string) string {
 	return prefix + strings.ReplaceAll(s, "\n", "\n"+prefix)
