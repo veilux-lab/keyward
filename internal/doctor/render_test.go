@@ -19,9 +19,9 @@ import (
 // of a report whatever their columns and wrapping.
 func flat(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// row is the first row of out that holds start, with the lines under it, as flat
-// makes them.
-func row(out, start string) string {
+// rows is each row of out with the lines under it, as flat makes them.
+func rows(out string) []string {
+	var got []string
 	lines := strings.Split(out, "\n")
 	for i, line := range lines {
 		if !strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "   ") {
@@ -31,8 +31,16 @@ func row(out, start string) string {
 		for end < len(lines) && strings.HasPrefix(lines[end], "   ") {
 			end++
 		}
-		if got := flat(strings.Join(lines[i:end], "\n")); strings.Contains(got+" ", start) {
-			return got
+		got = append(got, flat(strings.Join(lines[i:end], "\n")))
+	}
+	return got
+}
+
+// row is the first row of out that holds start.
+func row(out, start string) string {
+	for _, r := range rows(out) {
+		if strings.Contains(r+" ", start) {
+			return r
 		}
 	}
 	return ""
