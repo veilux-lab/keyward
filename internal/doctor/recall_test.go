@@ -537,11 +537,18 @@ func TestDoctorStillListsEveryShapeOfSecretItListed(t *testing.T) {
 		t.Errorf("%d of %d fake secrets are not listed: %s", n, perShape, what)
 	}
 
+	// Rows by where they are, read once: finding each in the whole report took
+	// minutes under the race detector.
+	byPlace := map[string]string{}
+	for _, got := range rows(r.Render(doctor.Format{})) {
+		if where, _, _ := strings.Cut(got, " "); byPlace[where] == "" {
+			byPlace[where] = got
+		}
+	}
 	// Each entry's label follows its tag and what holds it.
-	out := r.Render(doctor.Format{})
 	labelled := 0
 	for where, holds := range holder {
-		_, label, ok := strings.Cut(row(out, where+" "), " "+holds+" ")
+		_, label, ok := strings.Cut(byPlace[where]+" ", " "+holds+" ")
 		if p, placed := at[where]; ok && placed {
 			labelled++
 			if sharesFour(p.value, label) {
