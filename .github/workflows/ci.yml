@@ -29,6 +29,23 @@ jobs:
           make verify
           go test -tags integration -run '^$' ./...
 
+  # The release also verifies on Intel, where the race tests run slower, so this
+  # repeats it with the same limit: #30 passed verify and failed there. Not required.
+  verify-intel:
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Verify
+        run: |
+          make verify
+          go test -tags integration -run '^$' ./...
+
   # Installs through a local tap, uses keyward, and uninstalls with --purge on a
   # fresh runner; fails if anything keyward created is left. Not required.
   lifecycle:
