@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/veilux-lab/keyward/internal/migrate"
 )
 
 // Claude changes Claude Code's MCP servers through its own CLI, so a running
@@ -36,7 +38,7 @@ func FindClaude(path string, run func(string, ...string) ([]byte, error)) (Claud
 }
 
 // Commands shows what Apply will run, with literal env and header values hidden,
-// and what may be a secret in its args.
+// and what may be a secret in its args and other keys.
 func (c Claude) Commands(f Finding) []string {
 	def, _, err := c.definitions(f)
 	if err != nil {
@@ -73,10 +75,10 @@ func (c Claude) Apply(f Finding) error {
 	return c.check(f)
 }
 
-// Credentials names the fields of f that hold a credential doctor reports in env
-// or headers, in its current definition or, failing that, the one Apply would add.
-// claude mcp add-json gets either in its command line, which any process can
-// read, so Apply must not be run for f while there is one.
+// Credentials names the fields of f that hold a credential doctor reports in env,
+// headers or a key keyward keeps, in its current definition or, failing that, the
+// one Apply would add. claude mcp add-json gets either in its command line, which
+// any process can read, so Apply must not be run for f while there is one.
 func (c Claude) Credentials(f Finding) []string {
 	updated, original, err := c.definitions(f)
 	if err != nil {
@@ -89,7 +91,7 @@ func (c Claude) Credentials(f Finding) []string {
 		}
 		var fields []string
 		for _, l := range Literals(fromJSON("Claude Code", "", "", map[string]jsonServer{f.Name: s})) {
-			if l.Secret && (strings.HasPrefix(l.Field, "env.") || strings.HasPrefix(l.Field, "headers.")) {
+			if l.Secret && (l.Kept || strings.HasPrefix(l.Field, "env.") || strings.HasPrefix(l.Field, "headers.")) {
 				fields = append(fields, l.Field)
 			}
 		}
@@ -164,7 +166,7 @@ func (c Claude) current(f Finding) (map[string]any, error) {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		} `json:"projects"`
 	}
-	if err := json.Unmarshal(data, &doc); err != nil {
+	if err := unmarshalNumbers(data, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	servers := doc.MCPServers
@@ -193,20 +195,21 @@ func (c Claude) check(f Finding) error {
 }
 
 // printable is a JSON definition for the user to read, with each literal env and
-// header value hidden, and what may be a secret in its url and args.
+// header value hidden, and what may be a secret in its args and other keys, as a
+// printed entry hides it.
 func printable(def []byte) string {
 	var printed map[string]any
-	json.Unmarshal(def, &printed)
-	for _, field := range []string{"env", "headers"} {
-		values, _ := printed[field].(map[string]any)
-		for k, v := range values {
-			if s, ok := v.(string); ok {
-				values[k] = shown(s)
-			}
+	unmarshalNumbers(def, &printed)
+	for k, v := range printed {
+		// The args are hidden together, below, as one after a --header is a header.
+		if k == "args" {
+			continue
 		}
-	}
-	if url, ok := printed["url"].(string); ok {
-		printed["url"] = shownArg(url)
+		hide := shownArg
+		if migrate.NamesCredential(k) {
+			hide = shown
+		}
+		printed[k] = jsonShown(v, hide)
 	}
 	args, _ := printed["args"].([]any)
 	words := make([]string, len(args))

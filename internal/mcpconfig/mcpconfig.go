@@ -310,11 +310,8 @@ func (j *jsonServer) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, (*fields)(j)); err != nil {
 		return err
 	}
-	// A number is kept as written, as float64 would round a large one.
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
 	var all map[string]any
-	if err := dec.Decode(&all); err != nil {
+	if err := unmarshalNumbers(data, &all); err != nil {
 		return err
 	}
 	for _, k := range jsonKeys {
@@ -324,6 +321,18 @@ func (j *jsonServer) UnmarshalJSON(data []byte) error {
 		j.other = all
 	}
 	return nil
+}
+
+// unmarshalNumbers is json.Unmarshal, but keeps a number as written, as float64
+// would round a large one.
+func unmarshalNumbers(data []byte, into any) error {
+	// A decoder stops after the first value, so json.Unmarshal says what is wrong.
+	if !json.Valid(data) {
+		return json.Unmarshal(data, into)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	return dec.Decode(into)
 }
 
 func readJSON(path string, into any) (bool, error) {

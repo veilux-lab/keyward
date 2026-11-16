@@ -539,8 +539,17 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 			copilot += ", which starts a project's .mcp.json servers too,"
 		}
 		fix := "store it with keyward add NAME, write ${VAR} in its place, add export VAR='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"
+		env := "in env as VAR"
+		if l.Client == "Codex" {
+			env = "with env_vars = [\"VAR\"]"
+		}
 		key, inEnv := strings.CutPrefix(field, "env.")
 		switch name, inHTTPHeaders := strings.CutPrefix(field, "http_headers."); {
+		case l.Kept:
+			// A key keyward keeps gets no value from keyward run, and the client
+			// reads it as written.
+			fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it " + env + " instead, if the server reads it from there, " +
+				"or else remove it, if nothing needs it, as keyward cannot fill in a value " + l.Client + " reads itself; then run keyward mcp wrap"
 		case inEnv && l.Client == "Codex":
 			// Codex fills no variable in env, but passes on those env_vars names.
 			fix = "store it with keyward add NAME, remove it and add " + strconv.Quote(key) + " to env_vars, add export " + key + "='cap://NAME' to ~/.zshrc, and run keyward mcp wrap"
@@ -573,10 +582,6 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 		case strings.HasPrefix(l.Field, "args[") && !strings.Contains(l.Field, " ("):
 			// keyward run refuses a secret as an argument unless given
 			// --allow-command-line, but wrap leaves one in a header to mcp-remote.
-			env := "in env as VAR"
-			if l.Client == "Codex" {
-				env = "with env_vars = [\"VAR\"]"
-			}
 			fix = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it " + env + ", if the server reads it from there, " +
 				"or else write ${VAR} in its place, which wrap puts in the server's command line only if given --allow-command-line, unless it is in an mcp-remote --header; " +
 				"then run keyward mcp wrap"

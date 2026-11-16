@@ -910,6 +910,37 @@ func TestTheAdviceForACredentialInArgsSaysToPassItInEnv(t *testing.T) {
 	}
 }
 
+// keyward run resolves only a server's env, so the advice for a credential in a key
+// keyward keeps is to pass it in env instead, in each client's own way, if the
+// server reads it from there, as a remote one cannot, or else to remove it.
+func TestTheAdviceForACredentialInAKeptKeySaysToPassItInEnvOrRemoveIt(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, home, ".claude.json", `{"mcpServers": {"linear": {"type": "http", "url": "https://mcp.example.com/mcp", "oauth": {"clientSecret": "`+githubToken+`"}}}}`)
+	write(t, home, ".codex/config.toml", "[mcp_servers.linear]\ncommand = \"linear-mcp\"\napi_key = \""+githubToken+"\"\n")
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	r, err := doctor.Run(vault.NewMemory(), nil, servers)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	const store, then = "store it with keyward add NAME, add export VAR='cap://NAME' to ~/.zshrc, and pass it ",
+		" instead, if the server reads it from there, or else remove it, if nothing needs it, as keyward cannot fill in a value "
+	out := r.Render(doctor.Format{})
+	for start, want := range map[string]string{
+		"Claude Code server linear, oauth.clientSecret": store + "in env as VAR" + then + "Claude Code reads itself; then run keyward mcp wrap",
+		"Codex server linear, api_key":                  store + "with env_vars = [\"VAR\"]" + then + "Codex reads itself; then run keyward mcp wrap",
+	} {
+		if !strings.HasSuffix(row(out, start), " a GitHub token "+want) {
+			t.Errorf("the report lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 // Copilot CLI, once installed, starts the servers in a project's .mcp.json too, so
 // the advice for a credential in one's URL or args is the advice for Copilot's.
 func TestTheAdviceForAProjectsServerIsCopilotsOnceItIsInstalled(t *testing.T) {

@@ -87,9 +87,9 @@ anything else there is printed as written.
 `keyward mcp wrap` makes the changes for Claude Code after a "yes", through its
 own `claude mcp` command, and `keyward mcp unwrap` starts the servers without
 keyward again; restore the files that set their variables first. Both skip a
-server that holds a credential in its env or headers, since `claude mcp` would get
-it in its command line. Move it out as `keyward doctor` says, then run the command
-again.
+server that holds a credential in its env, headers or another setting, since
+`claude mcp` would get it in its command line. Move it out as `keyward doctor`
+says, then run the command again.
 
 For a server of another Claude Code project, run wrap in that project's folder,
 which keyward names. A server that reads a variable without naming it in its
