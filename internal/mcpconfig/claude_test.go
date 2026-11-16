@@ -3,6 +3,7 @@ package mcpconfig_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,6 +109,57 @@ func TestClaudeWrapKeepsOtherFieldsAndChecksTheResult(t *testing.T) {
 	}
 }
 
+// A number keyward keeps, alone or in an object, is passed on as written, in the
+// definition added and the original put back, and shown so: float64 would round a
+// large one.
+func TestClaudeKeepsLargeNumbersAsWritten(t *testing.T) {
+	const timeout, id = "12345678901234567890", "98765432109876543210"
+	home, fake, c := claudeHome(t, `{"pagerduty": {"command": "uvx", "args": ["pagerduty-mcp"], "env": {"PD_KEY": "${PD_KEY}"}, "timeout": `+timeout+`, "meta": {"id": `+id+`}}}`)
+	f := claudeFinding(t, home, true)
+	texts := c.Commands(f)[1:]
+	fake.failAdds = 2
+	err := c.Apply(f)
+	if err == nil {
+		t.Fatal("Apply succeeded")
+	}
+	for _, call := range fake.calls {
+		if strings.Contains(call, " add-json ") {
+			texts = append(texts, call)
+		}
+	}
+	texts = append(texts, err.Error())
+	if len(texts) != 4 {
+		t.Fatalf("add-json shown and run, and the error = %q", texts)
+	}
+	for _, text := range texts {
+		if !strings.Contains(text, `"timeout":`+timeout) || !strings.Contains(text, `"id":`+id) {
+			t.Errorf("a number is not as written: %s", text)
+		}
+	}
+}
+
+// A config changed since it was read, to one with text after its object, as
+// concurrent writes can leave, or to none, is not read, as Load would not read it,
+// and Apply runs nothing.
+func TestClaudeApplyRunsNothingOnAConfigLoadWouldNotRead(t *testing.T) {
+	for _, tc := range []struct {
+		change func(config string) string
+		want   string
+	}{
+		{func(config string) string { return config + " trailing" }, "invalid character 't' after top-level value"},
+		{func(string) string { return "" }, "unexpected end of JSON input"},
+	} {
+		home, fake, c := claudeHome(t, `{"pagerduty": {"command": "uvx", "args": ["pagerduty-mcp"], "env": {"PD_KEY": "${PD_KEY}"}}}`)
+		f := claudeFinding(t, home, true)
+		data, _ := os.ReadFile(fake.config)
+		write(t, fake.config, tc.change(string(data)))
+		calls := len(fake.calls)
+		if err := c.Apply(f); err == nil || !strings.Contains(err.Error(), tc.want) || len(fake.calls) > calls {
+			t.Errorf("Apply error = %v, want %q, and calls %q", err, tc.want, fake.calls[calls:])
+		}
+	}
+}
+
 // If adding fails after the remove, the original definition is put back.
 func TestClaudeApplyRestoresTheServerWhenAddingFails(t *testing.T) {
 	home, fake, c := claudeHome(t, `{"pagerduty": {"command": "uvx", "args": ["pagerduty-mcp"], "env": {"PD_KEY": "${PD_KEY}"}}}`)
@@ -163,12 +215,12 @@ func TestClaudeCommandsHideLiteralsThatApplyKeeps(t *testing.T) {
 	}
 }
 
-// A secret in a URL or an argument is hidden too: in the commands wrap and unwrap
-// show, in unwrap's suggestion, and in each error Apply returns, from putting the
-// original back, failing to, or reading back another definition. The definition
-// added keeps it. wrap quotes JSON or a quoted value again in its script, so a
-// secret there is behind an escaped quote.
-func TestClaudeHidesSecretsInTheURLAndArgumentsThatApplyKeeps(t *testing.T) {
+// A secret in a URL, an argument or another key is hidden too: in the commands
+// wrap and unwrap show, in unwrap's suggestion, and in each error Apply returns,
+// from putting the original back, failing to, or reading back another definition.
+// The definition added keeps it. wrap quotes JSON or a quoted value again in its
+// script, so a secret there is behind an escaped quote.
+func TestClaudeHidesSecretsOutsideEnvAndHeadersThatApplyKeeps(t *testing.T) {
 	for _, tc := range []struct {
 		server  string
 		secrets []string
@@ -194,6 +246,10 @@ func TestClaudeHidesSecretsInTheURLAndArgumentsThatApplyKeeps(t *testing.T) {
 		{`{"apart": {"command": "npx", "args": ["-y", "mcp-remote", "https://api.example.com/mcp", "--header", "X-Api-Key:` + opaqueHeader + `", "--header=DD-API-KEY: ` + hexHeader + `"],
 			"env": {"PD_KEY": "${PD_KEY}"}}}`,
 			[]string{opaqueHeader, hexHeader}},
+		// A key named like a credential is hidden whole, and so is a value in an object.
+		{`{"kept": {"command": "uvx", "args": ["kept-mcp"], "env": {"PD_KEY": "${PD_KEY}"}, "password": "` + namedValue + `", "note": "` + argToken + `",
+			"oauth": {"clientSecret": "` + opaqueToken + `", "callbackPort": 8080}}}`,
+			[]string{namedValue, argToken, opaqueToken}},
 	} {
 		home, fake, c := claudeHome(t, tc.server)
 		f := claudeFinding(t, home, true)
@@ -236,6 +292,14 @@ func TestClaudeHidesSecretsInTheURLAndArgumentsThatApplyKeeps(t *testing.T) {
 				t.Errorf("printed %q:\n%s", value, printed)
 			}
 		}
+	}
+}
+
+// A secret in the args shows as its own length, as they are hidden together, once.
+func TestClaudeCommandsShowASecretArgumentAsItsLength(t *testing.T) {
+	home, _, c := claudeHome(t, `{"tool": {"command": "uvx", "args": ["tool-mcp", "--token", "`+argToken+`"], "env": {"PD_KEY": "${PD_KEY}"}}}`)
+	if cmds := c.Commands(claudeFinding(t, home, true)); !strings.Contains(cmds[1], fmt.Sprintf(`"--token","<%d bytes hidden>"`, len(argToken))) {
+		t.Errorf("command = %s", cmds[1])
 	}
 }
 

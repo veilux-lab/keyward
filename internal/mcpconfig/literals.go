@@ -21,10 +21,14 @@ type Literal struct {
 	// or one in a project's .mcp.json once it is installed.
 	Copilot bool
 	// Field is the key that holds it: env.NAME, headers.NAME, http_headers.NAME,
-	// url, or args[N]. In a bridge keyward wrote, it also says which of the remote
-	// server's headers, or its URL, the text is, as in "args[6] (its mcp-remote
-	// URL)" or "env.KW_HDR_1 (from its X-Api-Key header)".
+	// url, args[N], or one Kept marks, as password or oauth.clientSecret. In a
+	// bridge keyward wrote, it also says which of the remote server's headers, or
+	// its URL, the text is, as in "args[6] (its mcp-remote URL)" or "env.KW_HDR_1
+	// (from its X-Api-Key header)".
 	Field string
+	// Kept marks a key keyward does not read but keeps as written, which keyward
+	// run passes no value to.
+	Kept bool
 	migrate.Detection
 }
 
@@ -54,12 +58,15 @@ func Literals(servers []Server) []Literal {
 			s.Env, s.Headers, as = putBack(s.Env, bridge.Headers, script)
 			s.URL, s.Args, as["url"] = bridge.URL, nil, script+" (its mcp-remote URL)"
 		}
+		literal := Literal{Client: s.Client, Config: s.Config, Server: s.Name, Project: s.Project, Copilot: s.byCopilot()}
 		add := func(field string, d migrate.Detection) {
 			if name, ok := as[field]; ok {
 				field = name
 			}
 			if d.Secret || d.Possible {
-				found = append(found, Literal{Client: s.Client, Config: s.Config, Server: s.Name, Project: s.Project, Copilot: s.byCopilot(), Field: field, Detection: d})
+				l := literal
+				l.Field, l.Detection = field, d
+				found = append(found, l)
 			}
 		}
 		// A placeholder holds no credential. An argument is not judged so, as a
@@ -96,11 +103,48 @@ func Literals(servers []Server) []Literal {
 			}
 			add(fmt.Sprintf("args[%d]", i), d)
 		}
+		// A client's own setting, as an OAuth client's ID, can look as random as a
+		// key, so a key keyward keeps counts only as a secret.
+		for k, v := range s.other {
+			keptSecrets(k, k, v, func(field string, d migrate.Detection) {
+				l := literal
+				l.Field, l.Kept, l.Detection = field, true, d
+				found = append(found, l)
+			})
+		}
 	}
 	slices.SortFunc(found, func(a, b Literal) int {
 		return strings.Compare(a.Client+a.Config+a.Server+a.Field, b.Client+b.Config+b.Server+b.Field)
 	})
 	return found
+}
+
+// keptSecrets calls found for each secret in v, the value of field, a key keyward
+// keeps, judged as printing hides it: a string by its key and as an argument, an
+// array's items by its key, and an object's values each by its own.
+func keptSecrets(field, key string, v any, found func(field string, d migrate.Detection)) {
+	switch v := v.(type) {
+	case string:
+		if d := surer(migrate.Detect(key, v), argument(v)); d.Secret && !migrate.Placeholder(v) {
+			found(field, d)
+		}
+	case []any:
+		for i, item := range v {
+			keptSecrets(fmt.Sprintf("%s[%d]", field, i), key, item, found)
+		}
+	case []string:
+		for i, item := range v {
+			keptSecrets(fmt.Sprintf("%s[%d]", field, i), key, item, found)
+		}
+	case map[string]any:
+		for k, item := range v {
+			keptSecrets(field+"."+k, k, item, found)
+		}
+	case map[string]string:
+		for k, item := range v {
+			keptSecrets(field+"."+k, k, item, found)
+		}
+	}
 }
 
 // movedText is a bridge header's ${KW_HDR_n}, named by headerVar, which holds text

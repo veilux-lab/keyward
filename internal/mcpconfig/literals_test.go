@@ -51,7 +51,9 @@ func literalsFixture(t *testing.T) (home, workdir string) {
     "api": {"type": "http", "url": "https://api.example.com/v1/mcp", "headers": {"X-Api-Key": "`+namedValue+`"}},
     "remote": {"type": "http", "url": "https://bot:`+urlPassword+`@mcp.example.com/mcp"},
     "query": {"type": "sse", "url": "https://mcp.example.com/sse?key=`+queryKey+`&region=us"},
-    "pagerduty": {"command": "uvx", "args": ["pagerduty-mcp"], "env": {"PAGERDUTY_API_KEY": "`+namedValue+`", "MY_THING": "`+randomValue+`", "LEVEL": "info", "PD_KEY": "${PD_KEY}", "WRAPPED": "cap://pagerduty-key"}}
+    "pagerduty": {"command": "uvx", "args": ["pagerduty-mcp"], "env": {"PAGERDUTY_API_KEY": "`+namedValue+`", "MY_THING": "`+randomValue+`", "LEVEL": "info", "PD_KEY": "${PD_KEY}", "WRAPPED": "cap://pagerduty-key"},
+      "password": "`+namedValue+`", "oauth": {"clientSecret": "`+namedValue+`", "clientId": "`+randomValue+`", "callbackPort": 8080, "metadataUrl": "https://auth.example.com/mcp?key=`+queryKey+`"},
+      "apiKey": "<your-api-key>", "headersHelper": "printf 'Authorization: Bearer `+headerToken+`'", "apiKeys": ["`+namedValue+`"], "credentials": [{"auth": {"password": "`+namedValue+`"}}]}
   },
   "projects": {
     "`+workdir+`": {"mcpServers": {"here": {"command": "tool", "args": ["--token", "`+argToken+`"]}}},
@@ -72,6 +74,9 @@ X-Api-Key = "`+namedValue+`"
 [mcp_servers.pd]
 command = "uvx"
 enabled = false
+bearer_token = "`+jwtToken+`"
+oauth = { client_secret = "`+namedValue+`" }
+tokens = ["`+namedValue+`"]
 
 [mcp_servers.pd.env]
 PD_TOKEN = "`+jwtToken+`"
@@ -82,6 +87,9 @@ PD_TOKEN = "`+jwtToken+`"
 
 // Every value a definition holds is checked, in every client and every Claude Code
 // project. A placeholder or a reference is not plaintext, so it is not reported.
+// A key keyward keeps, or a value in an array or object it holds, is judged as
+// printing hides it, by its key and as an argument, but counts only as a secret:
+// a client's own setting, as an OAuth client's ID, can look as random as a key.
 func TestLiteralsFindCredentialsWrittenIntoServerDefinitions(t *testing.T) {
 	home, workdir := literalsFixture(t)
 	servers, errs := mcpconfig.LoadAll(home, workdir)
@@ -95,18 +103,27 @@ func TestLiteralsFindCredentialsWrittenIntoServerDefinitions(t *testing.T) {
 	}
 	// true marks a value whose own form proves it; false one only its name suggests.
 	want := map[string]bool{
-		"Claude Code github headers.Authorization":    true,
-		"Claude Code api headers.X-Api-Key":           false,
-		"Claude Code remote url":                      true,
-		"Claude Code query url":                       true,
-		"Claude Code pagerduty env.PAGERDUTY_API_KEY": false,
-		"Claude Code pagerduty env.MY_THING":          false,
-		"Claude Code here args[1]":                    true,
-		"Claude Code there env.OPENAI_API_KEY":        true,
-		"Codex linear http_headers.Authorization":     true,
-		"Codex figma http_headers.X-Api-Key":          false,
-		"Codex pd env.PD_TOKEN":                       true,
-		"Cursor postgres args[2]":                     true,
+		"Claude Code github headers.Authorization":           true,
+		"Claude Code api headers.X-Api-Key":                  false,
+		"Claude Code remote url":                             true,
+		"Claude Code query url":                              true,
+		"Claude Code pagerduty env.PAGERDUTY_API_KEY":        false,
+		"Claude Code pagerduty env.MY_THING":                 false,
+		"Claude Code pagerduty password":                     false,
+		"Claude Code pagerduty oauth.clientSecret":           false,
+		"Claude Code pagerduty oauth.metadataUrl":            true,
+		"Claude Code pagerduty headersHelper":                true,
+		"Claude Code pagerduty apiKeys[0]":                   false,
+		"Claude Code pagerduty credentials[0].auth.password": false,
+		"Claude Code here args[1]":                           true,
+		"Claude Code there env.OPENAI_API_KEY":               true,
+		"Codex linear http_headers.Authorization":            true,
+		"Codex figma http_headers.X-Api-Key":                 false,
+		"Codex pd env.PD_TOKEN":                              true,
+		"Codex pd bearer_token":                              true,
+		"Codex pd oauth.client_secret":                       false,
+		"Codex pd tokens[0]":                                 false,
+		"Cursor postgres args[2]":                            true,
 	}
 	if len(got) != len(want) {
 		t.Errorf("literals = %v, want %v", got, want)
