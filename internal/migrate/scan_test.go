@@ -1,6 +1,7 @@
 package migrate_test
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -314,6 +315,84 @@ func TestQuoteIsHowTheValueWasWritten(t *testing.T) {
 		}
 		if got := found[0].Quote(); got != want {
 			t.Errorf("Quote(%q) = %q, want %q", line, got, want)
+		}
+	}
+}
+
+// A document's line, as in an agent's instructions, holds a credential where a
+// known prefix starts a word, even in markdown's backticks or bold, in a URL with
+// a password, or set by name, as a shell, YAML or JSON sets one. Its hashes and
+// IDs look random, and a placeholder or an expansion holds none, nor an example
+// that says it is one: by example, as AWS's documented keys and the hosts kept
+// for documentation do, by words for a credential, filler or an ellipsis where
+// one goes, or by the login a local database is set up with. An ellipsis or a
+// tag after a token cuts short only one with little past its prefix. A
+// basic-auth credential is judged by the login it encodes.
+func TestInDocumentFindsOnlySureCredentials(t *testing.T) {
+	const token = "ghp_" + "FakeDocumentToken000000000000000000"
+	basic := func(login string) string {
+		return "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(login))
+	}
+	for _, tc := range []struct {
+		text  string
+		found bool
+		known bool
+	}{
+		{"Use the token `" + token + "` for the API.", true, true},
+		{"**" + token + "**", true, true},
+		{"Connect with postgres://app:S3cr3tP4ss@db.internal:5432/app", true, true},
+		{"export API_TOKEN=correct-horse-battery", true, false},
+		{"commit 3f9a2b7c1d8e4f6a0b5c9d2e7f1a4b8c3d6e9f02 fixed it", false, false},
+		{"export SERVICE_ID=Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3u", false, false},
+		{"export GITHUB_TOKEN=ghp_" + strings.Repeat("x", 36), false, false},
+		{"curl -H \"Authorization: Bearer $API_TOKEN\" https://api.example.com", false, false},
+		{"export HTTPS_PROXY=http://username:password@proxy.example.com:8080", false, false},
+		{"Connect with postgres://user:pass@localhost/db", false, false},
+		{"Connect with https://deploy:correcthorse@auth.internal/", true, true},
+		{"mongodb+srv://admin:admin@cluster0.example.net/test", false, false},
+		{"export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", false, false},
+		{"API_KEY=your-api-key-here", false, false},
+		{"export EXAMPLE_DB_PASSWORD=Correct-Horse-Battery", true, false},
+		{"export DB_PASSWORD=Secret-Horse-Battery", true, false},
+		{"export DB_PASSWORD=Come-Here-Now-42", true, false},
+		{"export ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxx", false, false},
+		{"SLACK_BOT_TOKEN=xoxb-XXXXXXXXXXXX-XXXXXXXXXXXX-XXXXXXXXXXXXXXXXXXXXXXXX", false, false},
+		{"ANTHROPIC_API_KEY=sk-ant-api03-<your-key>", false, false},
+		{"ANTHROPIC_API_KEY=sk-ant-api03-YOUR_KEY_HERE", false, false},
+		{"ANTHROPIC_API_KEY=sk-ant-api03-YOUR-API-KEY", false, false},
+		{"GITHUB_TOKEN=github_pat_xxxxxxxxxxxxxxxxxxxxxx_xxxx...", false, false},
+		{"OPENAI_API_KEY=sk-proj-...", false, false},
+		{"Authorization: Bearer sk-ant-api03-...", false, false},
+		{"Authorization: Bearer sk-ant-api03-<key>", false, false},
+		{"Use " + token + "... for the API", true, true},
+		{"Token " + token + "<br>", true, true},
+		{"Authorization: Bearer ghp_YOURTOKENHERE", false, false},
+		{"curl https://deploy:***@ci.corp.internal/job/build", false, false},
+		{"curl https://deploy:xxxx@ci.corp.internal/job/build", false, false},
+		{"curl https://deploy:REDACTED@ci.corp.internal/job/build", false, false},
+		{"curl https://deploy:[REDACTED]@ci.corp.internal/job/build", false, false},
+		{"curl https://deploy:%s@ci.corp.internal/job/build", false, false},
+		{"curl https://deploy:...@ci.corp.internal/job/build", false, false},
+		{"Connect with https://apikey:correcthorsebattery@auth.internal/", true, true},
+		{"DATABASE_URL=postgres://postgres:postgres@localhost:5432/app_dev", false, false},
+		{"Connect with mysql://root:root@127.0.0.1:3306/app", false, false},
+		{"Connect with postgres://app:S3cr3tP4ss@localhost/app", true, true},
+		{"Connect with postgres://postgres:postgres@db.internal:5432/app", true, true},
+		{basic("user:password"), false, false},
+		{basic("deploy:Tr0ub4dor3x"), true, true},
+		{"      POSTGRES_PASSWORD: Secret-Horse-Battery-9", true, false},
+		{"password: Secret-Horse-Battery-9", true, false},
+		{"  DD_API_KEY: 4f8a2c9e1b7d3e6f0a5c9d2e7f1a4b8c", true, false},
+		{`  "token": "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uWq0P",`, true, false},
+		{`  "token": "ghp_xxxxxxxxxxxxxxxxxxxx",`, false, false},
+		{"- DB_PASSWORD: Secret-Horse-Battery-9", true, false},
+		{"Password: `Secret-Horse-Battery-9`", true, false},
+		{"Auth: use the SSO login", false, false},
+		{"password: <your-password>", false, false},
+		{"API_TOKEN: my-secret-token", false, false},
+	} {
+		if d := migrate.InDocument(tc.text); d.Secret != tc.found || d.Possible || d.KnownShape != tc.known || d.Secret && d.Reason == "" {
+			t.Errorf("InDocument(%q) = %+v, want a secret %v, of a known shape %v", tc.text, d, tc.found, tc.known)
 		}
 	}
 }

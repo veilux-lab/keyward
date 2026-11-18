@@ -12,6 +12,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/agents"
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/doctor"
+	"github.com/veilux-lab/keyward/internal/handle"
 	"github.com/veilux-lab/keyward/internal/ledger"
 	"github.com/veilux-lab/keyward/internal/mcpconfig"
 	"github.com/veilux-lab/keyward/internal/migrate"
@@ -40,7 +41,7 @@ func (c *CLI) uninstall(args []string) int {
 		return c.fail("keyward uninstall: %v; nothing was changed", err)
 	}
 	// Purging while something still points at the vault would strand it for good.
-	if *purge && (len(p.manual) > 0 || len(p.gone) > 0 || len(p.files.Skipped) > 0 || len(p.unset) > 0) {
+	if *purge && (len(p.manual) > 0 || len(p.gone) > 0 || len(p.files.Skipped) > 0 || len(p.unset) > 0 || len(p.passing) > 0) {
 		return c.fail("keyward uninstall --purge: these would still use stored secrets after uninstall. Change them first, then run it again:\n%s",
 			p.leftForUser(c))
 	}
@@ -175,6 +176,9 @@ type offboarding struct {
 	folders []string
 	// unset are servers that, changed back, read a variable no file sets.
 	unset []unset
+	// passing are the agents' files that pass a reference to a stored secret on
+	// to the commands their agent starts.
+	passing []string
 }
 
 func (c *CLI) offboardingPlan() (offboarding, error) {
@@ -234,6 +238,9 @@ func (c *CLI) offboardingPlan() (offboarding, error) {
 		}
 	}
 	p.unset = unsetIn(slices.Concat(p.viaClaude, p.manual), slices.Concat(c.variableFiles(), p.paths))
+	if p.passing, err = c.passing(); err != nil {
+		return p, err
+	}
 	for _, config := range agents.Linked(c.Home) {
 		if !slices.ContainsFunc(p.links, func(r ledger.Record) bool { return r.Path == config }) {
 			p.handLinks = append(p.handLinks, config)
@@ -343,7 +350,41 @@ func (p offboarding) leftForUser(c *CLI) string {
 	for _, issue := range p.files.Skipped {
 		fmt.Fprintf(&b, "  %s: %s\n", c.tilde(issue.Location()), issue.Reason)
 	}
+	for _, path := range p.passing {
+		fmt.Fprintf(&b, "  %s: it passes cap:// references to the commands its agent starts, which only keyward run resolves; set each to its value, or remove it\n",
+			c.tilde(path))
+	}
 	return b.String()
+}
+
+// passing names the agents' files that pass a reference to a stored secret on
+// to the commands their agent starts, which keyward cannot change back.
+func (c *CLI) passing() ([]string, error) {
+	if c.Home == "" {
+		return nil, nil
+	}
+	entries, err := c.Store.Entries()
+	if err != nil {
+		return nil, err
+	}
+	stored := map[string]bool{}
+	for _, e := range entries {
+		stored[e.Name] = true
+	}
+	var found []string
+	for _, a := range mcpconfig.AgentFiles(c.Home, c.Workdir, mcpconfig.ClaudeProjects(c.Home)) {
+		content, err := os.ReadFile(a.Path)
+		if err != nil {
+			continue
+		}
+		if _, passed, _ := a.Read(content); slices.ContainsFunc(passed, func(ref string) bool {
+			h, err := handle.Parse(ref)
+			return err == nil && stored[h.Name]
+		}) {
+			found = append(found, a.Path)
+		}
+	}
+	return found, nil
 }
 
 // unset is a server that, changed back, reads variables from its client's
@@ -390,8 +431,8 @@ func unsetIn(findings []mcpconfig.Finding, files []string) []unset {
 }
 
 // variableFiles names the files that can set what a server reads from its
-// client's environment: those doctor reads but MCP configs, and each file the
-// ledger says migrate rewrote.
+// client's environment: those doctor reads by default but MCP configs, and each
+// file the ledger says migrate rewrote.
 func (c *CLI) variableFiles() []string {
 	var files []string
 	for _, path := range doctor.DefaultPaths(c.Home, c.Workdir) {
@@ -461,7 +502,7 @@ func (c *CLI) residue(purge bool, p offboarding) []string {
 			}
 		}
 	}
-	for _, path := range p.paths {
+	for _, path := range slices.Concat(p.paths, p.passing) {
 		if data, err := os.ReadFile(path); err == nil && strings.Contains(string(data), "cap://") {
 			left = append(left, c.tilde(path)+" still has cap:// references")
 		}

@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -188,10 +190,13 @@ func stablePath(home string) string {
 	return "keyward"
 }
 
-// runTool runs another tool's CLI, returning everything it printed.
+// runTool runs another tool's CLI, returning everything it printed. It leaves
+// out git's variables, which a hook that runs keyward sets, so that git, or a
+// tool that runs it, reads the repository in dir rather than the hook's.
 func runTool(dir string, argv ...string) ([]byte, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "GIT_") })
 	return cmd.CombinedOutput()
 }
 

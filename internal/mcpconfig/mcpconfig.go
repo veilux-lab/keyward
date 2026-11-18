@@ -2465,6 +2465,18 @@ func tomlValue(key string, v any, hide bool) string {
 			pairs = append(pairs, tomlKey(k)+" = "+quoteJSON(literal(v[k])))
 		}
 		return "{ " + strings.Join(pairs, ", ") + " }"
+	case map[string]any:
+		var pairs []string
+		for _, k := range slices.Sorted(maps.Keys(v)) {
+			var value string
+			if s, ok := v[k].(string); ok {
+				value = quoteJSON(literal(s))
+			} else {
+				value = tomlValue(k, v[k], hide)
+			}
+			pairs = append(pairs, tomlKey(k)+" = "+value)
+		}
+		return "{ " + strings.Join(pairs, ", ") + " }"
 	}
 	// A credential readTOML keeps raw, as a multi-line string, is printed hidden
 	// as a string, which is TOML, but a bare value, as a number, holds none.

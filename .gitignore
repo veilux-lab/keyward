@@ -8,3 +8,7 @@ coverage.html
 # frontend-slides working files (previews are throwaway)
 .frontend-slides/
 __pycache__/
+
+# Personal agent files: global git excludes do not travel with a clone.
+**/.claude/settings.local.json
+CLAUDE.local.md

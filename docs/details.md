@@ -146,6 +146,60 @@ Copilot CLI too. It does not check a server of another client, or one that start
 `keyward run` in a way it cannot read, as from a script file: start such a server
 once to see that it still runs.
 
+## Agents' own files
+
+`keyward doctor` reads the files AI agents keep for themselves, which any agent
+can read and a repository can publish, in home, the current folder and each
+Claude Code project in `~/.claude.json`. It lists those it read but those of
+other projects, which it counts.
+
+- Claude Code's settings: `.claude/settings.json` and `.claude/settings.local.json`,
+  in home and in a project. Claude Code saves a project's local settings at the
+  root of its git repository, a worktree's in its main checkout, and doctor reads
+  them there too.
+- Codex's `~/.codex/config.toml` beside its MCP servers, as its OpenTelemetry and
+  model providers' headers.
+- Instructions: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
+  `~/.codex/AGENTS.override.md`, `~/.copilot/copilot-instructions.md` and
+  `~/.gemini/GEMINI.md`, and in a project `CLAUDE.md`, `.claude/CLAUDE.md`,
+  `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` and
+  `.github/copilot-instructions.md`. Only what is surely a credential counts
+  there, in a line or set as a shell, YAML or JSON sets one: not an example, as
+  `user:password@` and `sk-ant-api03-xxxx` are, nor the login a local database
+  is set up with, as `postgres:postgres@localhost` is.
+
+When you answer "Yes, and don't ask again", Claude Code saves the approved
+command, or the prefix the prompt names, as an allow rule; text before that
+point, such as `PGPASSWORD=…`, is saved with it. It saves the rule in the
+project's `.claude/settings.local.json`, or where VS Code's approval card says,
+which can be the shared `.claude/settings.json`. So doctor reads each rule's
+command for a password: in a URL, after `Bearer`, in a variable or curl header
+named like a credential, or given to `mysql -p`, `sshpass -p` or `curl -u`.
+Remove a rule with `/permissions` in Claude Code; a command that reads the
+secret through `keyward run` saves none.
+
+Claude Code resolves no reference in a settings file's `env`. Its own variables,
+such as `ANTHROPIC_API_KEY`, come out, or move to the helper setting doctor names,
+as `apiKeyHelper`; a helper that reads a value through `keyward run` needs
+`--no-mask`. Doctor lists such a credential, and one in Codex's OpenTelemetry
+headers, as a warning rather than a problem, since keyward has no way to hold it
+there. A variable only the commands it starts need can hold `cap://NAME`,
+which a command started through `keyward run` resolves. `keyward uninstall`
+cannot change it back, so it lists the file, and `--purge` waits until you
+change it. Such a reference must resolve, but one in instructions or a rule is
+an example, or a command an agent may run, so it only counts as in use.
+
+doctor also asks git whether it tracks a personal file: `.claude/settings.local.json`,
+`CLAUDE.local.md`, or an agent's login in home, `~/.claude/.credentials.json` or
+`~/.codex/auth.json`, which doctor never reads. The global git excludes Claude
+Code writes for its local settings do not travel with a clone. Where git cannot
+read a repository, doctor does not say that none is tracked, and it does not see
+a home tracked through a bare repository.
+
+It does not yet read Codex's saved approvals in `~/.codex/rules/`, its profile
+files, a project's `.codex/config.toml`, or rules files under `.claude/rules/` and
+`.github/instructions/`.
+
 ## Moving to a new Mac
 
 Your secrets are in two places, and both must reach the new Mac: the vault file,

@@ -14,7 +14,9 @@ package doctor
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -69,18 +71,23 @@ type Report struct {
 	// deleted.
 	Scanned []string
 	Absent  []string
+	// OtherProjects counts the agents' files read in each other Claude Code
+	// project, too many to list.
+	OtherProjects map[string]int
 
 	// Malformed and Dangling are problems: each breaks a command today.
 	Malformed []Reference
 	Dangling  []Reference
 
-	// Plaintext, Unmovable and Literals look like credentials: values in the
-	// files, other text in them, and values in MCP server definitions. Those of a
-	// known shape, and the nearby lines listed with them, are problems; the rest
-	// only may be credentials.
+	// Plaintext, Unmovable, Literals and Agents look like credentials: values in
+	// the files, other text in them, values in MCP server definitions, and in the
+	// agents' own files. Those of a known shape, and the nearby lines listed with
+	// them, are problems, but for those an agent reads itself, which keyward
+	// cannot hold; the rest only may be credentials.
 	Plaintext []Plaintext
 	Unmovable []Unmovable
 	Literals  []mcpconfig.Literal
+	Agents    []mcpconfig.AgentLiteral
 
 	// Orphaned is verifiably unused: provenance names a scanned file that no longer
 	// references it.
@@ -97,10 +104,11 @@ type Report struct {
 // malformed reference breaks a command; a credential in plaintext is open to any
 // agent, and is counted as the report's list of them counts it, every line of a
 // range in it as one. Orphans, unknowns and the other values that only may be
-// credentials do not count: they cost a line of output, not a failure.
+// credentials do not count: they cost a line of output, not a failure. Nor does
+// one keyward cannot hold, which would fail doctor for good.
 func (r *Report) Problems() []string {
 	problems := r.brokenReferences()
-	if certain, _ := r.plaintextEntries(); certain.lines > 0 {
+	if certain, _, _ := r.plaintextEntries(); certain.lines > 0 {
 		problems = append(problems, fmt.Sprintf("%d credential(s) in plaintext", certain.lines))
 	}
 	return problems
@@ -122,15 +130,21 @@ func (r *Report) brokenReferences() []string {
 // Checks says how each of the report's checks came out, in the order the
 // checklist shows them.
 func (r *Report) Checks() []Check {
-	certain, possible := r.plaintextEntries()
+	certain, unheld, possible := r.plaintextEntries()
 	stored := fmt.Sprintf("%d secret(s) stored and referenced", len(r.Referenced))
 	references := Check{Pass, "References", stored}
 	if broken := r.brokenReferences(); len(broken) > 0 {
 		references = Check{Fail, "References", stored + "; " + strings.Join(broken, "; ") + ", listed above"}
 	}
-	known := Check{Pass, "Known secrets", "none in plaintext"}
+	var known []Check
 	if certain.lines > 0 {
-		known = Check{Fail, "Known secrets", fmt.Sprintf("%d credential(s) in plaintext, listed above", certain.lines)}
+		known = append(known, Check{Fail, "Known secrets", fmt.Sprintf("%d credential(s) in plaintext, listed above", certain.lines)})
+	}
+	if unheld.lines > 0 {
+		known = append(known, Check{Attention, "Known secrets", fmt.Sprintf("%d credential(s) keyward can't hold, listed above", unheld.lines)})
+	}
+	if len(known) == 0 {
+		known = []Check{{Pass, "Known secrets", "none in plaintext"}}
 	}
 	maybe := Check{Pass, "Maybe secrets", "nothing else looks like one"}
 	if possible.lines > 0 {
@@ -147,17 +161,18 @@ func (r *Report) Checks() []Check {
 	if len(unused) > 0 {
 		unreferenced = Check{Attention, "Unused", strings.Join(unused, "; ") + ", listed above"}
 	}
-	return []Check{references, known, maybe, unreferenced}
+	return append(append([]Check{references}, known...), maybe, unreferenced)
 }
 
-// Run scans paths and the configs servers were read from, compares what they
-// reference against what is stored, and looks for credentials still in plaintext
-// in those files and in servers.
+// Run scans paths, the configs servers were read from, and agents, the agents'
+// own files, compares what they reference against what is stored, and looks for
+// credentials still in plaintext in those files and in servers.
 //
 // A path that does not exist is recorded in Absent rather than failing: the default
-// set includes files many machines will not have.
-func Run(store vault.Store, paths []string, servers []mcpconfig.Server) (*Report, error) {
-	r := &Report{Literals: mcpconfig.Literals(servers)}
+// set includes files many machines will not have. An agent's file that does not
+// exist is left out, as most do not.
+func Run(store vault.Store, paths []string, servers []mcpconfig.Server, agents ...mcpconfig.AgentFile) (*Report, error) {
+	r := &Report{Literals: mcpconfig.Literals(servers), OtherProjects: map[string]int{}}
 
 	// refs maps a name, lowercased as keyward run reads it, to every place it is
 	// referenced.
@@ -165,8 +180,8 @@ func Run(store vault.Store, paths []string, servers []mcpconfig.Server) (*Report
 	// scanned lets provenance be judged: a file absent from this set was never
 	// looked at, so it can prove nothing.
 	scanned := make(map[string]bool)
-	// seen keeps a file named twice, perhaps by a relative path, from being
-	// counted twice.
+	// seen keeps a file named twice, perhaps by a relative path or a link, from
+	// being counted twice.
 	seen := make(map[string]bool)
 	// configs names the MCP configs whose servers were read, such as a
 	// project's .mcp.json, beyond those IsMCPConfig names. Each is scanned for
@@ -176,17 +191,23 @@ func Run(store vault.Store, paths []string, servers []mcpconfig.Server) (*Report
 	files := slices.Clone(paths)
 	for _, s := range servers {
 		file, _, _ := strings.Cut(s.Config, " (project ")
-		if !configs[file] {
-			configs[file] = true
+		if key := absolute(file); !configs[key] {
+			configs[key] = true
 			files = append(files, file)
+		}
+	}
+	// An agent's file is read once, under the first path that names it.
+	var unique []mcpconfig.AgentFile
+	agentFiles := make(map[string]bool)
+	for _, a := range agents {
+		if key := absolute(a.Path); !agentFiles[key] {
+			agentFiles[key] = true
+			unique = append(unique, a)
 		}
 	}
 
 	for _, path := range files {
-		key := path
-		if abs, err := filepath.Abs(path); err == nil {
-			key = abs
-		}
+		key := absolute(path)
 		if seen[key] {
 			continue
 		}
@@ -206,12 +227,69 @@ func Run(store vault.Store, paths []string, servers []mcpconfig.Server) (*Report
 			refs[name] = append(refs[name], ref)
 		}
 		r.Malformed = append(r.Malformed, malformed...)
-		// MCP configs are checked through their servers: read as shell, they
-		// would count a token twice.
-		if !IsMCPConfig(path) && !configs[key] {
+		// MCP configs are checked through their servers, and agents' files as
+		// their agents read them, below: read as shell, they would count a token
+		// twice.
+		if !IsMCPConfig(path) && !configs[key] && !agentFiles[key] {
 			plaintext, unmovable := scanPlaintext(path, content)
 			r.Plaintext = append(r.Plaintext, plaintext...)
 			r.Unmovable = append(r.Unmovable, unmovable...)
+		}
+	}
+
+	// used names the secrets an agent's file refers to where a missing one breaks
+	// nothing: its instructions and saved rules hold examples, and commands it may
+	// run. Only a reference its settings pass to the commands it starts must
+	// resolve.
+	used := map[string]bool{}
+	for _, a := range unique {
+		content, err := os.ReadFile(a.Path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		var literals []mcpconfig.AgentLiteral
+		var passed []string
+		if err == nil {
+			literals, passed, err = a.Read(content)
+		}
+		r.Agents = append(r.Agents, literals...)
+		// Codex's config, which DefaultPaths names, and a file named to check were
+		// read above for references.
+		key := absolute(a.Path)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if err != nil {
+			r.Absent = append(r.Absent, a.Path)
+			continue
+		}
+		if a.Project == "" {
+			r.Scanned = append(r.Scanned, a.Path)
+		} else {
+			r.OtherProjects[a.Project]++
+		}
+		scanned[a.Path] = true
+		breaks := map[string]bool{}
+		for _, p := range passed {
+			valid, malformed := scanReferences(a.Path, []byte(p))
+			for _, ref := range append(valid, malformed...) {
+				breaks[ref.Name] = true
+			}
+		}
+		valid, malformed := scanReferences(a.Path, content)
+		for _, ref := range valid {
+			name, _ := handle.Normalize(ref.Name)
+			if breaks[ref.Name] {
+				refs[name] = append(refs[name], ref)
+			} else {
+				used[name] = true
+			}
+		}
+		for _, ref := range malformed {
+			if breaks[ref.Name] {
+				r.Malformed = append(r.Malformed, ref)
+			}
 		}
 	}
 
@@ -238,7 +316,7 @@ func Run(store vault.Store, paths []string, servers []mcpconfig.Server) (*Report
 		if backup.IsKey(e.Name) {
 			continue
 		}
-		if len(refs[e.Name]) > 0 {
+		if len(refs[e.Name]) > 0 || used[e.Name] {
 			// Referenced anywhere at all is enough. Provenance pointing elsewhere just
 			// means the value moved.
 			r.Referenced = append(r.Referenced, e.Name)
@@ -406,6 +484,19 @@ func sourceFile(note string) string {
 	return note[:i]
 }
 
+// absolute is path made absolute, with its links followed, or as it is if it
+// cannot be, so a file named twice, perhaps by a relative path or a link, is
+// read once.
+func absolute(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return path
+}
+
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -425,20 +516,21 @@ func sortFindings(f []Finding) {
 }
 
 // The tags of a row in a list of credentials say how to fix it: migrate moves its
-// value, add stores it, edit means removing it by hand, and an MCP server's fix
-// follows its row.
+// value, add stores it, edit means removing it by hand, and an MCP server's fix,
+// as an agent setting's, follows its row.
 const (
 	tagMigrate = "migrate"
 	tagAdd     = "add"
 	tagEdit    = "edit"
 	tagMCP     = "mcp"
+	tagAgent   = "agent"
 )
 
 // entry is a row of a list of credentials: where it is, its tag, what holds it
-// and why it looks like one. An MCP server's carries its fix, which differs from
-// server to server. file and line place a line's entry, lines counts the lines it
-// names, and paired marks one whose line is listed twice, for its value and for
-// the comment beside it.
+// and why it looks like one. An MCP server's, or an agent setting's, carries its
+// fix, which differs from row to row. file and line place a line's entry, lines
+// counts the lines it names, and paired marks one whose line is listed twice, for
+// its value and for the comment beside it.
 type entry struct {
 	where, tag, what, reason, fix string
 	file                          string
@@ -459,7 +551,7 @@ type listing struct {
 // the user may mark.
 func (l listing) eachLine() string {
 	if l.ranges {
-		return "marking each line of a range, "
+		return "; mark each line of a range"
 	}
 	return ""
 }
@@ -469,11 +561,12 @@ func (l listing) eachLine() string {
 const maxGap = 3
 
 // plaintextEntries lists each value that looks like a credential: those of a
-// known shape, and those that only may be credentials. Nearby text migrate cannot
-// move is listed as one range, as stretches merges it, with those of a known
-// shape if one of its lines is. Lines are listed in file order, and MCP servers
-// after them.
-func (r *Report) plaintextEntries() (certain, possible listing) {
+// known shape, those of a known shape an agent reads itself, which keyward cannot
+// hold, and those that only may be credentials. Nearby text migrate cannot move
+// is listed as one range, as stretches merges it, with those of a known shape if
+// one of its lines is. Lines and agents' settings are listed in file order, and
+// MCP servers after them.
+func (r *Report) plaintextEntries() (certain, unheld, possible listing) {
 	// add lists an entry naming lines with those of a known shape if known says one
 	// of them holds one. Marking such an entry's lines would hide a credential, so
 	// that is never advised.
@@ -508,6 +601,21 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 		add(entry{where: fmt.Sprintf("%s:%d", p.File, p.Line), tag: tag, what: p.Name, reason: p.Reason, file: p.File, line: p.Line, lines: 1, paired: paired},
 			p.KnownShape, !paired)
 	}
+	// A line of an agent's instructions is no shell file's, so it is never marked.
+	for _, a := range r.Agents {
+		e := entry{where: a.File, tag: tagAgent, what: a.Field, reason: a.Reason, fix: a.Fix, file: a.File, lines: 1}
+		switch {
+		case a.Line > 0:
+			e.where, e.tag, e.what, e.line = fmt.Sprintf("%s:%d", a.File, a.Line), tagEdit, "instructions", a.Line
+		case !a.KnownShape:
+			e.fix = "if it is one, " + e.fix
+		}
+		if a.KnownShape && a.Unholdable {
+			unheld.entries, unheld.lines = append(unheld.entries, e), unheld.lines+1
+			continue
+		}
+		add(e, a.KnownShape, false)
+	}
 	for _, s := range stretches(r.Unmovable, r.Plaintext) {
 		e := entry{where: fmt.Sprintf("%s:%d", s.File, s.Line), tag: tagEdit, what: s.Kind, reason: migrate.Describe(s.Labels), file: s.File, line: s.Line, lines: s.lines, paired: s.valued}
 		if s.lines > 1 {
@@ -526,8 +634,9 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 	byPlace := func(a, b entry) int {
 		return cmp.Or(cmp.Compare(rank(a.file), rank(b.file)), strings.Compare(a.file, b.file), cmp.Compare(a.line, b.line))
 	}
-	slices.SortStableFunc(certain.entries, byPlace)
-	slices.SortStableFunc(possible.entries, byPlace)
+	for _, l := range []*listing{&certain, &unheld, &possible} {
+		slices.SortStableFunc(l.entries, byPlace)
+	}
 	// keyward run resolves only its environment, so a field outside env reads a
 	// reference through a variable. One in env does too, of its own name: unwrap
 	// and uninstall read it from that, which restoring ~/.zshrc then sets. wrap
@@ -605,7 +714,7 @@ func (r *Report) plaintextEntries() (certain, possible listing) {
 		what := fmt.Sprintf("%s server %s, %s%s", l.Client, l.Server, l.Field, l.Config[len(config):])
 		add(entry{where: config, tag: tagMCP, what: what, reason: l.Reason, fix: fix, lines: 1}, l.KnownShape, false)
 	}
-	return certain, possible
+	return certain, unheld, possible
 }
 
 // A stretch is lines of one file holding text migrate cannot move the same way,
@@ -647,9 +756,9 @@ func stretches(found []Unmovable, plain []Plaintext) []stretch {
 	return merged
 }
 
-// DefaultPaths returns the files doctor reads when none are given: the shell
-// startup files, a .env in the working directory, and the config of the agents
-// most likely to hold references.
+// DefaultPaths returns the files doctor reads by default, beside the agents' own
+// files: the shell startup files, a .env in the working directory, and the
+// config of the agents most likely to hold references.
 //
 // The list is intentionally broad. Every file added makes an "unreferenced" verdict
 // more trustworthy, and a file that does not exist costs one line of output.

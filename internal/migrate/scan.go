@@ -245,7 +245,7 @@ func assignments(text string) []clue {
 	var found []clue
 	add := func(name, value string, from, to int) {
 		if d := Detect(name, value); d.Secret || d.Possible {
-			found = append(found, clue{start: offset + spans[from][0], end: offset + spans[to][1], known: d.KnownShape, label: d.label, placeholder: Placeholder(value)})
+			found = append(found, clue{start: offset + spans[from][0], end: offset + spans[to][1], known: d.KnownShape, label: d.label, placeholder: Placeholder(value), possible: d.Possible})
 		}
 	}
 	for i, field := range fields {

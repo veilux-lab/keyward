@@ -700,23 +700,16 @@ func ledgerFolders(records []ledger.Record, home string) []string {
 // servers of, as neither lists its projects anywhere keyward reads, or is empty
 // if neither is installed.
 func (c *CLI) projectsNote() string {
-	var files, clients []string
-	for _, p := range []struct{ dir, file, client string }{
-		{".cursor", "a Cursor project's .cursor/mcp.json", "Cursor"},
-		{".copilot", "a Copilot CLI project's .github/mcp.json", mcpconfig.Copilot},
-	} {
+	var clients []string
+	for _, p := range []struct{ dir, client string }{{".cursor", "Cursor"}, {".copilot", mcpconfig.Copilot}} {
 		if info, err := os.Stat(filepath.Join(c.Home, p.dir)); err == nil && info.IsDir() {
-			files, clients = append(files, p.file), append(clients, p.client)
+			clients = append(clients, p.client)
 		}
 	}
-	if len(files) == 0 {
+	if len(clients) == 0 {
 		return ""
 	}
-	opened := clients[0]
-	if len(clients) > 1 {
-		opened = "either"
-	}
-	return "keyward reads " + strings.Join(files, " and ") + " only in this folder and in those of Claude Code's projects, so run keyward mcp in any other folder you open in " + opened + "."
+	return "keyward finds " + strings.Join(clients, " and ") + " project servers only here and in Claude Code's projects; run keyward mcp in any other such project."
 }
 
 // checkServers returns the servers that need a change, and apart from them those

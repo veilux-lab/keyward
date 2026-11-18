@@ -300,15 +300,13 @@ func TestALegendListsOnlyTheTagsItsSectionUses(t *testing.T) {
 		"  ~/.zshrc:1  migrate  GITHUB_TOKEN  a GitHub token\n" +
 		"\n" +
 		"  To fix each:\n" +
-		"    migrate  move it with keyward migrate ~/.zshrc (preview with --dry-run), or store it with\n" +
-		"             keyward add NAME and set the variable to 'cap://NAME'\n" +
-		"    e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'\n" +
-		"  Then rotate each one, and store its new value with keyward add --force NAME.\n" +
-		"  AI agents must not open these lines or print these configs; ask the user to fix them.\n\n"; certain != want {
+		"    migrate  keyward migrate ~/.zshrc moves it (try --dry-run first)\n" +
+		"  Fix these yourself, not with an AI agent, then rotate each and store the new value with keyward\n" +
+		"  add --force NAME.\n\n"; certain != want {
 		t.Errorf("the credentials read\n%s\nwant\n%s", certain, want)
 	}
-	if want := "If one is a credential: add store it with keyward add NAME and set the variable to 'cap://NAME'; migrate moves only values it is sure of " +
-		"edit remove it by hand in an editor e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' Rotate each one"; !strings.Contains(flat(possible), want) {
+	if want := "If one is a credential: add keyward add NAME, then set the variable to 'cap://NAME' " +
+		"edit remove it in an editor e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' Judge these yourself"; !strings.Contains(flat(possible), want) {
 		t.Errorf("the values lack %q:\n%s", want, possible)
 	}
 }
@@ -324,17 +322,21 @@ func TestTheLegendNamesTheFileToMigrateWhenThereIsOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if want := "migrate move it with keyward migrate on the file it is in (preview with --dry-run), or store it"; !strings.Contains(flat(r.Render(doctor.Format{Home: home})), want) {
+	if want := "migrate keyward migrate FILE moves it (try --dry-run first)"; !strings.Contains(flat(r.Render(doctor.Format{Home: home})), want) {
 		t.Errorf("the report lacks %q:\n%s", want, r.Render(doctor.Format{Home: home}))
 	}
 }
 
-// The legend gives an example of the first value of its section whose name can
-// become a reference's, and none where no value's can.
+// The legend gives an example of the first value of its section to store with
+// keyward add whose name can become a reference's, and none where no such value's
+// can, or where migrate moves them all.
 func TestTheExampleIsTheFirstValueThatCanBeAReference(t *testing.T) {
 	const rc = "/home/someone/.zshrc"
 	possible := func(line int, name string) doctor.Plaintext {
 		return doctor.Plaintext{File: rc, Line: line, Name: name, Detection: migrate.Detection{Possible: true, Reason: "a value named like a credential"}}
+	}
+	named := func(line int, name string) doctor.Plaintext {
+		return doctor.Plaintext{File: rc, Line: line, Name: name, Detection: migrate.Detection{Secret: true, Reason: "the variable name suggests a credential"}}
 	}
 	comment := doctor.Unmovable{File: rc, UnmovableLine: migrate.UnmovableLine{Line: 9, Kind: "comment", Labels: []migrate.Label{{One: "32 hex characters", Many: "runs of 32 hex characters"}}}}
 	for _, tc := range []struct {
@@ -346,6 +348,8 @@ func TestTheExampleIsTheFirstValueThatCanBeAReference(t *testing.T) {
 		{"the first value", []doctor.Plaintext{possible(1, "BUILD_ID"), possible(2, "BUILD_REF")}, nil, "e.g. keyward add build-id and set BUILD_ID to 'cap://build-id'"},
 		{"the first that can be one", []doctor.Plaintext{possible(1, "_TOKEN"), possible(2, "BUILD_REF")}, nil, "e.g. keyward add build-ref and set BUILD_REF to 'cap://build-ref'"},
 		{"no value that can be one", []doctor.Plaintext{possible(1, "_TOKEN")}, nil, ""},
+		{"the first to add", []doctor.Plaintext{named(1, "MY_SERVICE_TOKEN"), possible(2, "BUILD_ID")}, nil, "e.g. keyward add build-id and set BUILD_ID to 'cap://build-id'"},
+		{"none to add", []doctor.Plaintext{named(1, "MY_SERVICE_TOKEN")}, nil, ""},
 		{"no value", nil, []doctor.Unmovable{comment}, ""},
 	} {
 		r := &doctor.Report{Scanned: []string{rc}, Plaintext: tc.plaintext, Unmovable: tc.unmovable}
@@ -359,7 +363,7 @@ func TestTheExampleIsTheFirstValueThatCanBeAReference(t *testing.T) {
 	}
 }
 
-const listedTwice = "Marking leaves the whole line alone, so mark a line listed twice, for its value and for the comment beside it, only once neither holds a secret."
+const listedTwice = "A marked line is ignored whole, so mark a line listed twice only if neither part is a secret."
 
 // Marking a line marks its value and the comment beside it alike, so the values
 // that may be credentials say so where their section lists a value whose comment
@@ -386,7 +390,7 @@ func TestTheValuesSayALineListedTwiceIsMarkedOnlyOnceNeitherHoldsASecret(t *test
 		if got := strings.Count(flat(out), listedTwice); got != map[bool]int{true: 1}[tc.want] {
 			t.Errorf("%s: the report says a line listed twice is marked once neither holds a secret %d times:\n%s", tc.name, got, out)
 		}
-		if strings.Contains(section(out, "✗ "), "Marking") {
+		if strings.Contains(strings.ToLower(section(out, "✗ ")), "mark") {
 			t.Errorf("%s: the credentials speak of marking:\n%s", tc.name, out)
 		}
 	}
@@ -398,7 +402,7 @@ func TestTheIgnoreSentenceAppearsOnlyWhereALineCanBeMarked(t *testing.T) {
 	home := t.TempDir()
 	rc := write(t, home, ".zshrc", "export BUILD_ID="+mixedToken+"\n")
 	servers := []mcpconfig.Server{{Client: "Claude Code", Config: filepath.Join(home, ".claude.json"), Name: "team", Command: "team-mcp", Env: map[string]string{"API_KEY": namedValue}}}
-	const ignore = "If one holds no secret, end its line with # keyward:ignore yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not."
+	const ignore = "If one is not, end its line with # keyward:ignore (shell and .env files)."
 
 	for _, tc := range []struct {
 		name    string
@@ -454,7 +458,7 @@ func TestPathsUnderHomeReadAsTilde(t *testing.T) {
 		"~/.zshrc:1 cap://absent keyward add absent",
 		elsewhere + ":2 cap://absent keyward add absent",
 		mounted + ":4 cap://absent keyward add absent",
-		"migrate move it with keyward migrate ~/.zshrc (preview",
+		"migrate keyward migrate ~/.zshrc moves it (try",
 		"~/.claude.json mcp Claude Code server app, env.GITHUB_TOKEN (project ~/app)",
 		"and run keyward mcp wrap in ~/app ",
 		"remove the server from ~/.claude.json by hand, with Claude Code closed, as its project's folder no longer exists",
@@ -601,13 +605,13 @@ func TestPaintStylesEachPartWithoutMovingAColumn(t *testing.T) {
 		"  <c>~/.zshrc:1</>      <c>migrate</>  GITHUB_TOKEN  <d>a GitHub token</>\n",
 		"  <c>~/.claude.json</>  <c>mcp</>      Claude Code server github, env.GITHUB_PERSONAL_ACCESS_TOKEN\n" +
 			under(27) + "<d>a GitHub token</>\n" + under(27) + "store it with keyward add NAME,",
-		"    <c>migrate</>  move it with keyward migrate ~/.zshrc",
-		"  <y>AI agents must not open these lines or print these configs; ask the user to fix them.</>\n",
+		"    <c>migrate</>  keyward migrate ~/.zshrc moves it",
+		"  <y>Fix these yourself, not with an AI agent, then rotate each",
 		"<y>!</> <b>3 value(s) that may be credentials</>\n" +
 			"  <c>~/.zshrc:3</>   <c>add</>      BUILD_ID          <d>a random 36-character token</>\n" +
 			"  <c>~/.zshrc:12</>  <c>migrate</>  MY_SERVICE_TOKEN  <d>the variable name suggests a credential</>\n" +
 			"  <c>~/.zshrc:14</>  <c>migrate</>  " + name + "\n" + under(42) + "<d>the variable name suggests a credential</>\n",
-		"  <y>AI agents must not open these lines or print these configs; ask the user to judge them.</>\n",
+		"  <y>Judge these yourself, not with an AI agent.",
 		"    <d>e.g. keyward add build-id and set BUILD_ID to 'cap://build-id'</>\n",
 		"  orphan-of-a-removed-line  <d>came from ~/.zshrc:9, which no</>       <c>keyward rm orphan-of-a-removed-line</>\n" +
 			under(28) + "<d>longer references it</>\n",

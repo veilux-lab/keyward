@@ -190,16 +190,12 @@ func TestACredentialInPlaintextIsAProblem(t *testing.T) {
 		t.Errorf("the row for DATABASE_URL reads %q, want %q:\n%s", got, want, out)
 	}
 	for _, want := range []string{
-		"move it with keyward migrate on the file it is in (preview with --dry-run), or store it with keyward add NAME and set the variable to 'cap://NAME' " +
-			"e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'",
+		"migrate keyward migrate FILE moves it (try --dry-run first) " +
+			"Fix these yourself, not with an AI agent, then rotate each and store the new value with keyward add --force NAME.",
 	} {
 		if !strings.Contains(flat(out), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
-	}
-	if want := "\n  Then rotate each one, and store its new value with keyward add --force NAME.\n" +
-		"  AI agents must not open these lines or print these configs; ask the user to fix them.\n"; !strings.Contains(out, want) {
-		t.Errorf("the report lacks %q:\n%s", want, out)
 	}
 	if strings.Contains(out, migrate.IgnoreMarker) {
 		t.Errorf("the report advises marking a credential's line:\n%s", out)
@@ -237,7 +233,7 @@ func TestValuesThatMayBeCredentialsAreListedNotFailed(t *testing.T) {
 		t.Errorf("Problems() = %v, want none", p)
 	}
 	out := r.Render(doctor.Format{})
-	if !strings.Contains(out, "! 6 value(s) that may be credentials\n") || !strings.Contains(flat(out), "# "+migrate.IgnoreMarker+" yourself, and keyward leaves the line alone") {
+	if !strings.Contains(out, "! 6 value(s) that may be credentials\n") || !strings.Contains(flat(out), "If one is not, end its line with # "+migrate.IgnoreMarker+" (shell and .env files).") {
 		t.Errorf("the report does not list them with a way to mark one as no secret:\n%s", out)
 	}
 	if strings.Contains(out, "in plaintext") {
@@ -284,7 +280,7 @@ func TestACredentialMigrateCannotMoveIsAProblem(t *testing.T) {
 			t.Errorf("the row reads %q, want %q:\n%s", got, want, out)
 		}
 	}
-	if want := "To fix each: edit remove it by hand in an editor Then rotate"; !strings.Contains(flat(out), want) {
+	if want := "To fix each: edit remove it in an editor Fix these yourself"; !strings.Contains(flat(out), want) {
 		t.Errorf("the report lacks %q:\n%s", want, out)
 	}
 	for _, value := range []string{githubToken, dbPassword} {
@@ -322,16 +318,15 @@ func TestTextMigrateCannotMoveIsListedWhenItOnlyMayBeACredential(t *testing.T) {
 	if got, want := row(out, rc+":2 "), rc+":2 edit alias a random 36-character token"; got != want {
 		t.Errorf("the row reads %q, want %q:\n%s", got, want, out)
 	}
-	for _, want := range []string{"! 4 value(s) that may be credentials", "If one is a credential: edit remove it by hand in an editor Rotate",
-		"Rotate each one that is a credential, and store its new value with keyward add --force NAME. " +
-			"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, and keyward leaves the line alone (shell and .env files only); an AI agent must not. " +
-			"AI agents must not open these lines or print these configs; ask the user to judge them."} {
+	for _, want := range []string{"! 4 value(s) that may be credentials", "If one is a credential: edit remove it in an editor Judge these yourself",
+		"Judge these yourself, not with an AI agent. If one is a credential, fix it, then rotate it and store the new value with keyward add --force NAME. " +
+			"If one is not, end its line with # " + migrate.IgnoreMarker + " (shell and .env files)."} {
 		if !strings.Contains(flat(out), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
 	}
-	if !strings.HasSuffix(out, "\n  AI agents must not open these lines or print these configs; ask the user to judge them.\n") {
-		t.Errorf("the report does not end with what AI agents must not do:\n%s", out)
+	if !strings.HasSuffix(out, " (shell and .env files).\n") {
+		t.Errorf("the report does not end with how to mark a line:\n%s", out)
 	}
 	if strings.Contains(out, "in plaintext") {
 		t.Errorf("the report calls them credentials:\n%s", out)
@@ -447,17 +442,17 @@ func TestNearbyLinesOfOneKindAreListedAsOneRange(t *testing.T) {
 			rc + ":1-4 edit 3 comment lines AWS access key IDs and AWS secret keys " +
 			rc + ":5 edit alias a GitHub token " +
 			rc + ":11 edit comment an AWS access key ID and an AWS secret key " +
-			"To fix each: edit remove it by hand in an editor (in a range, every line) Then rotate",
+			"To fix each: edit remove it in an editor (in a range, every line) Fix these yourself",
 		"! 2 value(s) that may be credentials " +
 			rc + ":6-7 edit 2 comment lines runs of 32 hex characters " +
-			"If one is a credential: edit remove it by hand in an editor (in a range, each line that is one) Rotate",
-		"If one holds no secret, end its line with # " + migrate.IgnoreMarker + " yourself, marking each line of a range,",
+			"If one is a credential: edit remove it in an editor (in a range, each line that is one) Judge these yourself",
+		"If one is not, end its line with # " + migrate.IgnoreMarker + " (shell and .env files; mark each line of a range).",
 	} {
 		if !strings.Contains(flat(out), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)
 		}
 	}
-	if n := strings.Count(flat(out), "marking each line of a range"); n != 1 {
+	if n := strings.Count(flat(out), "mark each line of a range"); n != 1 {
 		t.Errorf("the report advises marking each line of a range %d times, want once, for the values that may be credentials:\n%s", n, out)
 	}
 	if n := strings.Count(out, migrate.IgnoreMarker); n != 1 {
@@ -493,7 +488,7 @@ func TestARangeHoldingACredentialIsListedWithTheCredentials(t *testing.T) {
 	}
 	out := r.Render(doctor.Format{})
 	want := "✗ 6 credential(s) in plaintext " + rc + ":1-10 edit 6 comment lines AWS access key IDs and AWS secret keys " +
-		"To fix each: edit remove it by hand in an editor (in a range, every line) Then rotate "
+		"To fix each: edit remove it in an editor (in a range, every line) Fix these yourself, not with an AI agent, then rotate "
 	if !strings.Contains(flat(out), want) {
 		t.Errorf("the report does not list the pairs as one range of credentials:\n%s", out)
 	}
@@ -637,8 +632,8 @@ func TestACommentBesideAListedValueIsListedAlone(t *testing.T) {
 	sure, unsure := section(out, "✗ "), section(out, "! ")
 	for _, want := range []string{
 		rc + ":2 migrate GITHUB_TOKEN a GitHub token " + rc + ":3 edit trailer a GitHub token " + rc + ":4 edit trailer a GitHub token " +
-			"To fix each: migrate move it with keyward migrate " + rc + " (preview with --dry-run), or store it with keyward add NAME and set the variable to 'cap://NAME' " +
-			"edit remove it by hand in an editor e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token' Then rotate",
+			"To fix each: migrate keyward migrate " + rc + " moves it (try --dry-run first) " +
+			"edit remove it in an editor Fix these yourself",
 	} {
 		if !strings.Contains(flat(sure), want) {
 			t.Errorf("the credentials lack %q:\n%s", want, sure)
@@ -647,8 +642,8 @@ func TestACommentBesideAListedValueIsListedAlone(t *testing.T) {
 	for _, want := range []string{
 		rc + ":1 edit trailer 32 hex characters " + rc + ":2 edit trailer 32 hex characters " + rc + ":4 add BUILD_ID a random 36-character token " +
 			rc + ":5 edit trailer 32 hex characters " +
-			"If one is a credential: add store it with keyward add NAME and set the variable to 'cap://NAME'; migrate moves only values it is sure of " +
-			"edit remove it by hand in an editor e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' Rotate",
+			"If one is a credential: add keyward add NAME, then set the variable to 'cap://NAME' " +
+			"edit remove it in an editor e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' Judge these yourself",
 		listedTwice,
 	} {
 		if !strings.Contains(flat(unsure), want) {
@@ -677,8 +672,8 @@ func TestNothingAdvisesMarkingACommentBesideAListedValue(t *testing.T) {
 	if strings.Contains(out, migrate.IgnoreMarker) {
 		t.Errorf("the report advises marking a line whose comment fails doctor:\n%s", out)
 	}
-	if !strings.Contains(flat(section(out, "! ")), "migrate moves only values it is sure of e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' Rotate each one that is a credential, "+
-		"and store its new value with keyward add --force NAME. "+listedTwice) {
+	if !strings.Contains(flat(section(out, "! ")), "then set the variable to 'cap://NAME' e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' "+
+		"Judge these yourself, not with an AI agent. If one is a credential, fix it, then rotate it and store the new value with keyward add --force NAME. "+listedTwice) {
 		t.Errorf("the advice for the value does not say to mark the line only once neither holds a secret:\n%s", out)
 	}
 }
@@ -745,7 +740,7 @@ func TestOnlyAJWTOfTheValuesStartingEyJFailsDoctor(t *testing.T) {
 	}
 	out := r.Render(doctor.Format{})
 	if want := "! 1 value(s) that may be credentials " + rc + ":2 migrate SPLUNK_MCP_TOKEN base64-encoded JSON " +
-		"If one is a credential: migrate move it with keyward migrate " + rc + " (preview"; !strings.Contains(flat(out), want) {
+		"If one is a credential: migrate keyward migrate " + rc + " moves it (try --dry-run first)"; !strings.Contains(flat(out), want) {
 		t.Errorf("the report lacks %q:\n%s", want, out)
 	}
 }
@@ -763,9 +758,9 @@ func TestTheAdviceForAPossibleCredentialSaysHowToMoveIt(t *testing.T) {
 	out := r.Render(doctor.Format{})
 	for _, want := range []string{
 		rc + ":1 migrate MY_SERVICE_TOKEN the variable name suggests a credential " + rc + ":2 add BUILD_ID a random 36-character token " +
-			"If one is a credential: migrate move it with keyward migrate " + rc + " (preview with --dry-run), or store it with keyward add NAME and set the variable to 'cap://NAME' " +
-			"add store it with keyward add NAME and set the variable to 'cap://NAME'; migrate moves only values it is sure of " +
-			"e.g. keyward add my-service-token and set MY_SERVICE_TOKEN to 'cap://my-service-token' Rotate",
+			"If one is a credential: migrate keyward migrate " + rc + " moves it (try --dry-run first) " +
+			"add keyward add NAME, then set the variable to 'cap://NAME' " +
+			"e.g. keyward add build-id and set BUILD_ID to 'cap://build-id' Judge these yourself",
 	} {
 		if !strings.Contains(flat(out), want) {
 			t.Errorf("the report lacks %q:\n%s", want, out)

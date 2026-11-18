@@ -1272,7 +1272,7 @@ func TestMCPAndDoctorReadTheCursorServersOfEveryKnownFolder(t *testing.T) {
 	h.cli.Ledger.Add(ledger.Record{Kind: ledger.Allowed, Path: config, Name: "team", Text: "PD_KEY"})
 	var printed strings.Builder
 	run := runner(h, &printed)
-	const unread = "keyward reads a Cursor project's .cursor/mcp.json only in this folder and in those of Claude Code's projects, so run keyward mcp in any other folder you open in Cursor."
+	const unread = "keyward finds Cursor project servers only here and in Claude Code's projects; run keyward mcp in any other such project."
 
 	if code, out := run("mcp"); code != 1 || !strings.HasPrefix(out, "2 MCP server(s) would put a secret in a command line") ||
 		!strings.Contains(out, "(Cursor, ~/dev/project/.cursor/mcp.json)") || !strings.Contains(out, "(Cursor, ~/dev/allowed/.cursor/mcp.json)") || !strings.HasSuffix(out, "\n"+unread+"\n") {
@@ -1308,7 +1308,7 @@ func TestMCPReadsCopilotsServersInEveryKnownFolder(t *testing.T) {
 	fakeTools(t, h, home)
 	var printed strings.Builder
 	run := runner(h, &printed)
-	const unread = "keyward reads a Copilot CLI project's .github/mcp.json only in this folder and in those of Claude Code's projects, so run keyward mcp in any other folder you open in Copilot CLI."
+	const unread = "keyward finds Copilot CLI project servers only here and in Claude Code's projects; run keyward mcp in any other such project."
 
 	code, out := run("mcp")
 	for _, want := range []string{"(Copilot CLI, ~/.copilot/mcp-config.json)", "(Copilot CLI, ~/dev/project/.github/mcp.json)", "(Copilot CLI, ~/dev/allowed/.github/mcp.json)", "\n" + unread + "\n"} {
@@ -1321,16 +1321,14 @@ func TestMCPReadsCopilotsServersInEveryKnownFolder(t *testing.T) {
 	}
 }
 
-// With Cursor and Copilot CLI both installed, one note names the project files of
-// each that keyward reads.
-func TestTheProjectsNoteNamesCursorsAndCopilotsFilesTogether(t *testing.T) {
+// With Cursor and Copilot CLI both installed, one note names both.
+func TestTheProjectsNoteNamesCursorAndCopilotTogether(t *testing.T) {
 	h := newHarness(t, "", nil, nil)
 	home := homed(t, h)
 	os.Mkdir(filepath.Join(home, ".cursor"), 0o755)
 	os.Mkdir(filepath.Join(home, ".copilot"), 0o755)
 	var printed strings.Builder
-	const note = "keyward reads a Cursor project's .cursor/mcp.json and a Copilot CLI project's .github/mcp.json only in this folder and in those of " +
-		"Claude Code's projects, so run keyward mcp in any other folder you open in either."
+	const note = "keyward finds Cursor and Copilot CLI project servers only here and in Claude Code's projects; run keyward mcp in any other such project."
 	if code, out := runner(h, &printed)("mcp"); code != 0 || !strings.HasSuffix(out, "\n"+note+"\n") {
 		t.Errorf("mcp exit %d, want 0 and %q:\n%s", code, note, out)
 	}

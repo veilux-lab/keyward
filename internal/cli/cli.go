@@ -798,7 +798,12 @@ func (c *CLI) doctor(args []string) int {
 	paths = append(paths, args...)
 
 	servers, unread := c.mcpServers()
-	report, err := doctor.Run(c.Store, paths, servers)
+	// Without a home there is no agent's file to find.
+	var agentFiles []mcpconfig.AgentFile
+	if c.Home != "" {
+		agentFiles = mcpconfig.AgentFiles(c.Home, c.Workdir, mcpconfig.ClaudeProjects(c.Home))
+	}
+	report, err := doctor.Run(c.Store, paths, servers, agentFiles...)
 	if err != nil {
 		return c.fail("keyward doctor: %v", err)
 	}
@@ -859,6 +864,16 @@ func (c *CLI) doctor(args []string) int {
 	case counted:
 		check(doctor.Pass, "AI agents", "each installed agent reads "+agents.Display)
 	}
+	var tracked []string
+	if c.Home != "" {
+		var sure bool
+		switch tracked, sure = c.tracked(mcpconfig.Personal(c.Home, agentFiles)); {
+		case len(tracked) > 0:
+			check(doctor.Attention, "Agent files", fmt.Sprintf("%d personal file(s) tracked by git, listed above", len(tracked)))
+		case sure:
+			check(doctor.Pass, "Agent files", "no personal file tracked by git")
+		}
+	}
 	var alerts []string
 	if c.Exposures != nil {
 		exposed, err := c.Exposures()
@@ -887,12 +902,46 @@ func (c *CLI) doctor(args []string) int {
 		blocks = append(blocks, sections)
 	}
 	blocks = append(blocks, alerts...)
+	if len(tracked) > 0 {
+		blocks = append(blocks, f.Tracked(tracked))
+	}
 	blocks = append(blocks, report.Summary(f, checks, []string{c.skippedNote(gone), c.projectsNote()}), f.Verdict(checks, problems))
 	fmt.Fprint(c.Stdout, strings.Join(blocks, "\n"))
 	if len(problems) > 0 {
 		return exitFailure
 	}
 	return exitOK
+}
+
+// tracked returns those of files, each in a work tree, that git tracks, which a
+// push publishes, and reports whether git could say of each. It runs git only
+// where such a file exists, and passes over one git does not know.
+func (c *CLI) tracked(files []string) ([]string, bool) {
+	if c.LookPath == nil || c.RunTool == nil {
+		return nil, false
+	}
+	git, err := c.LookPath("git")
+	if err != nil {
+		return nil, false
+	}
+	var found []string
+	sure := true
+	for _, path := range files {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		dir, name := filepath.Split(path)
+		// A repository's own config can name a command git runs as it reads the index.
+		out, err := c.RunTool(dir, git, "-c", "core.fsmonitor=false", "ls-files", "--", name)
+		switch {
+		case err != nil:
+			// In a work tree, git could not read it, as one of another user's.
+			sure = false
+		case slices.Contains(strings.Split(string(out), "\n"), name):
+			found = append(found, path)
+		}
+	}
+	return found, sure
 }
 
 // mcpServers is loadAll, saying on stderr which configs it could not read, and

@@ -1830,6 +1830,85 @@ func TestACodexKeyNamedLikeACredentialIsHidden(t *testing.T) {
 	}
 }
 
+// Codex's config holds more than MCP servers, in forms read rather than failing
+// the whole file: the docs' OpenTelemetry exporter, an inline table nested and
+// spread over lines, and dotted keys.
+func TestCodexConfigBeyondItsServersStillReads(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".codex", "config.toml"), `model = "gpt-5"
+
+[otel]
+environment = "staging"
+exporter = { otlp-http = {
+  endpoint = "https://otel.example.com/v1/logs", # the collector
+  protocol = "binary",
+  headers = { "x-otlp-api-key" = "${OTLP_TOKEN}" }
+}}
+
+[model_providers.corp]
+base_url = "https://llm.example.com/v1"
+http_headers.X-Team = "payments"
+
+[mcp_servers.pd]
+command = "uvx"
+env = { PD_KEY = "cap://pagerduty-key" }
+`)
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	if len(errs) != 0 || len(servers) != 1 || servers[0].Env["PD_KEY"] != "cap://pagerduty-key" {
+		t.Fatalf("servers %+v, errors %v", servers, errs)
+	}
+}
+
+// A server written with a dotted key, or as an inline table, is not read: the
+// table keyward mcp prints in its place would leave the key out, and one of the
+// server itself would define it twice. Either makes the config unreadable,
+// rather than leaving the server unchecked.
+func TestACodexServerOutsideItsOwnTableIsNotRead(t *testing.T) {
+	for _, config := range []string{
+		"[mcp_servers.github]\ncommand = \"npx\"\ntools.search.approval_mode = \"approve\"\n",
+		"[mcp_servers.github]\ncommand = \"npx\"\nenv.GITHUB_TOKEN = \"cap://github-token\"\n",
+		"[mcp_servers]\ngithub.command = \"npx\"\n",
+		"mcp_servers.github.command = \"npx\"\n",
+		"mcp_servers.github = { command = \"npx\", env = { GITHUB_TOKEN = \"cap://github-token\" } }\n",
+		"[mcp_servers]\ngithub = { command = \"npx\" }\n",
+		"mcp_servers = { github = { command = \"npx\" } }\n",
+	} {
+		home := t.TempDir()
+		write(t, filepath.Join(home, ".codex", "config.toml"), config)
+		if servers, errs := mcpconfig.Load(home, t.TempDir()); len(errs) != 1 || len(servers) != 0 {
+			t.Errorf("%q: servers %+v, errors %v", config, servers, errs)
+		}
+	}
+}
+
+// An empty inline table of servers holds none to leave unread.
+func TestAnEmptyInlineTableOfCodexServersReadsAsNone(t *testing.T) {
+	for _, config := range []string{"mcp_servers = {}\n", "mcp_servers = { }\n"} {
+		home := t.TempDir()
+		write(t, filepath.Join(home, ".codex", "config.toml"), config)
+		if servers, errs := mcpconfig.Load(home, t.TempDir()); len(errs) != 0 || len(servers) != 0 {
+			t.Errorf("%q: servers %+v, errors %v", config, servers, errs)
+		}
+	}
+}
+
+// An inline table nested in one a server keeps is printed with its strings
+// hidden, as a flat one's are.
+func TestANestedInlineTableIsPrintedHidden(t *testing.T) {
+	home := t.TempDir()
+	write(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.github]\nurl = \"https://api.example.com/mcp/\"\n"+
+		"bearer_token_env_var = \"GITHUB_TOKEN\"\ntools = { get_issue = { approval_mode = \"approve\" }, list = { approval_mode = \"ask\", limits = { max = \"9\" } } }\n")
+	servers, errs := mcpconfig.Load(home, t.TempDir())
+	findings := mcpconfig.Check(servers, refs)
+	if len(errs) != 0 || len(findings) != 1 {
+		t.Fatalf("findings = %+v, errors %v", findings, errs)
+	}
+	want := `tools = { get_issue = { approval_mode = "<7 bytes hidden>" }, list = { approval_mode = "<3 bytes hidden>", limits = { max = "<1 bytes hidden>" } } }` + "\n"
+	if f := findings[0]; !strings.Contains(f.Suggestion, want) || !strings.Contains(f.Note, "Copy each hidden value") {
+		t.Errorf("table lacks %q:\n%s\nnote %q", want, f.Suggestion, f.Note)
+	}
+}
+
 func TestCodexKeepsTheStartupTimeout(t *testing.T) {
 	if f := finding(t, "Codex", "pagerduty"); !strings.Contains(f.Suggestion, "startup_timeout_sec = 60") {
 		t.Errorf("suggestion lost the timeout:\n%s", f.Suggestion)

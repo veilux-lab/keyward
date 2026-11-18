@@ -59,12 +59,16 @@ keyward help                              # commands and options
   instead, so such a command needs `--no-mask`. Masking has
   [limits](docs/details.md#masking).
 - `keyward doctor` also finds tokens still in plaintext in your shell files, the
-  current folder's `.env`, and MCP configs, and says where each one is and what it
-  looks like, such as "a GitHub token", without printing it. Nearby lines of one
-  kind are listed as one range. Name another file to check it too:
-  `keyward doctor .env.local`. If a line it lists in a shell or `.env` file holds
-  no secret, end it with `# keyward:ignore`, marking each line of a range of
-  values that may be credentials, and keyward leaves the line alone.
+  current folder's `.env`, MCP configs, and AI agents' own files: Claude Code's
+  settings and the commands it saved as allowed, Codex's config, and instructions
+  such as `CLAUDE.md` ([which files](docs/details.md#agents-own-files)). It says
+  where each one is and what it looks like, such as "a GitHub token", without
+  printing it, and whether git tracks a personal agent file, such as
+  `.claude/settings.local.json`. Nearby lines of one kind are listed as one
+  range. Name another file to check it too: `keyward doctor .env.local`. If a
+  line it lists in a shell or `.env` file holds no secret, end it with
+  `# keyward:ignore`, marking each line of a range of values that may be
+  credentials, and keyward leaves the line alone.
 - Migration keeps an encrypted backup. Remove it with `keyward backups rm ~/.zshrc`
   once everything works.
 

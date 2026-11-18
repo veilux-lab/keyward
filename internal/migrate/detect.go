@@ -1,10 +1,13 @@
 package migrate
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
+	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -381,6 +384,9 @@ type clue struct {
 	// random marks a token found by its randomness alone, which the comment it is
 	// in can show to be none.
 	random bool
+
+	// possible marks an assignment Detect calls only a possible secret.
+	possible bool
 }
 
 // clues finds what in text, such as a comment, is shaped like a credential: an
@@ -437,6 +443,109 @@ func clues(text string) []clue {
 		found = append(found, clue{start: r[0], end: r[1], label: base64Label(text[r[0]:r[1]]), random: true})
 	}
 	return append(found, tokens...)
+}
+
+// InDocument judges text, a line of a document such as an agent's instructions,
+// by what in it is surely a credential, as clues finds it or as YAML and JSON set
+// one: a known prefix starting a word, a URL with a password, or an assignment
+// Detect calls a secret. A document's hashes and IDs look random, so randomness
+// alone counts for nothing, and its examples look real. Its reason names what
+// each looks like.
+func InDocument(text string) Detection {
+	found := clues(text)
+	if name, value, ok := colonPair(text); ok {
+		if d := Detect(name, value); d.Secret {
+			start, end := len(text)-len(strings.TrimLeft(text, " \t")), len(strings.TrimRight(text, " \t\r"))
+			found = append(found, clue{start: start, end: end, known: d.KnownShape, label: d.label, placeholder: Placeholder(value)})
+		}
+	}
+	parts := slices.DeleteFunc(found, func(c clue) bool {
+		return c.random || c.possible || c.placeholder || example(text[c.start:c.end], text[c.end:])
+	})
+	if len(parts) == 0 {
+		return Detection{}
+	}
+	u := unmovableLine(0, "", text, parts)
+	return Detection{Secret: true, KnownShape: u.KnownShape, Reason: Describe(u.Labels)}
+}
+
+// colonPair returns the name and value text, a line of a document, sets as YAML
+// and JSON do: name: value alone on the line, perhaps quoted, as an item of a
+// list, or before a comma. A value in prose goes on past one word.
+func colonPair(text string) (name, value string, ok bool) {
+	fields := strings.Fields(strings.TrimPrefix(strings.TrimSpace(text), "- "))
+	if len(fields) != 2 || !strings.HasSuffix(fields[0], ":") {
+		return "", "", false
+	}
+	return strings.Trim(strings.TrimSuffix(fields[0], ":"), `"'`), strings.Trim(strings.TrimSuffix(fields[1], ","), "\"'`"), true
+}
+
+// example reports whether s, a credential in a document, says it is an example:
+// its value holds example, as AWS's documented keys and the hosts kept for
+// documentation do; its secret, past any prefix, is words of one case for a
+// credential, as in user:password@ and your-api-key-here, or holds filler or an
+// ellipsis, or is cut short by after, the text that follows it, with too little
+// past its prefix to be whole; or it is the login a local database is set up
+// with, as postgres:postgres@localhost is. A basic-auth credential is judged by
+// the login it encodes.
+func example(s, after string) bool {
+	if a, ok := parseAssignment(s); ok {
+		s = a.Value
+	} else if _, value, ok := colonPair(s); ok {
+		s = value
+	}
+	if strings.Contains(strings.ToLower(s), "example") {
+		return true
+	}
+	secret := s[len(matchPrefix(s)):]
+	switch i := strings.Index(s, "://"); {
+	case i >= 0:
+		userinfo, host, _ := strings.Cut(s[i+len("://"):], "@")
+		user, password, _ := strings.Cut(userinfo, ":")
+		if user == password && loopback(host) {
+			return true
+		}
+		secret = password
+	case strings.HasPrefix(s, "Basic "):
+		if login, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(secret, "=")); err == nil {
+			_, secret, _ = strings.Cut(string(login), ":")
+		}
+	default:
+		// After a scheme, as Bearer, a token can have a prefix of its own.
+		secret = strings.TrimPrefix(secret, matchPrefix(secret))
+	}
+	groups := strings.FieldsFunc(secret, func(r rune) bool { return r == '-' || r == '_' })
+	return holdsCredentialWord(secret) && charClasses(secret) == 1 ||
+		strings.Contains(secret, "...") || strings.Contains(secret, "…") || slices.ContainsFunc(groups, filler) ||
+		len(secret) < minNamedLen && cutShort.MatchString(after)
+}
+
+// cutShort matches an ellipsis or a template just after a credential, which ends
+// one with little past its prefix early, as in Bearer sk-ant-api03-... and Bearer
+// sk-ant-api03-<key>. A whole token can be followed by either, as by a tag.
+var cutShort = regexp.MustCompile(`^(?:\.\.\.|…|<[A-Za-z])`)
+
+// filler reports whether group, a part of a secret between dashes or
+// underscores, is written in place of its characters: part of a template in
+// angle brackets, x, X or * over and over, a format's verb, or a word in
+// capitals saying one goes there or was taken out. A passphrase can hold such a
+// word in lowercase.
+func filler(group string) bool {
+	if strings.HasPrefix(group, "<") || strings.HasSuffix(group, ">") {
+		return true
+	}
+	group = strings.Trim(group, "[].")
+	switch group {
+	case "%s", "YOUR", "HERE", "REDACTED":
+		return true
+	}
+	return len(group) >= 3 && strings.Contains("xX*", group[:1]) && strings.Count(group, group[:1]) == len(group)
+}
+
+// loopback reports whether hostport, what follows a URL's @, names this machine.
+func loopback(hostport string) bool {
+	u, err := url.Parse("//" + hostport)
+	return err == nil && slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, u.Hostname())
 }
 
 // KeyShaped returns the length of the token s begins with if it is shaped like a
