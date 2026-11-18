@@ -95,11 +95,13 @@ func Literals(servers []Server) []Literal {
 			// A header given with --header is judged by its name too, as a bridge's is.
 			for _, h := range headersIn(s.Args, i) {
 				if name, value, ok := cutHeader(h.String()); ok {
-					d = surer(header(name, value), d)
+					d = migrate.Surer(header(name, value), d)
 				}
 			}
+			// An option's value is judged by its name too, but a tie keeps what the
+			// argument holds, as a script given JSON is not JSON itself.
 			for _, o := range optionsIn(s.Args, i) {
-				d = surer(o.detect(), d)
+				d = migrate.Surer(d, o.detect())
 			}
 			add(fmt.Sprintf("args[%d]", i), d)
 		}
@@ -125,7 +127,7 @@ func Literals(servers []Server) []Literal {
 func keptSecrets(field, key string, v any, found func(field string, d migrate.Detection)) {
 	switch v := v.(type) {
 	case string:
-		if d := surer(migrate.Detect(key, v), argument(v)); d.Secret && !migrate.Placeholder(v) {
+		if d := migrate.Surer(migrate.Detect(key, v), argument(v)); d.Secret && !migrate.Placeholder(v) {
 			found(field, d)
 		}
 	case []any:
@@ -199,27 +201,7 @@ func detect(name, value string) migrate.Detection {
 	if !strings.Contains(value, "://") {
 		return d
 	}
-	return surer(d, argument(value))
-}
-
-// surer is whichever of a and b is surer of a credential, a if neither is: one of
-// a known shape, then a secret, then one that may be.
-func surer(a, b migrate.Detection) migrate.Detection {
-	sureness := func(d migrate.Detection) int {
-		switch {
-		case d.KnownShape:
-			return 3
-		case d.Secret:
-			return 2
-		case d.Possible:
-			return 1
-		}
-		return 0
-	}
-	if sureness(b) > sureness(a) {
-		return b
-	}
-	return a
+	return migrate.Surer(d, argument(value))
 }
 
 // argument looks for a credential prefix, or credentials in a URL, where a value

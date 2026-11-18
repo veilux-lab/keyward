@@ -270,9 +270,11 @@ func TestMCPWrapSkipsAServerWhoseURLReadsAMigratedSecretUnlessAllowed(t *testing
 // to add or to put back, that holds a credential doctor reports in env, headers or
 // another key it keeps, written or moved there from a header: they skip the
 // server, saying to move the credential out first, as doctor advises, and --purge
-// waits for it. A value that is no credential is applied.
+// waits for it. One in JSON counts too, as keyward mcp, wrap and doctor show, but
+// a value that is no credential is applied, as JSON whose keys alone are named
+// like credentials is.
 func TestNoCredentialGoesInClaudesCommandLine(t *testing.T) {
-	const appKey, headerKey, keptKey = "fa6e11fe9876543210fedcba9876543210ab", "FakeOpaqueTeamHeader0000", "fake-kept-client-secret"
+	const appKey, headerKey, keptKey, jsonKey = "fa6e11fe9876543210fedcba9876543210ab", "FakeOpaqueTeamHeader0000", "fake-kept-client-secret", "ghp_" + "FakeJSONEnvToken000000000000000000000"
 	r := uninstallFixture(t, "")
 	h := r.h
 	home := homed(t, h)
@@ -283,7 +285,8 @@ func TestNoCredentialGoesInClaudesCommandLine(t *testing.T) {
 	data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
 		"datadog": map[string]any{"command": "dd-mcp", "env": map[string]string{"DD_API_KEY": "${DD_API_KEY}", "DD_APP_KEY": appKey}},
 		"team":    map[string]any{"type": "http", "url": "https://mcp.example.com/mcp", "headers": map[string]string{"Authorization": "Bearer ${DD_API_KEY}", "X-Api-Key": headerKey}},
-		"pd":      map[string]any{"command": "pd-mcp", "env": map[string]string{"PD_KEY": "${PD_KEY}", "LOG_LEVEL": "debug"}},
+		"pd":      map[string]any{"command": "pd-mcp", "env": map[string]string{"PD_KEY": "${PD_KEY}", "LOG_LEVEL": "debug", "TOOL_CONFIG": `{"author":"Jane Doe <jane@example.com>"}`}},
+		"repl":    map[string]any{"command": "repl-mcp", "env": map[string]string{"PD_KEY": "${PD_KEY}", "TRUSTED_SERVICES": `{"github":"` + jsonKey + `"}`}},
 		"linear": map[string]any{"command": "linear-mcp", "env": map[string]string{"PD_KEY": "${PD_KEY}"}, "password": keptKey,
 			"oauth": map[string]any{"clientSecret": keptKey, "callbackPort": 8080}, "apiKeys": []string{keptKey}},
 		"wrapped": map[string]any{"command": "/opt/homebrew/bin/keyward", "args": []string{"run", "--only", "DD_API_KEY,KW_HDR_1", "--", "sh", "-c",
@@ -298,19 +301,21 @@ func TestNoCredentialGoesInClaudesCommandLine(t *testing.T) {
 
 	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "It skips datadog until the credential in its env.DD_APP_KEY is moved out") ||
 		!strings.Contains(out, "It skips team until the credential in its headers.X-Api-Key is moved out") ||
+		!strings.Contains(out, "It skips repl until the credential in its env.TRUSTED_SERVICES is moved out") ||
 		!strings.Contains(out, "It skips linear until the credential in its apiKeys[0], oauth.clientSecret, password is moved out") {
 		t.Errorf("mcp exit %d, want 1 and which servers wrap skips:\n%s", code, out)
 	}
 	h.cli.Stdin = strings.NewReader("yes\n")
 	if code, out := run("mcp", "wrap"); code != 1 || !strings.Contains(out, "Skipped datadog: its env.DD_APP_KEY holds a credential, and "+skips+", then run keyward mcp wrap again.") ||
 		!strings.Contains(out, "Skipped team: its headers.X-Api-Key holds a credential") || !strings.Contains(out, "✓ pd") ||
+		!strings.Contains(out, "Skipped repl: its env.TRUSTED_SERVICES holds a credential") ||
 		!strings.Contains(out, "Skipped linear: its apiKeys[0], oauth.clientSecret, password hold credentials, and claude mcp add-json would get them in its command line, "+
 			"where any process can read them; move them out first, as keyward doctor says, then run keyward mcp wrap again.") {
-		t.Errorf("wrap exit %d, want 1, datadog, team and linear skipped, and pd changed:\n%s", code, out)
+		t.Errorf("wrap exit %d, want 1, datadog, team, repl and linear skipped, and pd changed:\n%s", code, out)
 	}
 	if _, out := run("doctor"); !strings.Contains(out, "Claude Code server datadog, env.DD_APP_KEY\n") || !strings.Contains(out, "Claude Code server team, headers.X-Api-Key\n") ||
 		!strings.Contains(out, "Claude Code server linear, oauth.clientSecret\n") || !strings.Contains(out, "Claude Code server linear, password\n") ||
-		!strings.Contains(out, "Claude Code server linear, apiKeys[0]\n") {
+		!strings.Contains(out, "Claude Code server linear, apiKeys[0]\n") || !strings.Contains(out, "Claude Code server repl, env.TRUSTED_SERVICES\n") {
 		t.Errorf("doctor does not say where each credential is:\n%s", out)
 	}
 	h.cli.Stdin = strings.NewReader("yes\n")
@@ -322,7 +327,7 @@ func TestNoCredentialGoesInClaudesCommandLine(t *testing.T) {
 		t.Errorf("uninstall --purge exit %d, want 1 and wrapped left to change:\n%s", code, out)
 	}
 	for _, call := range *calls {
-		if strings.Contains(call, appKey) || strings.Contains(call, headerKey) || strings.Contains(call, keptKey) {
+		if strings.Contains(call, appKey) || strings.Contains(call, headerKey) || strings.Contains(call, keptKey) || strings.Contains(call, jsonKey) {
 			t.Errorf("claude got a credential in its command line: %s", call)
 		}
 	}

@@ -159,6 +159,21 @@ func TestNewPlanLeavesPossibleSecretsForTheUser(t *testing.T) {
 	}
 }
 
+// A JSON value holding a token is moved whole, as keyward run gives it back, and
+// one with nothing like a credential in it is left alone, needing nothing.
+func TestNewPlanMovesAJSONValueHoldingAToken(t *testing.T) {
+	content := `export MCP_CONFIG='{"url":"https://mcp.example.com/mcp","auth":{"github":"ghp_exampleTokenValue0123456789"}}'` + "\n" +
+		`export MCP_SERVICES='{"github":"/opt/tools/github-mcp","linear":"/opt/tools/linear-mcp"}'` + "\n"
+	p := mustPlan(t, "/tmp/.zshrc", content)
+
+	if len(p.Changes) != 1 || p.Changes[0].Name != "MCP_CONFIG" || p.Changes[0].Reason != "JSON holding a GitHub token" {
+		t.Errorf("Changes = %+v, want MCP_CONFIG, for the GitHub token it holds", p.Changes)
+	}
+	if len(p.Skips) != 1 || p.Skips[0].Name != "MCP_SERVICES" || p.Skips[0].Actionable {
+		t.Errorf("Skips = %+v, want MCP_SERVICES, needing nothing", p.Skips)
+	}
+}
+
 // A variable that is never exported only exists inside the shell, so keyward run
 // can never resolve it. Rewriting it would leave the shell holding a reference
 // nothing can turn back into the value. Found on a real ~/.zshrc.

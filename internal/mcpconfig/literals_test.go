@@ -51,7 +51,7 @@ func literalsFixture(t *testing.T) (home, workdir string) {
     "api": {"type": "http", "url": "https://api.example.com/v1/mcp", "headers": {"X-Api-Key": "`+namedValue+`"}},
     "remote": {"type": "http", "url": "https://bot:`+urlPassword+`@mcp.example.com/mcp"},
     "query": {"type": "sse", "url": "https://mcp.example.com/sse?key=`+queryKey+`&region=us"},
-    "pagerduty": {"command": "uvx", "args": ["pagerduty-mcp"], "env": {"PAGERDUTY_API_KEY": "`+namedValue+`", "MY_THING": "`+randomValue+`", "LEVEL": "info", "PD_KEY": "${PD_KEY}", "WRAPPED": "cap://pagerduty-key"},
+    "pagerduty": {"command": "uvx", "args": ["pagerduty-mcp"], "env": {"PAGERDUTY_API_KEY": "`+namedValue+`", "MY_THING": "`+randomValue+`", "LEVEL": "info", "PD_KEY": "${PD_KEY}", "WRAPPED": "cap://pagerduty-key", "MCP_CONFIG": "{\"auth\":{\"github\":\"`+headerToken+`\"}}"},
       "password": "`+namedValue+`", "oauth": {"clientSecret": "`+namedValue+`", "clientId": "`+randomValue+`", "callbackPort": 8080, "metadataUrl": "https://auth.example.com/mcp?key=`+queryKey+`"},
       "apiKey": "<your-api-key>", "headersHelper": "printf 'Authorization: Bearer `+headerToken+`'", "apiKeys": ["`+namedValue+`"], "credentials": [{"auth": {"password": "`+namedValue+`"}}]}
   },
@@ -109,6 +109,7 @@ func TestLiteralsFindCredentialsWrittenIntoServerDefinitions(t *testing.T) {
 		"Claude Code query url":                              true,
 		"Claude Code pagerduty env.PAGERDUTY_API_KEY":        false,
 		"Claude Code pagerduty env.MY_THING":                 false,
+		"Claude Code pagerduty env.MCP_CONFIG":               true,
 		"Claude Code pagerduty password":                     false,
 		"Claude Code pagerduty oauth.clientSecret":           false,
 		"Claude Code pagerduty oauth.metadataUrl":            true,
@@ -191,15 +192,17 @@ func TestLiteralsInArgumentsOnlyWhereAValueStarts(t *testing.T) {
 // An option's name marks the value after it as a header's name does its value, as
 // in --api-key VALUE or --app-key=VALUE, and a token shaped like a key, of hex
 // digits or mixing cases and digits, may be one where a value or a segment of a
-// URL's path starts. With nothing but a name or a shape to go on, each only may be
-// a credential. Randomness alone does not count after an option, as a package's
-// name after -y has as much.
+// URL's path starts, and in JSON after an option a key's name marks a random token.
+// With nothing but a name or a shape to go on, each only may be a credential.
+// Randomness alone does not count after an option, as a package's name after -y
+// has as much.
 func TestLiteralsFindAValueByItsOptionsNameOrItsShape(t *testing.T) {
 	const (
 		hexKey = "0123456789abcdef0123456789abcdef"
 		appKey = "Zx8Kq2Lm9Pw4Rt7Yv1Nb5Hc3Jd6Fg0Sa"
 		uuid   = "3f2a9c1e-7b4d-4e8f-9a6b-2c1d0e5f7a8b"
 		named  = "FakeOpaqueOptionValue"
+		short  = "Zx8Kq2Lm9Pw4Rt7Yv1Nb" // random, but too short to be shaped like a key
 	)
 	args := []string{
 		"-y", "@modelcontextprotocol/server-github",
@@ -210,6 +213,7 @@ func TestLiteralsFindAValueByItsOptionsNameOrItsShape(t *testing.T) {
 		"--dd-api-key=" + hexKey, // [9]
 		"--root", "${HOME}", "--name", "my-server", "--key-file", "/etc/keys/key.pem", "--region", "us-east-1",
 		"exec dd-mcp --api-key " + hexKey + ` --root "$HOME"`, // [18]: a word of a script keyward writes
+		"--config", `{"db":{"password":"` + short + `"}}`, // [20]: in JSON, a random token under a password key
 	}
 	config, err := json.Marshal(map[string]any{"mcpServers": map[string]any{
 		"dd":   map[string]any{"command": "npx", "args": args},
@@ -231,7 +235,7 @@ func TestLiteralsFindAValueByItsOptionsNameOrItsShape(t *testing.T) {
 		}
 		fields = append(fields, l.Server+" "+l.Field)
 	}
-	if got, want := strings.Join(fields, ","), "dd args[18],dd args[3],dd args[4],dd args[6],dd args[8],dd args[9],path url"; got != want {
+	if got, want := strings.Join(fields, ","), "dd args[18],dd args[20],dd args[3],dd args[4],dd args[6],dd args[8],dd args[9],path url"; got != want {
 		t.Errorf("fields = %s, want %s", got, want)
 	}
 }

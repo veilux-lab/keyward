@@ -682,13 +682,16 @@ func TestACurrentBridgeIsReportedForWhatItPutsInACommandLine(t *testing.T) {
 // A bridge an earlier keyward wrote can send an ordinary header written out, as
 // Accept or a client's name, which mcp-remote has in its command line but which
 // holds no secret. Only header text that the header's name or value marks as a
-// credential, as doctor judges a header, counts as a secret there.
+// credential, as doctor judges a header, and JSON by the strings in it, counts as
+// a secret there.
 func TestABridgesOrdinaryHeaderIsNoSecretInItsCommandLine(t *testing.T) {
 	const ordinary = `--header "Accept: application/json, text/event-stream" --header "X-Client-Name: claude-code"`
 	for _, tc := range []struct{ script, exposed string }{
 		{`exec npx -y mcp-remote https://api.example.com/mcp/ ` + authHeader + ` ` + ordinary + ` --transport http-only`, ""},
 		{`exec npx -y mcp-remote https://api.example.com/mcp/ ` + authHeader + ` ` + ordinary + ` --header "X-Api-Key: fake-literal-api-key" --transport http-only`, "the X-Api-Key header"},
 		{`exec npx -y mcp-remote https://api.example.com/mcp/ ` + ordinary + ` --header "Authorization: Bearer fake-literal" --transport http-only`, "the Authorization header"},
+		{`exec npx -y mcp-remote https://api.example.com/mcp/ ` + authHeader + ` --header "X-Client-Info: {\"name\":\"claude-code\",\"version\":\"1.2.3\"}" ` +
+			`--header "X-Context: {\"github\":\"` + headerToken + `\"}" --transport http-only`, "the X-Context header"},
 	} {
 		var exposed []string
 		for _, f := range mcpconfig.Check(load(t, "api", bridge(tc.script)), refs) {
