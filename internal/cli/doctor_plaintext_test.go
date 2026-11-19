@@ -47,10 +47,9 @@ func TestDoctorFailsOnACredentialInPlaintext(t *testing.T) {
 	}
 	for _, want := range []string{
 		"~/.zshrc:2 migrate GITHUB_TOKEN a GitHub token",
-		"move it with keyward migrate ~/.zshrc (preview with --dry-run), or store it with keyward add NAME and set the variable to 'cap://NAME' " +
-			"e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'",
+		"migrate keyward migrate ~/.zshrc moves it (try --dry-run first) Fix these yourself",
 		"~/.claude.json mcp Claude Code server openai, env.OPENAI_API_KEY (project ~/other-project)",
-		"Then rotate each one, and store its new value with keyward add --force NAME.",
+		"Fix these yourself, not with an AI agent, then rotate each and store the new value with keyward add --force NAME.",
 	} {
 		if !strings.Contains(flat(h.out()), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, h.out())
@@ -66,32 +65,34 @@ func TestDoctorFailsOnACredentialInPlaintext(t *testing.T) {
 	}
 }
 
-// keyward add only stores a copy, so doctor's advice says to set the variable to its
-// reference too. Following it, and then storing the rotated value, leaves nothing
-// to report.
+// keyward add only stores a copy, so doctor's advice for a value migrate leaves
+// says to set the variable to its reference too. Following it, and then storing
+// the rotated value, leaves nothing to report.
 func TestFollowingDoctorsAdviceForAShellVariableClearsIt(t *testing.T) {
+	// Only its randomness marks this one, so migrate leaves it.
+	const buildID = "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i"
 	h := newHarness(t, "", nil, nil)
 	rc := filepath.Join(homed(t, h), ".zshrc")
-	os.WriteFile(rc, []byte("export GITHUB_TOKEN="+leftoverToken+"\n"), 0o644)
+	os.WriteFile(rc, []byte("export BUILD_ID="+buildID+"\n"), 0o644)
 	var printed strings.Builder
 	run := runner(h, &printed)
 
-	if code, out := run("doctor"); code != 1 || !strings.Contains(out, "e.g. keyward add github-token and set GITHUB_TOKEN to 'cap://github-token'") {
-		t.Fatalf("doctor exit %d, want 1 and the advice:\n%s", code, out)
+	if code, out := run("doctor"); code != 0 || !strings.Contains(out, "e.g. keyward add build-id and set BUILD_ID to 'cap://build-id'") {
+		t.Fatalf("doctor exit %d, want 0 and the advice:\n%s", code, out)
 	}
-	h.cli.ReadSecret = func() ([]byte, error) { return []byte(leftoverToken), nil }
-	if code, out := run("add", "github-token"); code != 0 {
+	h.cli.ReadSecret = func() ([]byte, error) { return []byte(buildID), nil }
+	if code, out := run("add", "build-id"); code != 0 {
 		t.Fatalf("add exit %d:\n%s", code, out)
 	}
-	os.WriteFile(rc, []byte("export GITHUB_TOKEN='cap://github-token'\n"), 0o644)
-	h.cli.ReadSecret = func() ([]byte, error) { return []byte("ghp_FakeRotatedToken00000000000000000000"), nil }
-	if code, out := run("add", "--force", "github-token"); code != 0 {
+	os.WriteFile(rc, []byte("export BUILD_ID='cap://build-id'\n"), 0o644)
+	h.cli.ReadSecret = func() ([]byte, error) { return []byte("Qw8eRt5yUi2oPa9sDf6gHj3kLz7xCv4bNm1q"), nil }
+	if code, out := run("add", "--force", "build-id"); code != 0 {
 		t.Fatalf("add --force exit %d:\n%s", code, out)
 	}
 	if code, out := run("doctor"); code != 0 || verdict(out) != "✓ No problems found." {
 		t.Errorf("doctor exit %d, want 0:\n%s", code, out)
 	}
-	if strings.Contains(printed.String(), leftoverToken) {
+	if strings.Contains(printed.String(), buildID) {
 		t.Errorf("printed the token:\n%s", printed.String())
 	}
 }
@@ -131,7 +132,7 @@ func TestDoctorFailsOnACredentialMigrateCannotMove(t *testing.T) {
 			if got, want := row(h.out(), "~/.zshrc:2 "), "~/.zshrc:2 edit "+tc.kind+" a GitHub token"; got != want {
 				t.Errorf("the row reads %q, want %q:\n%s", got, want, h.out())
 			}
-			if want := "To fix each: edit remove it by hand in an editor Then rotate"; !strings.Contains(flat(h.out()), want) {
+			if want := "To fix each: edit remove it in an editor Fix these yourself"; !strings.Contains(flat(h.out()), want) {
 				t.Errorf("stdout lacks %q:\n%s", want, h.out())
 			}
 			if got, want := verdict(h.out()), "✗ Problems found: 1 credential(s) in plaintext."; got != want {

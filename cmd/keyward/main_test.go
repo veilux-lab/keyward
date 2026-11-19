@@ -97,3 +97,13 @@ func TestCommandsWithoutVaultAccessDoNotStartService(t *testing.T) {
 		})
 	}
 }
+
+// A tool keyward runs, git among them, sees none of git's variables, which a
+// hook that runs keyward sets for its own repository.
+func TestRunToolLeavesOutGitsVariables(t *testing.T) {
+	t.Setenv("GIT_DIR", t.TempDir())
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(t.TempDir(), "index"))
+	if out, err := runTool(t.TempDir(), "/bin/sh", "-c", `test -z "${GIT_DIR+set}${GIT_INDEX_FILE+set}"`); err != nil {
+		t.Errorf("the tool saw git's variables: %v %s", err, out)
+	}
+}

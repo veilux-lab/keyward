@@ -125,26 +125,35 @@ func Literals(servers []Server) []Literal {
 // keeps, judged as printing hides it: a string by its key and as an argument, an
 // array's items by its key, and an object's values each by its own.
 func keptSecrets(field, key string, v any, found func(field string, d migrate.Detection)) {
-	switch v := v.(type) {
-	case string:
-		if d := migrate.Surer(migrate.Detect(key, v), argument(v)); d.Secret && !migrate.Placeholder(v) {
+	eachString(field, key, v, func(field, key, s string) {
+		if d := migrate.Surer(migrate.Detect(key, s), argument(s)); d.Secret && !migrate.Placeholder(s) {
 			found(field, d)
 		}
+	})
+}
+
+// eachString calls f with each string in v, the value of field, with its field
+// and the key that names it: key for v or an item of it, and its own for each of
+// an object's values.
+func eachString(field, key string, v any, f func(field, key, s string)) {
+	switch v := v.(type) {
+	case string:
+		f(field, key, v)
 	case []any:
 		for i, item := range v {
-			keptSecrets(fmt.Sprintf("%s[%d]", field, i), key, item, found)
+			eachString(fmt.Sprintf("%s[%d]", field, i), key, item, f)
 		}
 	case []string:
 		for i, item := range v {
-			keptSecrets(fmt.Sprintf("%s[%d]", field, i), key, item, found)
+			eachString(fmt.Sprintf("%s[%d]", field, i), key, item, f)
 		}
 	case map[string]any:
 		for k, item := range v {
-			keptSecrets(field+"."+k, k, item, found)
+			eachString(field+"."+k, k, item, f)
 		}
 	case map[string]string:
 		for k, item := range v {
-			keptSecrets(field+"."+k, k, item, found)
+			eachString(field+"."+k, k, item, f)
 		}
 	}
 }

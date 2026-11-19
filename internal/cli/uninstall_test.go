@@ -271,6 +271,45 @@ func TestPurgeRefusesWhileAnMCPServerItCannotChangeUsesTheVault(t *testing.T) {
 	}
 }
 
+// doctor's advice for a credential in an agent's settings env, or in Codex's
+// shell_environment_policy.set, is a reference the agent passes on, which
+// keyward cannot change back. uninstall names each such file, and purging would
+// delete the only copy of the value it needs.
+func TestUninstallNamesTheAgentsFilesThatPassAReferenceOn(t *testing.T) {
+	r := uninstallFixture(t, "")
+	home := homed(t, r.h)
+	if err := r.h.store.Seed(map[string]string{"gh-token": "ghp_FakeUninstallToken000000000000000000"}); err != nil {
+		t.Fatal(err)
+	}
+	settings, codex := filepath.Join(home, ".claude", "settings.json"), filepath.Join(home, ".codex", "config.toml")
+	put(t, settings, `{"env": {"GH_TOKEN": "cap://gh-token"}}`)
+	put(t, codex, "[shell_environment_policy]\nset = { GH_TOKEN = \"cap://gh-token\" }\n")
+	put(t, filepath.Join(home, "app", ".claude", "settings.json"), `{"env": {"GH_TOKEN": "cap://not-stored"}}`)
+	put(t, filepath.Join(home, ".claude.json"), `{"projects": {"`+filepath.Join(home, "app")+`": {}}}`)
+	r.h.cli.PurgeVault = func() error { t.Error("purged while an agent still passed a reference on"); return nil }
+	r.h.cli.Stdin = strings.NewReader("yes\n")
+	if code := r.h.cli.Run([]string{"uninstall", "--purge"}); code != 1 || len(r.calls) != 0 {
+		t.Errorf("exit %d, calls %v, want a refusal", code, r.calls)
+	}
+	for _, want := range []string{"~/.claude/settings.json: ", "~/.codex/config.toml: "} {
+		if !strings.Contains(r.h.err(), want) {
+			t.Errorf("the refusal does not name %s:\n%s", want, r.h.err())
+		}
+	}
+	if strings.Contains(r.h.err(), "~/app/") {
+		t.Errorf("the refusal names a file whose reference is to nothing stored:\n%s", r.h.err())
+	}
+
+	r.h.stderr.Reset()
+	r.h.cli.Stdin = strings.NewReader("yes\n")
+	if code := r.h.cli.Run([]string{"uninstall"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, r.h.err())
+	}
+	if !strings.Contains(r.h.err(), "~/.claude/settings.json: ") || !strings.Contains(r.h.out(), "~/.claude/settings.json still has cap:// references") {
+		t.Errorf("uninstall does not say the file still passes a reference on:\n%s\n%s", r.h.err(), r.h.out())
+	}
+}
+
 func TestPurgeDeletesTheVaultOnceFilesAreRestored(t *testing.T) {
 	r := uninstallFixture(t, "")
 	homed(t, r.h)

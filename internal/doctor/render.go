@@ -74,27 +74,29 @@ func (r *Report) Render(f Format) string {
 		sections = append(sections, f.heading(Fail, fmt.Sprintf("%d malformed reference(s), which will fail when used", n))+f.table(rows, -1))
 	}
 
-	certain, possible := r.plaintextEntries()
+	// The user makes these changes: an agent that opens a line reads the secret.
+	// Rotating leaves the vault with the old value.
+	certain, unheld, possible := r.plaintextEntries()
 	if certain.lines > 0 {
-		// Rotating leaves the vault with the old value. The user makes these changes;
-		// an agent that opens a line reads the secret.
 		sections = append(sections, f.heading(Fail, fmt.Sprintf("%d credential(s) in plaintext", certain.lines))+f.entries(certain.entries)+"\n"+
 			f.fixes("To fix each:", "every line", certain.entries)+
-			f.paragraph(plain, "Then rotate each one, and store its new value with keyward add --force NAME.")+
-			f.paragraph(Warning, "AI agents must not open these lines or print these configs; ask the user to fix them."))
+			f.paragraph(Warning, "Fix these yourself, not with an AI agent, then rotate each and store the new value with keyward add --force NAME."))
+	}
+	if unheld.lines > 0 {
+		sections = append(sections, f.heading(Attention, fmt.Sprintf("%d credential(s) keyward can't hold", unheld.lines))+f.entries(unheld.entries)+"\n"+
+			f.paragraph(Warning, "Fix these yourself, not with an AI agent."))
 	}
 	if possible.lines > 0 {
 		s := f.heading(Attention, fmt.Sprintf("%d value(s) that may be credentials", possible.lines)) + f.entries(possible.entries) + "\n" +
 			f.fixes("If one is a credential:", "each line that is one", possible.entries) +
-			f.paragraph(plain, "Rotate each one that is a credential, and store its new value with keyward add --force NAME.")
+			f.paragraph(Warning, "Judge these yourself, not with an AI agent. If one is a credential, fix it, then rotate it and store the new value with keyward add --force NAME.")
 		if possible.markable {
-			s += f.paragraph(plain, "If one holds no secret, end its line with # "+migrate.IgnoreMarker+" yourself, "+possible.eachLine()+
-				"and keyward leaves the line alone (shell and .env files only); an AI agent must not.")
+			s += f.paragraph(plain, "If one is not, end its line with # "+migrate.IgnoreMarker+" (shell and .env files"+possible.eachLine()+").")
 		}
 		if possible.paired {
-			s += f.paragraph(plain, "Marking leaves the whole line alone, so mark a line listed twice, for its value and for the comment beside it, only once neither holds a secret.")
+			s += f.paragraph(plain, "A marked line is ignored whole, so mark a line listed twice only if neither part is a secret.")
 		}
-		sections = append(sections, s+f.paragraph(Warning, "AI agents must not open these lines or print these configs; ask the user to judge them."))
+		sections = append(sections, s)
 	}
 
 	if n := len(r.Orphaned); n > 0 {
@@ -126,9 +128,17 @@ func (r *Report) Summary(f Format, checks []Check, notes []string) string {
 	// Without the files read, "unreferenced" reads as "unused".
 	const title = "keyward doctor"
 	at := len(title) + 2
-	b.WriteString(f.paint(Heading, title) + "  " + f.files("read", r.Scanned, at))
+	others := ""
+	if n := len(r.OtherProjects); n > 0 {
+		files := 0
+		for _, count := range r.OtherProjects {
+			files += count
+		}
+		others = fmt.Sprintf("%d agent file(s) in %d other Claude Code project(s)", files, n)
+	}
+	b.WriteString(f.paint(Heading, title) + "  " + f.files("read", r.Scanned, others, at))
 	if len(r.Absent) > 0 {
-		b.WriteString(spaces(at) + f.files("not read", r.Absent, at))
+		b.WriteString(spaces(at) + f.files("not read", r.Absent, "", at))
 	}
 	labelW := 0
 	for _, c := range checks {
@@ -180,9 +190,21 @@ func (f Format) Alert(heading, advice string) string {
 	return f.heading(Fail, heading) + f.paragraph(plain, advice)
 }
 
+// Tracked renders the personal files git tracks, as a section of its own.
+func (f Format) Tracked(files []string) string {
+	rows := make([][]cell, len(files))
+	for i, file := range files {
+		rows[i] = []cell{{Command, f.Tilde(file)}}
+	}
+	return f.heading(Attention, fmt.Sprintf("%d personal file(s) git tracks", len(files))) + f.table(rows, -1) + "\n" +
+		f.paragraph(plain, "git tracks each, so a push publishes it: run git rm --cached FILE in its folder, and add FILE to the repository's .gitignore. "+
+			"Its earlier commits keep it, so if one was pushed, rotate any credential it held.")
+}
+
 // entries renders the rows of a list of credentials in columns: where, the tag,
 // what holds it, and why it looks like one, which wraps in a column of its own.
-// An MCP server's row has its reason and fix under what holds it.
+// A row with a fix, an MCP server's or an agent setting's, has its reason and fix
+// under what holds it.
 func (f Format) entries(list []entry) string {
 	tagW := 0
 	for _, e := range list {
@@ -228,7 +250,8 @@ func (f Format) entries(list []entry) string {
 }
 
 // fixes is the legend of a list: how to fix a row of each tag it uses but an MCP
-// server's, and an example of the first value whose name can be a reference's.
+// server's, and an example of the first value to add whose name can be a
+// reference's.
 // inRange says which lines of a range to remove. It is empty where no row is a
 // line's.
 func (f Format) fixes(intro, inRange string, list []entry) string {
@@ -240,28 +263,27 @@ func (f Format) fixes(intro, inRange string, list []entry) string {
 		if e.tag == tagMigrate {
 			files[e.file] = true
 		}
-		if example == "" && (e.tag == tagMigrate || e.tag == tagAdd) {
+		if example == "" && e.tag == tagAdd {
 			if ref, err := migrate.RefName(e.what); err == nil {
 				// keyward add only stores a copy, so the variable is set to the reference too.
 				example = "e.g. keyward add " + ref + " and set " + e.what + " to 'cap://" + ref + "'"
 			}
 		}
 	}
-	file := "on the file it is in"
+	file := "FILE"
 	if len(files) == 1 {
 		for path := range files {
 			file = f.Tilde(path)
 		}
 	}
-	store := "store it with keyward add NAME and set the variable to 'cap://NAME'"
-	edit := "remove it by hand in an editor"
+	edit := "remove it in an editor"
 	if ranged {
 		edit += " (in a range, " + inRange + ")"
 	}
 	var lines [][2]string
 	for _, l := range [][2]string{
-		{tagMigrate, "move it with keyward migrate " + file + " (preview with --dry-run), or " + store},
-		{tagAdd, store + "; migrate moves only values it is sure of"},
+		{tagMigrate, "keyward migrate " + file + " moves it (try --dry-run first)"},
+		{tagAdd, "keyward add NAME, then set the variable to 'cap://NAME'"},
 		{tagEdit, edit},
 	} {
 		if used[l[0]] {
@@ -285,9 +307,10 @@ func (f Format) fixes(intro, inRange string, list []entry) string {
 	return b
 }
 
-// files lists paths after what was done with them, wrapped under the first. A
-// comma ends each but the last, as a path may hold a space.
-func (f Format) files(done string, paths []string, at int) string {
+// files lists paths after what was done with them, and others, the files counted
+// instead, wrapped under the first. A comma ends each but the last, as a path may
+// hold a space.
+func (f Format) files(done string, paths []string, others string, at int) string {
 	words := []string{"no files"}
 	if len(paths) > 0 {
 		words = make([]string, len(paths))
@@ -297,6 +320,12 @@ func (f Format) files(done string, paths []string, at int) string {
 				words[i] += ","
 			}
 		}
+	}
+	switch {
+	case others != "" && len(paths) > 0:
+		words = append(words, append([]string{"and"}, strings.Fields(others)...)...)
+	case others != "":
+		words = strings.Fields(others)
 	}
 	at += runes(done) + 1
 	var b strings.Builder
