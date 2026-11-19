@@ -44,6 +44,11 @@ keyward help                              # commands and options
   only the `cap://` reference. Name the variables a command needs with `--only`;
   without it, `keyward run` resolves every reference in its environment. Don't
   start your editor that way, or everything inside it gets the values.
+- To keep typing a command as before, alias it in your shell's startup file,
+  such as `~/.zshrc` or `~/.bashrc`, naming what it needs:
+  `alias gh='keyward run --only GITHUB_TOKEN -- gh'`. An alias works only in
+  your shell; a script, or a program another app starts, still needs
+  `keyward run`.
 - Any process can read a program's command line, and security tools log it. So
   `keyward run` refuses a `sh -c` script that would put a value in another
   program's arguments, as `curl -H "Authorization: Bearer $API_TOKEN" URL` would.
