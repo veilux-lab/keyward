@@ -100,6 +100,8 @@ reference, not a broken value.
   `keyward recovery restore` with their recovery code.
 - Never run `keyward setup` or `keyward recovery`; ask the user to run them in
   Terminal.app, not an editor terminal.
+- Never run `keyward copy`, even when the user asks: it puts a value on the
+  clipboard, where you could read it. Tell the user to run it.
 - Do not run `keyward migrate`, `restore`, `rm`, `add --force`,
   `run --allow-command-line`, `backups recover`, `backups rm`, `mcp wrap`,
   `mcp unwrap`, `agents link`, `agents unlink`, or `uninstall`, read keyward's

@@ -23,6 +23,7 @@ import (
 	"github.com/veilux-lab/keyward/internal/agents"
 	"github.com/veilux-lab/keyward/internal/backup"
 	"github.com/veilux-lab/keyward/internal/cli"
+	"github.com/veilux-lab/keyward/internal/clipboard"
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/launchd"
 	"github.com/veilux-lab/keyward/internal/ledger"
@@ -35,6 +36,12 @@ import (
 var homebrewExecutable string
 
 func main() {
+	// Before anything else, so the process keyward copy starts reads no settings
+	// and logs nothing.
+	if len(os.Args) > 1 && os.Args[1] == clipboard.ClearArg {
+		clipboard.ClearWhenDue(clipboard.General{}, os.Args[2:])
+		return
+	}
 	daemon.Version = cli.Version
 	// KEYWARD_SERVICE scopes the daemon's vault and Keychain key to a different
 	// service name, KEYWARD_SOCKET moves the socket, and KEYWARD_VAULT the vault
@@ -102,6 +109,8 @@ func main() {
 		RunTool:        runTool,
 		Self:           stablePath(home),
 		Exposures:      client.Exposures,
+		Clipboard:      clipboard.Copy,
+		ClearClipboard: clipboard.ClearLater,
 		Backups:        backup.Default(home),
 		Record:         record,
 		Daemon: func() error {
