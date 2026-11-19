@@ -1,14 +1,14 @@
 class Keyward < Formula
   desc "Move shell secrets into a Keychain-keyed vault, resolved by a local broker"
   homepage "https://github.com/veilux-lab/keyward"
-  url "https://github.com/veilux-lab/keyward/releases/download/v1.7.2/keyward-1.7.2.tar.gz"
-  version "1.7.2"
-  sha256 "eca36f08c03019616afda3ad74940ada5a2b72d0a3e5a20701fe9c4daf2a34a6"
+  url "https://github.com/veilux-lab/keyward/releases/download/v1.7.3/keyward-1.7.3.tar.gz"
+  version "1.7.3"
+  sha256 "3fc94c3fb69f8db6e7470255f473a81f7f3996ef2fb257dcf4cb19cf4053859b"
   license "MIT"
 
   bottle do
-    root_url "https://github.com/veilux-lab/keyward/releases/download/v1.7.2"
-    sha256 arm64_sequoia: "82ec88944a8728be7c29bbd21bf5278d3be16eacff942a72c036d8e05ef4479e"
+    root_url "https://github.com/veilux-lab/keyward/releases/download/v1.7.3"
+    sha256 arm64_sequoia: "31ab57695cc2c56f120c75a44b75075be54e1046b180c8b929c21f95bfd8604c"
   end
 
   depends_on "go" => :build
