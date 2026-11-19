@@ -1,7 +1,9 @@
 package migrate
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -17,9 +19,10 @@ import (
 type Detection struct {
 	Secret bool
 
-	// Possible marks a value that only looks random. It is never moved: randomness
-	// alone also describes compiler flags and hostnames, and no list of safe names
-	// can be complete. The user decides instead.
+	// Possible marks a value that only looks random, or JSON that only a key's
+	// name or a prefix marks. It is never moved: randomness alone also describes
+	// compiler flags and hostnames, and no list of safe names can be complete. The
+	// user decides instead.
 	Possible bool
 
 	// KnownShape marks a secret recognised by the value alone, from a known
@@ -128,7 +131,11 @@ var safeNames = map[string]bool{
 //
 // Exclusions are checked before signals: a value that cannot be a literal secret
 // is dismissed before any heuristic has a chance to misfire on it.
-func Detect(name, value string) Detection {
+func Detect(name, value string) Detection { return detect(name, value, true) }
+
+// detect is Detect, with safeNames exempting name only as a variable's: a key in
+// JSON names none, so pwd there is a password, as in DB_PWD.
+func detect(name, value string, variable bool) Detection {
 	switch {
 	case value == "":
 		return Detection{Reason: "the value is empty"}
@@ -142,8 +149,18 @@ func Detect(name, value string) Detection {
 	case hasExpansion(value):
 		return Detection{Reason: "the value contains a shell expansion"}
 
-	case safeNames[strings.ToUpper(name)]:
+	case variable && safeNames[strings.ToUpper(name)]:
 		return Detection{Reason: "a known non-secret variable"}
+	}
+
+	// JSON is judged before it is read as a URL, as it can hold a token beside one,
+	// or an @ after one that is no user info. A name that suggests a credential
+	// still makes the whole one.
+	if found, ok := inJSON(name, value); ok {
+		if hasNameHint(name) {
+			return Surer(byName(value), found)
+		}
+		return found
 	}
 
 	// Checked before the path and URL exclusions, because a connection string is
@@ -167,10 +184,7 @@ func Detect(name, value string) Detection {
 	}
 
 	if hasNameHint(name) {
-		if len(value) >= minNamedLen {
-			return Detection{Secret: true, Reason: "the variable name suggests a credential", label: namedLabel(value)}
-		}
-		return Detection{Reason: fmt.Sprintf("the name suggests a credential but the value is under %d characters", minNamedLen)}
+		return byName(value)
 	}
 
 	if len(value) >= minEntropyLen && entropyBits(value) >= minEntropyBits {
@@ -185,6 +199,75 @@ func Detect(name, value string) Detection {
 	}
 
 	return Detection{Reason: "nothing about the name or value suggests a secret"}
+}
+
+// byName is the verdict on a value whose name suggests a credential.
+func byName(value string) Detection {
+	if len(value) >= minNamedLen {
+		return Detection{Secret: true, Reason: "the variable name suggests a credential", label: namedLabel(value)}
+	}
+	return Detection{Reason: fmt.Sprintf("the name suggests a credential but the value is under %d characters", minNamedLen)}
+}
+
+// inJSON judges value, if it is a JSON object or array, by its surest string. Its
+// reason says what the JSON holds, as Detect's own would call a key the variable.
+// Keys are sorted, so a tie is named the same each run.
+func inJSON(name, value string) (d Detection, ok bool) {
+	var v any
+	start := strings.TrimSpace(value)
+	if !strings.HasPrefix(start, "{") && !strings.HasPrefix(start, "[") || json.Unmarshal([]byte(value), &v) != nil {
+		return Detection{}, false
+	}
+	d = Detection{Reason: "the value is JSON, and nothing in its values suggests a secret"}
+	var judge func(key string, v any)
+	judge = func(key string, v any) {
+		switch v := v.(type) {
+		case string:
+			if !Placeholder(v) {
+				found := detect(key, v, false)
+				// Ordinary settings can be named like credentials, as author and s3_key
+				// are, or start like one, as ASIA and sk-SK do. So such a name alone, or
+				// a prefix without its kind's shape whatever its key, only may mark one,
+				// and a prefix, as a name, needs as long a value.
+				if found.Secret && !found.KnownShape && (found.label == named || matchPrefix(v) != "") {
+					found.Secret, found.Possible = false, len(v) >= minNamedLen
+				}
+				found.Reason = "JSON holding " + found.label.One
+				d = Surer(d, found)
+			}
+		case []any:
+			for _, item := range v {
+				judge(key, item)
+			}
+		case map[string]any:
+			for _, k := range slices.Sorted(maps.Keys(v)) {
+				// Read as a header's name is, so X-Api-Key matches API_KEY.
+				judge(strings.ReplaceAll(k, "-", "_"), v[k])
+			}
+		}
+	}
+	judge(name, v)
+	return d, true
+}
+
+// Surer is whichever of a and b is surer of a credential, a if neither is: one of
+// a known shape, then a secret, then one that may be.
+func Surer(a, b Detection) Detection {
+	sureness := func(d Detection) int {
+		switch {
+		case d.KnownShape:
+			return 3
+		case d.Secret:
+			return 2
+		case d.Possible:
+			return 1
+		}
+		return 0
+	}
+	if sureness(b) > sureness(a) {
+		return b
+	}
+	return a
 }
 
 // NamesCredential reports whether a variable, or an option, called name suggests

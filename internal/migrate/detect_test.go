@@ -445,6 +445,67 @@ func TestCommentsNeedAKnownShapeToo(t *testing.T) {
 	}
 }
 
+// A JSON object or array is judged by its surest string, each under its own key,
+// so names mapped to paths hold no credential and a token in JSON is one. A key's
+// name alone, or a prefix without its kind's shape whatever its key, only may mark
+// one, though a variable's name marks it all.
+func TestDetectJudgesJSONByTheStringsInIt(t *testing.T) {
+	const (
+		token    = "ghp_" + "1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVwXyZ"
+		slack    = "xoxb-" + "123456789012-1234567890123-AbCdEfGhIjKlMnOp"
+		checksum = "q3Vt8ZkYp1Lr0Xw9NcEa6HbJd2Ms5Ug7Fi4Ko+Ty/8E="
+		random   = "Zx9kQm2vLp7wRt4yNb8cFj1hGd5sAe3uYo6i"
+		header   = "FakeOpaqueTeamHeader0000"
+		pem      = `-----BEGIN PRIVATE KEY-----\nFakeKeyBody0000\n-----END PRIVATE KEY-----\n`
+		cert     = `-----BEGIN CERTIFICATE-----\nFakeCertBody0000\n-----END CERTIFICATE-----\n`
+		google   = `"auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token"`
+	)
+	for _, c := range []struct {
+		name, value            string
+		secret, possible, sure bool
+		reason                 string
+	}{
+		{"NODE_REPL_TRUSTED_SERVICES", `{"github":"/opt/tools/github-mcp","linear":"/opt/tools/linear-mcp"}`, false, false, false, "JSON"},
+		{"MCP_SERVICES", `["github","linear","notion","slack","atlassian","pagerduty"]`, false, false, false, "JSON"},
+		{"MCP_REGIONS", `["ASIA","EUROPE","AMERICAS"]`, false, false, false, "JSON"},
+		{"TOOL_SETTINGS", `{"locales":["en-US","sk-SK","de-DE"]}`, false, false, false, "JSON"},
+		{"ARCHIVE_CHECKSUM", `["` + checksum + `"]`, false, false, false, "JSON"},
+		{"ARCHIVES", `{"tools":{"archive_checksum":["` + checksum + `"]}}`, false, false, false, "JSON"},
+		{"ENDPOINTS", `{"endpoint":"https://api.example.com","owner":"me@example.com"}`, false, false, false, "JSON"},
+		{"SERVICES", `{"github":"` + "ghp_" + strings.Repeat("x", 36) + `","linear":"<your-linear-api-key>"}`, false, false, false, "JSON"},
+		{"SERVICES", `{"api":"` + token + `"}`, true, false, true, "JSON holding a GitHub token"},
+		{"SERVICES", ` [ "` + slack + `", "` + token + `" ] `, true, false, true, "JSON holding a Slack token"},
+		{"SERVICES", `{"api":{"hosts":["api.example.com"],"auth":{"github":"` + token + `"}}}`, true, false, true, "JSON holding a GitHub token"},
+		{"SERVICES", `{"url":"https://api.example.com","value":"` + token + `"}`, true, false, true, "JSON holding a GitHub token"},
+		{"SERVICES", `{"home":"` + token + `"}`, true, false, true, "JSON holding a GitHub token"},
+		{"SERVICES", `{"db":"postgresql://app:S3cr3tP4ss@db.internal:5432/payments"}`, true, false, true, "JSON holding a URL with a password"},
+		{"SERVICES", `{"db":{"user":"app","password":"` + random + `"}}`, true, false, false, "JSON holding a value named like a credential: a random 36-character token"},
+		{"SERVICES", `{"id":"` + random + `","password":"` + random + `"}`, true, false, false, "JSON holding a value named like a credential: a random 36-character token"},
+		{"DB_CONN", `{"uid":"sa","pwd":"` + random + `"}`, true, false, false, "JSON holding a value named like a credential: a random 36-character token"},
+		{"SERVICES", `{"X-Api-Key":"` + header + `"}`, true, false, false, "JSON holding a value named like a credential: a random 24-character token"},
+		{"SERVICES", `{"db":{"user":"app","password":"correct-horse-battery-staple"}}`, false, true, false, "JSON holding a value named like a credential"},
+		{"SERVICES", `{"author":"Jane Doe <jane@example.com>","s3_key":"exports/2026/report.csv"}`, false, true, false, "JSON holding a value named like a credential"},
+		{"SERVICES", `{"password":"ASIA_PACIFIC_SOUTHEAST"}`, false, true, false, "JSON holding a temporary AWS access key ID"},
+		{"KAFKA_SSL", `{"ca":"` + cert + `"}`, false, true, false, "JSON holding a certificate or public key"},
+		{"SERVICES", `{"id":"` + random + `","port":8080}`, false, true, false, "JSON holding a random 36-character token"},
+		{"GOOGLE_CREDENTIALS", `{"type":"service_account","project_id":"payments-prod",` + google + `}`, true, false, false, "the variable name"},
+		{"GOOGLE_CREDENTIALS", `{"client_secret":"` + random + `"}`, true, false, false, "the variable name"},
+		{"GOOGLE_CREDENTIALS", `{"type":"service_account","private_key":"` + pem + `",` + google + `}`, true, false, true, "JSON holding a private key"},
+		{"MY_THING", `{` + random, false, true, false, "a random 36-character token"},
+		{"RETRIES", "5", false, false, false, "nothing about"},
+	} {
+		got := migrate.Detect(c.name, c.value)
+		if got.Secret != c.secret || got.Possible != c.possible || got.KnownShape != c.sure || !strings.Contains(got.Reason, c.reason) {
+			t.Errorf("Detect(%q, %q) = %+v, want Secret %v, Possible %v, KnownShape %v, a reason with %q", c.name, c.value, got, c.secret, c.possible, c.sure, c.reason)
+		}
+	}
+	for range 100 {
+		if got := migrate.Detect("SERVICES", `{"slack":"`+slack+`","github":"`+token+`"}`); got.Reason != "JSON holding a GitHub token" {
+			t.Fatalf("Detect gave %q, want the first key's token", got.Reason)
+		}
+	}
+}
+
 func TestCredentialPrefixPrefersTheLongestMatch(t *testing.T) {
 	for value, want := range map[string]string{
 		"sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWx":   "sk-ant-",

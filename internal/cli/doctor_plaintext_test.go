@@ -582,6 +582,34 @@ func TestFollowingDoctorsAdviceForALiteralInCodexHTTPHeadersLeavesAServerKeyward
 	}
 }
 
+// Codex writes a server's env in TOML, where JSON holds quotes, commas and braces.
+// doctor reports only the JSON holding a token, with Codex's fix, not names mapped
+// to paths, and keyward mcp prints neither value.
+func TestDoctorAndMCPJudgeJSONInACodexServersEnvByWhatItHolds(t *testing.T) {
+	h := newHarness(t, "", map[string]string{"pd-key": "v"}, nil)
+	home := homed(t, h)
+	os.WriteFile(filepath.Join(home, ".zshrc"), []byte("export PD_KEY='cap://pd-key'\n"), 0o644)
+	codex := filepath.Join(home, ".codex", "config.toml")
+	os.MkdirAll(filepath.Dir(codex), 0o755)
+	os.WriteFile(codex, []byte("[mcp_servers.node_repl]\ncommand = \"node-repl-mcp\"\nenv_vars = [\"PD_KEY\"]\n"+
+		`env = { NODE_REPL_TRUSTED_SERVICES = '{"github":"/opt/tools/github-mcp","linear":"/opt/tools/linear-mcp"}', MCP_CONFIG = '{"auth":{"github":"`+leftoverToken+`"}}' }`+"\n"), 0o600)
+	var printed strings.Builder
+	run := runner(h, &printed)
+
+	if code, out := run("mcp"); code != 1 || !strings.Contains(out, "[mcp_servers.node_repl]") || !strings.Contains(out, "Copy each hidden value from the current definition") {
+		t.Errorf("mcp exit %d, want 1 and the server with its env hidden:\n%s", code, out)
+	}
+	const fix = ` JSON holding a GitHub token store it with keyward add NAME, remove it and add "MCP_CONFIG" to env_vars, add export MCP_CONFIG='cap://NAME' to ~/.zshrc, and run keyward mcp wrap`
+	if _, out := run("doctor"); !strings.HasSuffix(row(out, "Codex server node_repl, env.MCP_CONFIG"), fix) || strings.Contains(out, "NODE_REPL_TRUSTED_SERVICES") {
+		t.Errorf("doctor does not report the token in JSON alone, with its fix:\n%s", out)
+	}
+	for _, value := range []string{"/opt/tools/github-mcp", leftoverToken} {
+		if strings.Contains(printed.String(), value) {
+			t.Errorf("printed a value from env:\n%s", printed.String())
+		}
+	}
+}
+
 // doctor reads every Claude Code project's servers, but wrap changes a project's
 // local servers only from its folder, where Claude Code's CLI finds them. So the
 // advice for a literal in another project's server names that folder, and from

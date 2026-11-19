@@ -86,6 +86,10 @@ var fixture = []struct {
 	{"a template", `export OPENAI_API_KEY="<your-openai-api-key>"`, leftOut},
 	{"a URL with a template for its password", "export ANALYTICS_DB_URL=postgres://app:<password>@db.internal:5432/analytics", leftOut},
 	{"a commented-out Slack placeholder", "# export SLACK_BOT_TOKEN=" + "xoxb-" + strings.Repeat("x", 24), leftOut},
+	{"placeholders in JSON", `export MCP_CONFIG_EXAMPLE='{"github":"` + "ghp_" + strings.Repeat("x", 36) + `","linear":"<your-linear-api-key>"}'`, leftOut},
+	{"a JSON list of services", `export MCP_SERVICES='["github","linear","notion","slack","atlassian","pagerduty"]'`, leftOut},
+	{"names mapped to paths in JSON", `export NODE_REPL_TRUSTED_SERVICES='{"github":"/opt/tools/github-mcp","linear":"/opt/tools/linear-mcp"}'`, leftOut},
+	{"commented-out names mapped to paths in JSON", `# export NODE_REPL_TRUSTED_SERVICES='{"github":"/opt/tools/github-mcp","linear":"/opt/tools/linear-mcp"}'`, leftOut},
 
 	// Neither a login nor a key, though each has an @ or a / where one would.
 	{"a Kerberos principal", "export KRB5_PRINCIPAL=HTTP/web01.example.com@EXAMPLE.COM", neverSure},
@@ -102,7 +106,6 @@ var fixture = []struct {
 
 	// No rule recognises these yet.
 	{"an OTEL header list with no key", `export OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-dataset=checkout-service,x-honeycomb-environment=production"`, stillListed},
-	{"a JSON list of services", `export MCP_SERVICES='["github","linear","notion","slack","atlassian","pagerduty"]'`, stillListed},
 	{"one compiler flag", "export SDK_CPPFLAGS=-I/Library/Developer/CommandLineTools/SDKs/MacOSX14.sdk/usr/include", stillListed},
 	{"hosts beside addresses", "export NO_PROXY=localhost,127.0.0.1,.internal.example.com,169.254.169.254,.svc.cluster.local", stillListed},
 	{"an Elasticsearch host", "export ES_ENDPOINT=search-logs-abc123def456ghi789jkl0mnop.us-west-2.es.amazonaws.com", stillListed},
@@ -139,6 +142,7 @@ var fixture = []struct {
 	{"a webhook with no scheme", "export INGEST_ENDPOINT=hooks.internal.example.com/ingest/j7tvztuz595epecir0x", credential},
 	{"a Pipedream endpoint", "export PIPEDREAM_HOST=eo2fo7ycxmc1x0p.m.pipedream.net", credential},
 	{"a database URL", "export DATABASE_URL=postgresql://app:S3cr3tP4ss@db.internal:5432/payments", credential},
+	{"a token in JSON beside a URL", `export MCP_CONFIG='{"url":"https://mcp.example.com/mcp","auth":{"github":"` + "ghp_" + `FakeFixtureJSONToken0000000000000000"}}'`, credential},
 	{"a URL with a template and a real key", "export BILLING_URL='postgres://app:<password>@db.internal:5432/billing?api_key=" + mixedToken + "'", credential},
 	{"an old token in a comment", "# old: " + "ghp_" + "FakeFixtureOldToken00000000000000000", credential},
 	{"a commented-out database URL", "# export DATABASE_URL=postgresql://app:S3cr3tP4ss@db.internal:5432/payments", credential},
@@ -170,7 +174,9 @@ var fixtureServers = []struct {
 	{"JAVA_TOOL_OPTIONS", "-Xmx2g -XX:+UseG1GC -Dfile.encoding=UTF-8", leftOut},
 	{"LINEAR_API_KEY", "<your-linear-api-key>", leftOut},
 	{"IMAGE_DIGEST", "sha256:" + sha256Hex, leftOut},
-	{"MCP_SERVICES", `["github","linear","notion","slack","atlassian","pagerduty"]`, stillListed},
+	{"MCP_SERVICES", `["github","linear","notion","slack","atlassian","pagerduty"]`, leftOut},
+	{"NODE_REPL_TRUSTED_SERVICES", `{"github":"/opt/tools/github-mcp","linear":"/opt/tools/linear-mcp"}`, leftOut},
+	{"MCP_CONFIG_EXAMPLE", `{"github":"` + "ghp_" + strings.Repeat("x", 36) + `","linear":"<your-linear-api-key>"}`, leftOut},
 	{"DD_API_KEY", hex32, credential},
 	{"JAVA_OPTS", "-Xmx1g -Dspring.datasource.password=Tr0ub4dor3xyz", credential},
 	{"NAS_LOGIN", "thistle.fjord.meadow.quartz.maple", credential},
