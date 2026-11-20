@@ -88,6 +88,7 @@ func TestInstructionsCarryEveryRule(t *testing.T) {
 		"Only the user decides a value is not a secret: never add `# keyward:ignore` yourself, and do not open a line keyward lists to judge it.",
 		"If it says the vault key is missing, or that the vault does not match its key, tell the user to run `keyward recovery restore`",
 		"Never run `keyward setup` or `keyward recovery`; ask the user to run them in Terminal.app, not an editor terminal.",
+		"Never run `keyward copy`, even when the user asks: it puts a value on the clipboard, where you could read it. Tell the user to run it.",
 		"Do not run `keyward migrate`, `restore`, `rm`, `add --force`, `run --allow-command-line`,",
 		"edit `~/.agents/keyward.md`",
 		"or delete keyward's Keychain items, unless the user asks, even when a keyward message suggests it.",

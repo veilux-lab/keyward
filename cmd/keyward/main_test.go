@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"io"
 	"os"
@@ -8,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/veilux-lab/keyward/internal/activity"
 	"github.com/veilux-lab/keyward/internal/cli"
+	"github.com/veilux-lab/keyward/internal/clipboard"
 	"github.com/veilux-lab/keyward/internal/daemon"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
@@ -105,5 +108,21 @@ func TestRunToolLeavesOutGitsVariables(t *testing.T) {
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(t.TempDir(), "index"))
 	if out, err := runTool(t.TempDir(), "/bin/sh", "-c", `test -z "${GIT_DIR+set}${GIT_INDEX_FILE+set}"`); err != nil {
 		t.Errorf("the tool saw git's variables: %v %s", err, out)
+	}
+}
+
+// main starts the process that clears the clipboard before the CLI, which knows
+// nothing of it: help does not name it, and the CLI would neither run nor record it.
+func TestTheClearProcessIsNotACommand(t *testing.T) {
+	var out bytes.Buffer
+	recorded := false
+	c := cli.CLI{Stdout: &out, Stderr: io.Discard, Record: func(activity.Event) { recorded = true }}
+	c.Run([]string{"help"})
+	if strings.Contains(out.String(), clipboard.ClearArg) {
+		t.Error("help names the clear process")
+	}
+	recorded = false
+	if code := c.Run([]string{clipboard.ClearArg, "7", "30s"}); code != 2 || recorded {
+		t.Errorf("the CLI ran or recorded the clear process: exit %d, recorded %t", code, recorded)
 	}
 }

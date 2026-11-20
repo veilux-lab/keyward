@@ -110,6 +110,11 @@ type CLI struct {
 	// Exposures asks the daemon which secrets are in a running program's command
 	// line, so doctor never holds a value; nil skips that check.
 	Exposures func() ([]exposure.Exposure, error)
+	// Clipboard puts a value on the clipboard and returns the change count it left
+	// there; ClearClipboard clears it after a delay unless that count has moved on.
+	// Injected so no test touches the real clipboard.
+	Clipboard      func(value []byte) (int, error)
+	ClearClipboard func(count int, after time.Duration) error
 
 	// inSetup quiets each step's closing advice; setup gives it once at the end.
 	inSetup bool
@@ -137,8 +142,8 @@ type CLI struct {
 
 	Record    func(activity.Event)
 	cancelled bool
-	// refused is set when run refuses a script: it exits 2, but is recorded as
-	// denied rather than as a usage error.
+	// refused is set when run refuses a script, or copy runs without a terminal:
+	// it exits 2, but is recorded as denied rather than as a usage error.
 	refused bool
 	// ranCommand is set once run has run a command and is returning its exit code.
 	ranCommand bool
@@ -156,6 +161,7 @@ commands:
   migrate <file>         move a file's secrets into the vault (asks first)
   run -- <command>       run a command with the real values
   add <name>             store a secret read from stdin
+  copy <name>            put a secret on the clipboard for 30 seconds (asks first)
   ls                     list stored names
   rm <name>              remove a secret
   doctor [file...]       check references, plaintext and exposed secrets, backups, and setup
@@ -207,7 +213,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "setup", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
+	case "add", "copy", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "setup", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -253,6 +259,8 @@ func (c *CLI) dispatch(args []string) int {
 		return exitOK
 	case "add":
 		return c.add(args[1:])
+	case "copy":
+		return c.copyToClipboard(args[1:])
 	case "ls":
 		return c.list()
 	case "rm":

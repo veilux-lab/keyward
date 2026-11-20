@@ -36,6 +36,7 @@ keyward migrate --dry-run ~/.zshrc        # preview; hides values and token-like
 keyward migrate ~/.zshrc                  # move a file's secrets; asks for "yes"
 keyward run --only API_TOKEN -- npm test  # run a command with the values it names
 keyward ls                                # stored names
+keyward copy api-token                    # put a value on the clipboard; asks for "yes"
 keyward doctor                            # check your setup
 keyward help                              # commands and options
 ```
@@ -63,6 +64,11 @@ keyward help                              # commands and options
   `credential.helper` or Claude Code's `apiKeyHelper`, gets the placeholder
   instead, so such a command needs `--no-mask`. Masking has
   [limits](docs/details.md#masking).
+- `keyward copy NAME` puts a value on the clipboard for you to paste, and clears
+  it after 30 seconds unless you've copied something since. It runs only in a
+  terminal, not for an agent or a pipe. The value stays off your other devices
+  and clipboard managers are asked to skip it, but any app can read it until it
+  clears.
 - `keyward doctor` also finds tokens still in plaintext in your shell files, the
   current folder's `.env`, MCP configs, and AI agents' own files: Claude Code's
   settings and the commands it saved as allowed, Codex's config, and instructions
