@@ -168,6 +168,8 @@ commands:
   copy <name>            put a secret on the clipboard for 30 seconds (asks first)
   ls                     list stored names
   rm <name>              remove a secret
+  bind | unbind <name>   limit where a secret may go, or undo it (asks first)
+  bindings               list secrets and where they may go
   doctor [file...]       check references, plaintext and exposed secrets, backups, and setup
   restore <file>...      put the values back into files (asks first)
   backups [rm|recover]   list, remove, or recover migrate's backups
@@ -217,7 +219,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "copy", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "setup", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
+	case "add", "copy", "ls", "rm", "run", "bind", "unbind", "bindings", "migrate", "restore", "backups", "agents", "recovery", "mcp", "setup", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -271,6 +273,12 @@ func (c *CLI) dispatch(args []string) int {
 		return c.remove(args[1:])
 	case "run":
 		return c.run(args[1:])
+	case "bind":
+		return c.bind(args[1:])
+	case "unbind":
+		return c.unbind(args[1:])
+	case "bindings":
+		return c.bindings(args[1:])
 	case "migrate":
 		return c.migrate(args[1:])
 	case "restore":
