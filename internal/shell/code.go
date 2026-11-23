@@ -187,6 +187,11 @@ func (c *checker) unknownCode(p *process, program string, at *syntax.Word) {
 // read, which is an error, as for a script that cannot be read, if one names
 // a variable that holds a value, or a resolved one as a word.
 func (c *checker) mayRun(p *process, texts []string, why unreadable) {
+	if c.collecting {
+		// Collecting programs, any code made as the script runs cannot be named.
+		c.cannotRead(p, "", why)
+		return
+	}
 	for _, text := range texts {
 		// Each text costs a step however short, or a script of many short
 		// literals could be scanned again at every call for free.

@@ -586,6 +586,12 @@ type checker struct {
 	resolved  map[string]taint          // the variables keyward run resolves
 	mentioned bool                      // the script names a resolved variable, as a word
 	kept      bool                      // the command read may be exec with only redirections, which last
+
+	// collecting turns the walk into Programs: it records the external programs
+	// the script runs rather than following values, and treats anything it
+	// cannot read or name as an error, so an unknown command fails closed.
+	collecting bool
+	programs   map[string]bool
 }
 
 // spend counts n steps of work, and reports whether the check may go on.
@@ -599,7 +605,7 @@ func (c *checker) spend(n int) bool {
 // a check that stopped early cannot know where its value went, or text names
 // one that holds a value.
 func (c *checker) cannotRead(p *process, text string, why unreadable) {
-	if c.err == nil && (c.mentioned || p.names(text)) {
+	if c.err == nil && (c.collecting || c.mentioned || p.names(text)) {
 		c.err = why
 	}
 }
@@ -1967,11 +1973,20 @@ func (c *checker) program(p *process, args []arg, env map[string]taint, in strea
 	}
 	prog := args[l.at]
 	if !prog.isLit {
+		// A name made as the script runs cannot be checked against bindings.
+		if c.collecting {
+			c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: a command named as the script runs cannot be named", prog.word.Pos().Line()), toName})
+		}
 		return nil
 	}
 	name := path.Base(prog.lit)
 	if shells[name] {
 		return c.nested(p, args[l.at:], environ(), in)
+	}
+	if c.collecting {
+		// A launcher (sudo, env) and a shell pass the environment through to the
+		// program after them, which is the one recorded; both are transparent.
+		c.programs[prog.lit] = true
 	}
 	for i, a := range args[l.at+1:] {
 		// A shell given a script among another program's words, as in
