@@ -23,6 +23,8 @@ type request struct {
 	Name  string `json:"name,omitempty"`
 	Value []byte `json:"value,omitempty"`
 	Note  string `json:"note,omitempty"`
+	// Binding carries the binding to add or remove for bind and unbind.
+	Binding *vault.Binding `json:"binding,omitempty"`
 }
 
 type response struct {
@@ -34,6 +36,8 @@ type response struct {
 	Changed bool `json:"changed,omitempty"`
 	// Exposures answers exposures, by secret name and process.
 	Exposures []exposure.Exposure `json:"exposures,omitempty"`
+	// Bindings answers get-bindings.
+	Bindings []vault.Binding `json:"bindings,omitempty"`
 
 	// Code is empty on success. Message carries the error text, which by the
 	// Store contract never contains a value.

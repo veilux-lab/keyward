@@ -145,15 +145,20 @@ func (s *Server) handle(conn net.Conn) {
 		op = "status"
 	case "entries":
 		op = "list"
-	case "get", "put", "replace", "delete", "export-key", "restore-key", "exposures":
+	case "get", "put", "replace", "delete", "export-key", "restore-key", "exposures", "bind", "unbind", "get-bindings":
 	default:
 		op = "request"
+	}
+	// The kind of binding, so the log records what changed, never a value.
+	var detail string
+	if (req.Op == "bind" || req.Op == "unbind") && req.Binding != nil {
+		detail = req.Binding.Kind
 	}
 	name, invalid := handle.Normalize(req.Name)
 	if invalid != nil || resp.Code != "" {
 		name = ""
 	}
-	s.event(op, name, activity.Outcome(resp.err()), time.Since(start).Milliseconds())
+	s.eventDetail(op, name, detail, activity.Outcome(resp.err()), time.Since(start).Milliseconds())
 
 	s.reply(conn, resp)
 	clear(resp.Value)
@@ -184,6 +189,28 @@ func (s *Server) dispatch(req request) response {
 		var entries []vault.Entry
 		if entries, err = s.Store.Entries(); err == nil {
 			return response{Entries: entries}
+		}
+	case "bind", "unbind", "get-bindings":
+		binder, ok := s.Store.(vault.Binder)
+		if !ok {
+			err = errors.New("this daemon's store does not hold bindings")
+			break
+		}
+		if req.Op == "get-bindings" {
+			var bindings []vault.Binding
+			if bindings, err = binder.GetBindings(req.Name); err == nil {
+				return response{Bindings: bindings}
+			}
+			break
+		}
+		if req.Binding == nil {
+			err = errors.New("no binding given")
+			break
+		}
+		if req.Op == "bind" {
+			err = binder.Bind(req.Name, *req.Binding)
+		} else {
+			err = binder.Unbind(req.Name, *req.Binding)
 		}
 	case "exposures":
 		// Searched here, where the values already are, so none is sent anywhere.
@@ -236,7 +263,11 @@ func (s *Server) reply(conn net.Conn, resp response) {
 }
 
 func (s *Server) event(op, name, outcome string, duration int64) {
+	s.eventDetail(op, name, "", outcome, duration)
+}
+
+func (s *Server) eventDetail(op, name, detail, outcome string, duration int64) {
 	if s.Record != nil {
-		s.Record(activity.Event{Command: "daemon", Operation: op, Name: name, Outcome: outcome, DurationMS: duration})
+		s.Record(activity.Event{Command: "daemon", Operation: op, Name: name, Detail: detail, Outcome: outcome, DurationMS: duration})
 	}
 }
