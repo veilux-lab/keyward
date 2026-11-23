@@ -143,18 +143,20 @@ func bindingAllows(bindings []vault.Binding, targets []string) bool {
 }
 
 // referencedSecret returns the secret name that env sets key to, if key holds a
-// well-formed reference.
+// well-formed reference. The last entry wins, as it does for the command keyward
+// run executes, so the binding checked is the one on the value that reaches it.
 func referencedSecret(env []string, key string) (string, bool) {
+	name, found := "", false
 	for _, e := range env {
 		if k, v, ok := strings.Cut(e, "="); ok && k == key {
-			h, err := handle.Parse(v)
-			if err != nil {
-				return "", false
+			if h, err := handle.Parse(v); err == nil {
+				name, found = h.Name, true
+			} else {
+				found = false
 			}
-			return h.Name, true
 		}
 	}
-	return "", false
+	return name, found
 }
 
 // refuseBinding says why a bound secret may not reach this command, naming the
@@ -172,7 +174,13 @@ func refuseBinding(variable, secret string, bindings []vault.Binding, targets []
 			blocked = append(blocked, t)
 		}
 	}
-	where := "nothing, because its binding is of a kind this keyward does not understand"
+	// No blocked program but still not allowed means a binding kind this keyward
+	// does not understand, which allows nothing. (Phase 1 writes none of these.)
+	if len(blocked) == 0 {
+		return fmt.Sprintf("keyward run: %s is bound to %s in a way this keyward does not understand, so it may go nowhere.\n"+
+			"  Update keyward, or remove the binding in a terminal: keyward unbind %s --all", variable, secret, secret)
+	}
+	where := "nothing"
 	if len(programs) > 0 {
 		where = "only " + strings.Join(programs, ", ")
 	}

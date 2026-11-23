@@ -20,8 +20,8 @@ func (p *programList) Set(v string) error {
 }
 
 // bind limits a secret to the programs it may be given to. Like copy it needs a
-// terminal and a typed "yes", so an agent or a pipe cannot widen or add a
-// restriction unseen.
+// terminal and a typed "yes", so an agent or a pipe cannot change where a secret
+// may go unseen.
 func (c *CLI) bind(args []string) int {
 	fs := flag.NewFlagSet("bind", flag.ContinueOnError)
 	fs.SetOutput(c.Stderr)
