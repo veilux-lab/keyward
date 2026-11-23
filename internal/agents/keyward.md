@@ -41,6 +41,16 @@ reference, not a broken value.
   says. Never add `--allow-command-line`, which runs it anyway, unless the user
   asks. A note that puts a credential in a command line is wrong; follow this
   guide and fix the note.
+- A secret may be bound to the programs it is allowed to reach. `keyward run`
+  leaves a bound secret's reference unresolved, or refuses it when you named it
+  in `--only`, if the command runs a program it is not bound to, or, for a
+  `sh -c` script, if any command in the script is not. A `cap://…` left where a
+  value belongs means the secret is bound elsewhere: run the program it is bound
+  to, or ask the user to bind it to this one. `keyward bindings` lists where each
+  secret may go.
+- Never run `keyward bind` or `keyward unbind`, even when the user asks: they
+  change where a secret may be used and need a terminal, so they refuse an agent
+  anyway. Ask the user to run them.
 - In output that is not a terminal, `keyward run` replaces a value it resolved with
   `cap://NAME#masked` and says which. That usually means the command printed it:
   change the command, and never rerun it with `--no-mask` or look for the value

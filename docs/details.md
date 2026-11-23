@@ -75,6 +75,50 @@ Nor does the check follow output a script sends through a descriptor other than 
 or 2, as with `>&3`, an alias the script defines again, zsh's global aliases, or
 what `trap` code writes.
 
+## Bindings
+
+`--only` limits which secrets a command gets, but nothing limits where a secret
+goes once a command has it. A binding does: it says which programs a secret may
+reach, and `keyward run` enforces it.
+
+Bind a secret to a program with `keyward bind NAME --program gh`, repeating
+`--program` for more than one. `keyward unbind NAME --program gh`, or
+`--all`, removes bindings; `keyward bindings` lists them without values.
+Changing a binding needs a terminal and a typed "yes", so an agent or a pipe
+cannot change where a secret may go; the agent guide tells agents never to run
+`bind` or `unbind`.
+
+When `keyward run` resolves a bound secret, it checks the program it is about to
+run against the binding:
+
+- The program is matched by the absolute path your `PATH` finds when you bind it,
+  without following symlinks. A fake `gh` earlier on `PATH` does not match
+  `/opt/homebrew/bin/gh`, and matching the path rather than the Cellar target
+  keeps the binding working across Homebrew upgrades.
+- A bound secret named in `--only` that the command may not have is refused,
+  naming the secret and where it may go. One not named in `--only` is left
+  unresolved instead, so `keyward run -- npm test` keeps working when an unrelated
+  bound secret is in the environment.
+- For a `sh -c` script, every external command the script runs must be allowed,
+  since each inherits the secret from the environment. Launchers such as `sudo`
+  and `env`, and nested shells, are transparent — the program after them is the
+  one checked. A command the script names only as it runs, such as `$CMD` or
+  `eval`'s code, cannot be checked and is refused.
+
+A binding is part of the value's seal: the associated data that AES-GCM
+authenticates is the secret's name together with its canonical bindings. Editing
+or removing a binding in the vault file by hand therefore makes the value fail to
+decrypt, rather than quietly unbinding it. The vault file stays version 1 until
+the first binding is set and returns to version 1 when the last is removed, so an
+older keyward still reads a vault with no bindings. A binding of a kind this
+keyward does not understand — a host or MCP-server binding written by a later
+version — allows no program, failing closed.
+
+This stops a mistaken or tricked `keyward run` from handing a secret to a program
+of an attacker's choosing even though the agent never sees the value. It does not
+stop a program the secret is bound to from doing what it likes with it, nor
+malware running as you, which can read the vault key and bind a program itself.
+
 ## MCP servers
 
 An MCP server that uses a migrated token must start through `keyward run`.
