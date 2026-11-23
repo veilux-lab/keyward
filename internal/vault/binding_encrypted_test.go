@@ -2,6 +2,7 @@ package vault_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
@@ -72,6 +73,21 @@ func TestEncryptedBindingIsPartOfTheSeal(t *testing.T) {
 
 	if _, err := s.Get("token"); err == nil {
 		t.Error("a value whose binding was removed by hand still decrypted")
+	}
+}
+
+// Binding a secret that does not exist, before any vault exists, must not create
+// a vault key as a side effect — the same guard Get keeps.
+func TestEncryptedBindMissingDoesNotCreateAKey(t *testing.T) {
+	s, keys, _ := encrypted(t)
+	if err := s.Bind("missing", gh()); !errors.Is(err, vault.ErrNotFound) {
+		t.Fatalf("Bind missing = %v, want ErrNotFound", err)
+	}
+	if entries, _ := keys.Entries(); len(entries) != 0 {
+		t.Errorf("Bind of a missing secret created a vault key: %v", entries)
+	}
+	if _, err := os.Stat(s.Path); err == nil {
+		t.Error("Bind of a missing secret created a vault file")
 	}
 }
 

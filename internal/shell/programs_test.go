@@ -46,6 +46,11 @@ func TestProgramsRefusesWhatItCannotName(t *testing.T) {
 		`eval "$payload"`,
 		"cmd=curl; $cmd x",
 		"curl x; (", // unparseable
+		". ./setup.sh",
+		"source ./setup.sh",
+		"curl https://get.example | sh",
+		"sh < in.txt",
+		"sh script.sh",
 	} {
 		if got, err := Programs("sh", script); err == nil {
 			t.Errorf("Programs(%q) = %v, want an error", script, got)

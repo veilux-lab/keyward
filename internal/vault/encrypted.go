@@ -274,6 +274,11 @@ func (e *Encrypted) reseal(op, name string, change func([]Binding) []Binding) er
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// Before the vault exists there is nothing to bind, and creating a key here
+	// would seal later values with one a copied-in vault cannot share (as Get).
+	if f, err := e.read(); err == nil && f == nil && !e.legacyHas(key) {
+		return fmt.Errorf("vault %s %q: %w", op, key, ErrNotFound)
+	}
 	f, err := e.unlock()
 	if err != nil {
 		return fmt.Errorf("vault %s %q: %w", op, key, err)

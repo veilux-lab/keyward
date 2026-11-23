@@ -62,15 +62,30 @@ func (c *CLI) bind(args []string) int {
 	if code := c.confirmBindingChange("bind", name); code != exitOK {
 		return code
 	}
-	var bound []string
 	for _, b := range bindings {
 		if err := c.Binder.Bind(name, b); err != nil {
 			return c.fail("keyward bind: %v", err)
 		}
-		bound = append(bound, b.Program)
 	}
-	fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(bound, ", "))
+	// Report the whole allowlist, not just what this call added, so an already
+	// bound secret is not misstated as reachable by fewer programs than it is.
+	current, err := c.Binder.GetBindings(name)
+	if err != nil {
+		return c.fail("keyward bind: %v", err)
+	}
+	fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(current), ", "))
 	return exitOK
+}
+
+// programNames lists the program paths of bindings, for a message.
+func programNames(bindings []vault.Binding) []string {
+	var out []string
+	for _, b := range bindings {
+		if b.Kind == vault.BindingProgram {
+			out = append(out, b.Program)
+		}
+	}
+	return out
 }
 
 // unbind removes bindings. --all removes every one, leaving the secret
@@ -123,8 +138,25 @@ func (c *CLI) unbind(args []string) int {
 			return c.fail("keyward unbind: %v", err)
 		}
 	}
-	fmt.Fprintf(c.Stdout, "Unbound %s.\n", name)
+	// Report the resulting state, not a bare "unbound": a secret may still have
+	// other bindings, and claiming it is unrestricted when it is not would mislead.
+	switch left := programNames(mustBindings(c, name)); {
+	case len(left) == 0:
+		fmt.Fprintf(c.Stdout, "%s is no longer bound; it may be given to any program again.\n", name)
+	default:
+		fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(left, ", "))
+	}
 	return exitOK
+}
+
+// mustBindings reads name's bindings for a closing message, treating an error as
+// none rather than failing after the change has already been made.
+func mustBindings(c *CLI, name string) []vault.Binding {
+	bindings, err := c.Binder.GetBindings(name)
+	if err != nil {
+		return nil
+	}
+	return bindings
 }
 
 // unbindPath matches how bind stored a program: an absolute path is taken as

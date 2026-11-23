@@ -143,20 +143,20 @@ func bindingAllows(bindings []vault.Binding, targets []string) bool {
 }
 
 // referencedSecret returns the secret name that env sets key to, if key holds a
-// well-formed reference. The last entry wins, as it does for the command keyward
-// run executes, so the binding checked is the one on the value that reaches it.
+// well-formed reference. The first entry wins: os.Environ, keyward's env source,
+// keeps only the first of any duplicated key, and a child's getenv reads the
+// first too, so the first is the value the program actually sees.
 func referencedSecret(env []string, key string) (string, bool) {
-	name, found := "", false
 	for _, e := range env {
 		if k, v, ok := strings.Cut(e, "="); ok && k == key {
-			if h, err := handle.Parse(v); err == nil {
-				name, found = h.Name, true
-			} else {
-				found = false
+			h, err := handle.Parse(v)
+			if err != nil {
+				return "", false
 			}
+			return h.Name, true
 		}
 	}
-	return name, found
+	return "", false
 }
 
 // refuseBinding says why a bound secret may not reach this command, naming the

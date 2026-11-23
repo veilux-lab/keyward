@@ -1523,6 +1523,15 @@ func (c *checker) named(p *process, name string, args []arg, env map[string]tain
 	case "trap":
 		c.trap(p, rest)
 		return nil
+	case ".", "source":
+		// source runs a script from a file in the current shell, inheriting the
+		// environment. The value check treats that as a known gap (docs/details),
+		// but Programs cannot let it pass: the file may run any program with the
+		// secret, so collecting refuses rather than record nothing.
+		if c.collecting && len(rest) > 0 {
+			c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: %s runs a script from a file keyward cannot read", args[0].word.Pos().Line(), name), toWrite})
+		}
+		return nil
 	case "noglob", "nocorrect":
 		if len(rest) > 0 {
 			return c.run(p, rest, env, in)
@@ -2081,6 +2090,13 @@ func (c *checker) nested(p *process, args []arg, env map[string]taint, in stream
 		c.report(in.taint, shell, true, args[0].word, args[0].word, adviceFor(use{program: shell, vars: in.taint.names()}))
 	case fromStdin && in.literal:
 		return c.script(child, in.text, in.line, stream{})
+	}
+	// Reached when the inner shell's script could not be followed to a known set
+	// of programs: a non-literal -c argument, a bare shell, or one reading its
+	// script from a pipe or a file. Collecting cannot let that pass — the shell
+	// may run any program with the secret — so it refuses, as eval does.
+	if c.collecting {
+		c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: %s runs a script keyward cannot read", args[0].word.Pos().Line(), shell), toWrite})
 	}
 	return nil
 }

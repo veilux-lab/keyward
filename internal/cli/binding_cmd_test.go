@@ -92,6 +92,50 @@ func TestUnbindAllRemovesEveryBinding(t *testing.T) {
 	}
 }
 
+// Adding a program to an already-bound secret reports the whole allowlist, not
+// just the program just added.
+func TestBindReportsFullAllowlist(t *testing.T) {
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Interactive = true
+	pe := progPath(t, "printenv")
+	bindProgram(t, h, "tok", "/elsewhere/gh")
+	if code := h.cli.Run([]string{"bind", "tok", "--program", "printenv"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if out := h.out(); !strings.Contains(out, pe) || !strings.Contains(out, "/elsewhere/gh") {
+		t.Errorf("bind should report the full allowlist:\n%s", out)
+	}
+}
+
+// Removing one of several bindings reports the remaining ones, not "unbound".
+func TestUnbindReportsRemaining(t *testing.T) {
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Interactive = true
+	pe := progPath(t, "printenv")
+	for _, p := range []string{pe, "/elsewhere/gh"} {
+		bindProgram(t, h, "tok", p)
+	}
+	if code := h.cli.Run([]string{"unbind", "tok", "--program", "/elsewhere/gh"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if out := h.out(); !strings.Contains(out, pe) || strings.Contains(out, "any program") {
+		t.Errorf("unbind should report the remaining binding, not unrestricted:\n%s", out)
+	}
+}
+
+// Removing the last binding says the secret is unrestricted again.
+func TestUnbindAllReportsUnrestricted(t *testing.T) {
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Interactive = true
+	bindProgram(t, h, "tok", "/elsewhere/gh")
+	if code := h.cli.Run([]string{"unbind", "tok", "--all"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if !strings.Contains(h.out(), "any program") {
+		t.Errorf("unbind --all should say the secret may go anywhere again:\n%s", h.out())
+	}
+}
+
 // bindings lists secrets and where they may go, never values, and needs no
 // terminal: it reveals nothing an agent should not see.
 func TestBindingsListsNamesAndProgramsNotValues(t *testing.T) {
