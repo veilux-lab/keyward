@@ -130,6 +130,10 @@ type CLI struct {
 	// Service manages the signed installation and login agent.
 	Service func(action string) (string, error)
 
+	// Binder reads and changes secret bindings; nil without a daemon. run reads
+	// through it rather than the activity-wrapped store, so checking where a
+	// secret may go is not logged as a list; bind and unbind change through it.
+	Binder vault.Binder
 	// Recovery exports and restores the vault key; nil without a daemon.
 	Recovery vault.KeyRecovery
 	// RecoveryMarker records that a recovery code was shown, ending the reminders.
@@ -515,7 +519,17 @@ func (c *CLI) run(args []string) int {
 		c.refused = true
 		return exitUsage
 	}
-	result, err := resolve.New(c.Store).EnvOnly(env, only)
+	// Bindings limit which programs a secret may reach, which --only cannot.
+	keys, refusal, err := c.bindingResolveKeys(args, env, only)
+	if err != nil {
+		return c.fail("keyward run: %v", err)
+	}
+	if refusal != "" {
+		c.refused = true
+		fmt.Fprintln(c.Stderr, refusal)
+		return exitUsage
+	}
+	result, err := resolve.New(c.Store).EnvOnly(env, keys)
 	if err != nil {
 		return c.failResolve(err)
 	}

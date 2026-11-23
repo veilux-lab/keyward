@@ -56,6 +56,7 @@ func newHarness(t *testing.T, stdin string, seed map[string]string, environ []st
 	}
 	h.cli = &cli.CLI{
 		Store:   store,
+		Binder:  store,
 		Backups: backup.Dir{Path: filepath.Join(t.TempDir(), "backups")},
 		Ledger:  ledger.Ledger{Path: filepath.Join(t.TempDir(), "ledger.json")},
 		Stdin:   strings.NewReader(stdin),

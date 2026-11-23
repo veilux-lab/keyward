@@ -8,7 +8,9 @@ import (
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
-func gh() vault.Binding { return vault.Binding{Kind: vault.BindingProgram, Program: "/opt/homebrew/bin/gh"} }
+func gh() vault.Binding {
+	return vault.Binding{Kind: vault.BindingProgram, Program: "/opt/homebrew/bin/gh"}
+}
 
 // vaultVersion reads the version field from the vault file on disk.
 func vaultVersion(t *testing.T, path string) int {
