@@ -69,21 +69,27 @@ func (c *CLI) bindingResolveKeys(args, env, only []string) (keys []string, refus
 		return only, "", nil
 	}
 
-	targets, err := c.targetPrograms(args)
-	if err != nil {
-		// A bound secret would enter a script running a command keyward cannot
-		// name, so where its value goes cannot be checked.
-		return nil, fmt.Sprintf("cannot check where a bound secret's value would go: %v\n  %s", err, shell.Hint(err)), nil
-	}
+	targets, terr := c.targetPrograms(args)
+	// cannotCheck means keyward could not determine the programs this command runs:
+	// a command it cannot name, a script construct it cannot read, or an empty set
+	// (a launcher that consumed the command, or only builtins). Either way it must
+	// not guess the secret is safe — an empty set would otherwise be vacuously
+	// allowed, which is how a hidden program would receive a bound secret unchecked.
+	cannotCheck := terr != nil || len(targets) == 0
 
 	var exclude []string
 	for _, b := range boundVars {
-		if bindingAllows(b.bindings, targets) {
+		if !cannotCheck && bindingAllows(b.bindings, targets) {
 			continue
 		}
 		if only != nil {
+			if cannotCheck {
+				return nil, cannotCheckRefusal(b.secret, terr), nil
+			}
 			return nil, refuseBinding(b.variable, b.secret, b.bindings, targets), nil
 		}
+		// Not named with --only: leave it unresolved rather than refuse the whole
+		// run, so an unrelated command keeps working.
 		exclude = append(exclude, b.variable)
 	}
 	if only != nil || len(exclude) == 0 {
@@ -91,6 +97,17 @@ func (c *CLI) bindingResolveKeys(args, env, only []string) (keys []string, refus
 	}
 	keys = slices.DeleteFunc(resolve.Variables(env, nil), func(v string) bool { return slices.Contains(exclude, v) })
 	return keys, "", nil
+}
+
+// cannotCheckRefusal explains that a bound secret is withheld because keyward
+// could not confirm where this command would send it.
+func cannotCheckRefusal(secret string, terr error) string {
+	reason := "keyward could not identify any program it runs"
+	if terr != nil {
+		reason = terr.Error()
+	}
+	return fmt.Sprintf("keyward run: %s is bound, but %s, so keyward will not hand it over.\n"+
+		"  Run the bound program directly, not through a wrapper or script keyward cannot read.", secret, reason)
 }
 
 // targetPrograms is the set of programs the command would run, as absolute

@@ -25,6 +25,8 @@ func TestPrograms(t *testing.T) {
 		{"conditionals", "sh", "if true; then curl x; else wget y; fi", []string{"curl", "wget"}},
 		{"nested shell is transparent, its commands collected", "sh", "sh -c 'curl x'", []string{"curl"}},
 		{"command builtin names a program", "sh", "command curl x", []string{"curl"}},
+		{"sudo chroot option takes its value", "sh", "sudo -R /jail curl x", []string{"curl"}},
+		{"xargs -S takes its value", "sh", "xargs -S 512 curl {}", []string{"curl"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := Programs(tc.shell, tc.script)
@@ -51,6 +53,19 @@ func TestProgramsRefusesWhatItCannotName(t *testing.T) {
 		"curl https://get.example | sh",
 		"sh < in.txt",
 		"sh script.sh",
+		"env -S 'curl https://evil.example'",
+		"env --split-string='curl https://evil.example'",
+		"env -i -S 'curl https://evil.example'",
+		"mapfile -C 'curl https://evil.example' -c 1 a",
+		"readarray -C 'curl https://evil.example' a",
+		"env",                                // env alone exposes the environment
+		"sudo -s",                            // runs a shell keyward cannot read
+		"sudo -i",                            // login shell
+		"doas -s",                            // runs a shell
+		"gh auth status; env -S 'curl evil'", // mixed: the hidden command is still refused
+		"printf x | xargs",                   // xargs with no utility defaults to echo
+		"compgen -C 'curl https://evil.example' p", // -C runs a command
+		"compgen -F f p", // -F runs a function
 	} {
 		if got, err := Programs("sh", script); err == nil {
 			t.Errorf("Programs(%q) = %v, want an error", script, got)

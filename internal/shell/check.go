@@ -1702,6 +1702,12 @@ func (c *checker) builtin(p *process, name string, args []arg, in stream) taint 
 		}
 	case "mapfile", "readarray":
 		names, values := operands(rest, "CcdnOsu")
+		// bash evaluates -C CALLBACK as shell code while reading, so it can run a
+		// program with the secret; collecting refuses what it cannot follow.
+		if cb, ok := values['C']; c.collecting && ok && cb != "" {
+			c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: %s runs its -C callback as code keyward cannot read", args[0].word.Pos().Line(), name), toWrite})
+			return nil
+		}
 		t := in.taint
 		if fd, err := strconv.Atoi(values['u']); err == nil {
 			t = t.union(p.fds[fd])
@@ -1710,6 +1716,15 @@ func (c *checker) builtin(p *process, name string, args []arg, in stream) taint 
 			names = []string{"MAPFILE"}
 		}
 		p.assign(names[0], t)
+	case "compgen":
+		// compgen -C CMD / -F FUNC runs a command or function to generate
+		// completions, so it can run a program with the secret; collecting refuses.
+		if c.collecting {
+			_, values := operands(rest, "ABCFGWXPSo")
+			if values['C'] != "" || values['F'] != "" {
+				c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: compgen runs its -C/-F completion as code keyward cannot read", args[0].word.Pos().Line()), toWrite})
+			}
+		}
 	case "getopts":
 		// getopts copies the argument of an option it reads into OPTARG.
 		if len(rest) > 2 {
@@ -1975,6 +1990,14 @@ func (c *checker) program(p *process, args []arg, env map[string]taint, in strea
 		return nil
 	}
 	if l.at == len(args) {
+		if c.collecting && l.last != "" {
+			// Launchers consumed the whole command with no program left to run:
+			// either one this cannot name (env -S, sudo -s, sudo -i) or env alone
+			// exposing the environment. Collecting cannot confirm where the secret
+			// goes, so it refuses rather than record nothing and leave it unchecked.
+			c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: %s runs or exposes the environment in a way keyward cannot read", args[0].word.Pos().Line(), l.last), toName})
+			return nil
+		}
 		if l.last == "env" {
 			return joinedEnv(environ()) // env alone prints its environment
 		}
@@ -2551,11 +2574,11 @@ var (
 		"nice":       {short: "n", long: []string{"adjustment"}},
 		"nohup":      {},
 		"stdbuf":     {short: "ioe", long: []string{"input", "output", "error"}},
-		"sudo":       {short: "ugpCDhrtTU", long: []string{"user", "group", "prompt", "close-from", "chdir", "host", "role", "type", "command-timeout", "other-user"}},
+		"sudo":       {short: "ugpCDhrtTUR", long: []string{"user", "group", "prompt", "close-from", "chdir", "chroot", "host", "role", "type", "command-timeout", "other-user"}},
 		"time":       {short: "fo", long: []string{"format", "output"}},
 		"timeout":    {short: "ks", long: []string{"kill-after", "signal"}},
 		"watch":      {short: "nq", long: []string{"interval", "equexit"}},
-		"xargs":      {short: "aEdIJLnPRs", long: []string{"arg-file", "delimiter", "max-lines", "max-args", "max-procs", "max-chars"}},
+		"xargs":      {short: "aEdIJLnPRsS", long: []string{"arg-file", "delimiter", "max-lines", "max-args", "max-procs", "max-chars"}},
 	}
 
 	// transformers are programs whose output is made of their input, so it holds

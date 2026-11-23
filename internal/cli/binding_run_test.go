@@ -99,6 +99,45 @@ func TestRunResolvesScriptWhenEveryCommandAllowed(t *testing.T) {
 	}
 }
 
+// When keyward cannot determine the programs a script runs — a launcher that
+// swallows its command, or a function shadowing a real program in a dead branch
+// that leaves an empty set — a bound secret named in --only is refused rather
+// than resolved into a program keyward could not check.
+func TestRunRefusesBoundSecretWhenProgramsUndetermined(t *testing.T) {
+	for _, script := range []string{
+		"sudo -s",                              // launcher swallows the command (error)
+		"if false; then gh() { :; }; fi; gh x", // shadowed real program, empty set (no error)
+	} {
+		env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
+		h := newHarness(t, "", map[string]string{"tok": token}, env)
+		bindProgram(t, h, "tok", progPath(t, "printenv"))
+		code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "sh", "-c", script})
+		if code != 2 {
+			t.Errorf("%q: exit %d, want 2: %s", script, code, h.err())
+		}
+		if h.exec.calls != 0 {
+			t.Errorf("%q: ran the command keyward could not check", script)
+		}
+	}
+}
+
+// Without --only, the same undeterminable script leaves the bound secret
+// unresolved rather than refusing the whole run, so it never reaches the shell.
+func TestRunLeavesBoundSecretUnresolvedWhenProgramsUndetermined(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
+	h := newHarness(t, "", map[string]string{"tok": token}, env)
+	bindProgram(t, h, "tok", progPath(t, "printenv"))
+	if code := h.cli.Run([]string{"run", "--", "sh", "-c", "sudo -s"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if h.exec.calls != 1 {
+		t.Fatalf("exec called %d times, want 1", h.exec.calls)
+	}
+	if !contains(h.exec.env, "TOKEN=cap://tok") {
+		t.Error("the bound secret should have been left unresolved")
+	}
+}
+
 // A script that runs a command keyward run cannot name is refused when a bound
 // secret would enter its environment.
 func TestRunRefusesScriptWithUnnameableCommandWhenBound(t *testing.T) {
