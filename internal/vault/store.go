@@ -48,6 +48,27 @@ type Entry struct {
 	// Keychain attributes are readable more freely than values, so a note holds
 	// only a path or a short description. Never anything sensitive.
 	Note string
+
+	// Bindings say where the secret may go. Nil means unrestricted (the default
+	// for secrets created before bindings existed). A non-nil slice limits the
+	// secret to those destinations; unknown binding kinds allow nothing.
+	Bindings []Binding `json:"bindings,omitempty"`
+}
+
+// Binder manages the bindings on a stored secret. Separate from Store because
+// only the vault and daemon implement it, and callers that do not bind — the
+// resolver, doctor — do not need to depend on it.
+type Binder interface {
+	// Bind adds a binding to name, re-sealing the value. It is not an error if
+	// the same binding already exists.
+	Bind(name string, binding Binding) error
+
+	// Unbind removes a binding from name. It is not an error if the binding was
+	// not present; unbinding the last one leaves the secret unrestricted.
+	Unbind(name string, binding Binding) error
+
+	// GetBindings returns the bindings of name, or nil for unrestricted.
+	GetBindings(name string) ([]Binding, error)
 }
 
 // Store holds secret values keyed by name.

@@ -331,6 +331,145 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 			t.Error(err)
 		}
 	})
+
+	// A bound value must still decrypt, which is what proves the real store
+	// re-seals it under the new associated data rather than orphaning it.
+	t.Run("BindAddsAndListsAndStillOpens", func(t *testing.T) {
+		s := newStore(t)
+		b := binder(t, s)
+		name := reserve(t, s, "bind")
+		want := []byte("eyJraWQiOiJzcGx1bmsi")
+		if err := s.Put(name, vault.NewSecret(want), ""); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		binding := vault.Binding{Kind: vault.BindingProgram, Program: "/opt/homebrew/bin/gh"}
+		if err := b.Bind(name, binding); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		if got := entryBindings(t, s)[name]; len(got) != 1 || got[0] != binding {
+			t.Errorf("bindings = %v, want [%v]", got, binding)
+		}
+		got, err := s.Get(name)
+		if err != nil || string(got.Bytes()) != string(want) {
+			t.Fatalf("Get after Bind = %q, %v, want the stored value", got.Bytes(), err)
+		}
+	})
+
+	// Binding the same program twice leaves one binding, so a repeated bind is safe.
+	t.Run("BindIsIdempotent", func(t *testing.T) {
+		s := newStore(t)
+		b := binder(t, s)
+		name := reserve(t, s, "idempotent")
+		if err := s.Put(name, vault.NewSecret([]byte("v")), ""); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		binding := vault.Binding{Kind: vault.BindingProgram, Program: "/usr/bin/gh"}
+		for range 2 {
+			if err := b.Bind(name, binding); err != nil {
+				t.Fatalf("Bind: %v", err)
+			}
+		}
+		if got := entryBindings(t, s)[name]; len(got) != 1 {
+			t.Errorf("bindings = %v, want one", got)
+		}
+	})
+
+	// Replacing a value keeps its bindings: add --force rotates a credential, it
+	// does not widen where the credential may go.
+	t.Run("BindingsSurviveReplace", func(t *testing.T) {
+		s := newStore(t)
+		b := binder(t, s)
+		name := reserve(t, s, "replace-keeps")
+		if err := s.Put(name, vault.NewSecret([]byte("old")), ""); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		binding := vault.Binding{Kind: vault.BindingProgram, Program: "/usr/bin/gh"}
+		if err := b.Bind(name, binding); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		if err := s.Replace(name, vault.NewSecret([]byte("new")), ""); err != nil {
+			t.Fatalf("Replace: %v", err)
+		}
+		got, err := s.Get(name)
+		if err != nil || string(got.Bytes()) != "new" {
+			t.Fatalf("Get after Replace = %q, %v, want new", got.Bytes(), err)
+		}
+		if bs := entryBindings(t, s)[name]; len(bs) != 1 || bs[0] != binding {
+			t.Errorf("bindings after Replace = %v, want [%v]", bs, binding)
+		}
+	})
+
+	// Unbinding removes one destination and leaves the rest; removing the last
+	// one makes the secret unrestricted again.
+	t.Run("Unbind", func(t *testing.T) {
+		s := newStore(t)
+		b := binder(t, s)
+		name := reserve(t, s, "unbind")
+		if err := s.Put(name, vault.NewSecret([]byte("v")), ""); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		gh := vault.Binding{Kind: vault.BindingProgram, Program: "/usr/bin/gh"}
+		curl := vault.Binding{Kind: vault.BindingProgram, Program: "/usr/bin/curl"}
+		for _, bd := range []vault.Binding{gh, curl} {
+			if err := b.Bind(name, bd); err != nil {
+				t.Fatalf("Bind %v: %v", bd, err)
+			}
+		}
+		if err := b.Unbind(name, gh); err != nil {
+			t.Fatalf("Unbind: %v", err)
+		}
+		if got := entryBindings(t, s)[name]; len(got) != 1 || got[0] != curl {
+			t.Errorf("bindings = %v, want [%v]", got, curl)
+		}
+		// Unbinding one that is not there is not an error.
+		if err := b.Unbind(name, gh); err != nil {
+			t.Errorf("Unbind of an absent binding = %v, want nil", err)
+		}
+		if err := b.Unbind(name, curl); err != nil {
+			t.Fatalf("Unbind last: %v", err)
+		}
+		if got, err := b.GetBindings(name); err != nil || got != nil {
+			t.Errorf("GetBindings after removing the last = %v, %v, want nil", got, err)
+		}
+		if got, err := s.Get(name); err != nil || string(got.Bytes()) != "v" {
+			t.Fatalf("Get after Unbind = %q, %v, want the stored value", got.Bytes(), err)
+		}
+	})
+
+	t.Run("BindMissingName", func(t *testing.T) {
+		s := newStore(t)
+		b := binder(t, s)
+		name := reserve(t, s, "bind-missing")
+		if err := b.Bind(name, vault.Binding{Kind: vault.BindingProgram, Program: "/usr/bin/gh"}); !errors.Is(err, vault.ErrNotFound) {
+			t.Errorf("Bind on absent name = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// binder returns s as a vault.Binder, skipping the subtest if it is not one.
+// Bindings live in the Encrypted vault file; the raw Keychain store, used only
+// for the vault key and un-migrated legacy items, does not carry them.
+func binder(t *testing.T, s vault.Store) vault.Binder {
+	t.Helper()
+	b, ok := s.(vault.Binder)
+	if !ok {
+		t.Skipf("%T does not implement vault.Binder", s)
+	}
+	return b
+}
+
+// entryBindings indexes the store's bindings by name.
+func entryBindings(t *testing.T, s vault.Store) map[string][]vault.Binding {
+	t.Helper()
+	entries, err := s.Entries()
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	out := make(map[string][]vault.Binding, len(entries))
+	for _, e := range entries {
+		out[e.Name] = e.Bindings
+	}
+	return out
 }
 
 // entryNotes indexes the store's notes by name, for readable assertions.

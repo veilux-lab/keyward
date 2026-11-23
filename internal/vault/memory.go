@@ -2,6 +2,7 @@ package vault
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,14 +17,15 @@ import (
 // several references per command, so a Store that needed external locking would
 // push that requirement onto every caller.
 type Memory struct {
-	mu    sync.RWMutex
-	m     map[string][]byte
-	notes map[string]string
+	mu       sync.RWMutex
+	m        map[string][]byte
+	notes    map[string]string
+	bindings map[string][]Binding
 }
 
 // NewMemory returns an empty Memory store.
 func NewMemory() *Memory {
-	return &Memory{m: make(map[string][]byte), notes: make(map[string]string)}
+	return &Memory{m: make(map[string][]byte), notes: make(map[string]string), bindings: make(map[string][]Binding)}
 }
 
 // Get implements Store.
@@ -99,7 +101,55 @@ func (s *Memory) Delete(name string) error {
 	}
 	delete(s.m, key)
 	delete(s.notes, key)
+	delete(s.bindings, key)
 	return nil
+}
+
+// Bind adds a binding, Unbind removes one. The in-memory store keeps plaintext,
+// so there is nothing to re-seal; it only tracks the bindings the real store
+// seals into the value.
+func (s *Memory) Bind(name string, binding Binding) error {
+	return s.rebind(name, func(bindings []Binding) []Binding {
+		return canonicalBindings(append(slices.Clone(bindings), binding))
+	})
+}
+
+func (s *Memory) Unbind(name string, binding Binding) error {
+	return s.rebind(name, func(bindings []Binding) []Binding {
+		return canonicalBindings(slices.DeleteFunc(slices.Clone(bindings), func(b Binding) bool { return b == binding }))
+	})
+}
+
+func (s *Memory) rebind(name string, change func([]Binding) []Binding) error {
+	key, err := normalize(name)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[key]; !ok {
+		return fmt.Errorf("%q: %w", key, ErrNotFound)
+	}
+	if next := change(s.bindings[key]); len(next) == 0 {
+		delete(s.bindings, key)
+	} else {
+		s.bindings[key] = next
+	}
+	return nil
+}
+
+// GetBindings returns name's bindings, or nil for an unrestricted secret.
+func (s *Memory) GetBindings(name string) ([]Binding, error) {
+	key, err := normalize(name)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.m[key]; !ok {
+		return nil, fmt.Errorf("%q: %w", key, ErrNotFound)
+	}
+	return s.bindings[key], nil
 }
 
 // Entries implements Store.
@@ -109,7 +159,7 @@ func (s *Memory) Entries() ([]Entry, error) {
 
 	entries := make([]Entry, 0, len(s.m))
 	for k := range s.m {
-		entries = append(entries, Entry{Name: k, Note: s.notes[k]})
+		entries = append(entries, Entry{Name: k, Note: s.notes[k], Bindings: s.bindings[k]})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 	return entries, nil
