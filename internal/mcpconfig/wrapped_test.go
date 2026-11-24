@@ -47,3 +47,31 @@ func TestWrappedServersNameTheSecretsEachResolves(t *testing.T) {
 		}
 	}
 }
+
+// A server's own script that starts keyward run counts even when its words
+// expand a variable, taken as written; one keyward cannot read is listed as
+// unread, with the secrets its env holds, rather than dropped.
+func TestWrappedServersFollowAServersOwnScript(t *testing.T) {
+	home, work := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers": {
+		"home-var": {"command": "zsh", "args": ["-lc", "exec keyward run --only T -- \"$HOME/bin/server\""], "env": {"T": "cap://tok"}},
+		"unreadable": {"command": "zsh", "args": ["-lc", "keyward run --only T -- $(cat /tmp/which)"], "env": {"T": "cap://tok"}},
+		"no-keyward": {"command": "zsh", "args": ["-lc", "exec some-server $(cat /tmp/x)"], "env": {"T": "cap://tok"}}}}`), 0o600)
+	servers, errs := mcpconfig.Load(home, work)
+	if len(errs) > 0 {
+		t.Fatalf("Load: %v", errs)
+	}
+	got := map[string]mcpconfig.Wrapped{}
+	for _, w := range mcpconfig.WrappedServers(servers, nil) {
+		got[w.Name] = w
+	}
+	if w := got["home-var"]; w.Unread || !slices.Equal(w.Command, []string{"$HOME/bin/server"}) || !slices.Equal(w.Secrets, []string{"tok"}) {
+		t.Errorf("home-var = %+v, want the command as written and its secret", w)
+	}
+	if w := got["unreadable"]; !w.Unread || !slices.Equal(w.Secrets, []string{"tok"}) {
+		t.Errorf("unreadable = %+v, want it listed as unread with its secret", w)
+	}
+	if _, ok := got["no-keyward"]; ok {
+		t.Error("a script that never mentions keyward is listed")
+	}
+}

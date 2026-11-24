@@ -311,6 +311,68 @@ func TestBindSaysWhichMCPConfigsItCouldNotRead(t *testing.T) {
 	}
 }
 
+// Binding programs a secret is already bound to changes nothing, so bind says so
+// without asking; and each program is listed once.
+func TestBindAsksOnlyForAChange(t *testing.T) {
+	pe := progPath(t, "printenv")
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Interactive = true
+	bindProgram(t, h, "tok", pe)
+	if code := h.cli.Run([]string{"bind", "tok", "--program", "printenv"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if strings.Contains(h.err(), "Enter a value") || !strings.Contains(h.out(), "nothing changed") {
+		t.Errorf("asked for a yes to nothing, or did not say so:\n%s%s", h.err(), h.out())
+	}
+
+	h = newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Interactive = true
+	for _, p := range []string{"/elsewhere/gh", pe} {
+		bindProgram(t, h, "tok", p)
+	}
+	if code := h.cli.Run([]string{"bind", "tok", "--program", "true", "--program", "printenv", "--program", "true"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	question := prompted(t, h)
+	for _, p := range []string{pe, progPath(t, "true")} {
+		if n := strings.Count(question, p); n != 1 {
+			t.Errorf("%s is listed %d times:\n%s", p, n, question)
+		}
+	}
+}
+
+// A secret bound by a newer keyward cannot be changed by this one, which says so
+// before asking rather than failing after a yes as if the vault were tampered.
+func TestBindAndUnbindRefuseANewerKeywardsBinding(t *testing.T) {
+	for _, args := range [][]string{{"bind", "tok", "--program", "printenv"}, {"unbind", "tok", "--all"}} {
+		h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+		h.cli.Interactive = true
+		if err := h.store.Bind("tok", vault.Binding{Kind: "host"}); err != nil {
+			t.Fatal(err)
+		}
+		if code := h.cli.Run(args); code != 1 {
+			t.Errorf("%v: exit %d, want 1", args, code)
+		}
+		if !strings.Contains(h.err(), "update keyward") || strings.Contains(h.err(), "Enter a value") {
+			t.Errorf("%v: want an update-keyward refusal before any prompt:\n%s", args, h.err())
+		}
+	}
+}
+
+// A server whose script keyward cannot read may stop too, so bind names it as
+// unread rather than leaving it out.
+func TestBindNamesServersItCouldNotCheck(t *testing.T) {
+	home := writeServers(t, `{"mcpServers": {"opaque": {"command": "zsh", "args": ["-lc", "keyward run --only T -- $(cat /tmp/which)"], "env": {"T": "cap://tok"}}}}`)
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Home, h.cli.Workdir, h.cli.Interactive = home, t.TempDir(), true
+	if code := h.cli.Run([]string{"bind", "tok", "--program", "printenv"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if question := prompted(t, h); !strings.Contains(question, "opaque") || !strings.Contains(question, "could not read") {
+		t.Errorf("did not name the server it could not check:\n%s", question)
+	}
+}
+
 // unbind names what it cannot remove instead of asking for a yes to nothing.
 func TestUnbindNamesWhatIsNotThere(t *testing.T) {
 	for _, tc := range []struct {

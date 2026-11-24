@@ -96,7 +96,8 @@ path the secret is bound to:
   `/opt/homebrew/bin/gh`, and matching the path rather than the Cellar target
   keeps the binding working across Homebrew upgrades.
 - A `sh -c` script never gets a bound secret, whatever programs it names, even
-  when the shell itself is bound. The shell can pass the value on with built-ins
+  when the shell itself is bound, nor does a bound program whose words start one,
+  as `find -exec sh -c` does. The shell can pass the value on with built-ins
   alone, as a redirect to `/dev/tcp` does, and a script can make a program's name
   run something else, by changing `PATH` or defining a function. A launcher such
   as `env`, `sudo` or `xargs` is the program `keyward run` starts, so it does not
@@ -105,10 +106,9 @@ path the secret is bound to:
   does not get a bound secret, even the program it is bound to: the variable
   makes it load other code, which would get the secret with it.
 - A bound secret named in `--only` that the command may not have is refused,
-  naming the secret and where it may go. One not named in `--only` is left as its
-  `cap://` reference, which `keyward run` says in one line, so
-  `keyward run -- npm test` keeps working when an unrelated bound secret is in
-  the environment.
+  naming the secret and where it may go. Without `--only`, it is left as its `cap://`
+  reference, which `keyward run` says in one line, so `keyward run -- npm test`
+  keeps working when an unrelated bound secret is in the environment.
 
 So start the bound program itself, one call per `keyward run`, with loops, pipes
 and redirects outside it; output that reaches a pipe or a file is still masked.
@@ -124,11 +124,12 @@ an interpreter such as `python3`, `npx` or a launcher can send it anywhere. So a
 binding catches mistakes, such as a script that sends a token to the wrong
 place, not an agent set on getting around it.
 
-An MCP server that gets a secret through `keyward run` stops starting once the
-secret is bound, unless `keyward run` starts the server as a bound program.
-`keyward bind` and `keyward unbind` name such servers before they ask, and
-`keyward mcp` does not check bindings, so give each such server a secret of its
-own first.
+An MCP server that gets a secret through `keyward run` stops getting it once the
+secret is bound, unless `keyward run` starts the server as a bound program; one
+whose `--only` names the secret is refused and does not start. `keyward bind`
+and `keyward unbind` name such servers among those `keyward mcp` reads, judging
+each by your `PATH`, before they ask. `keyward mcp` does not check bindings, so
+give each such server a secret of its own first.
 
 A binding is part of the value's seal: the associated data that AES-GCM
 authenticates is the secret's name together with its canonical bindings. Editing

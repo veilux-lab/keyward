@@ -83,7 +83,7 @@ func TestInstructionsCarryEveryRule(t *testing.T) {
 		"mcp-remote fills `${VAR}` in a `--header` from its own environment, so single-quote it there: `--header 'Authorization: Bearer ${VAR}'`.",
 		"If a tool takes a credential only as an argument, use its environment variable or a stdin option instead, such as `PGPASSWORD` or `docker login --password-stdin`; if it has neither, tell the user.",
 		"An authentication failure, or a tool that receives `cap://…`, usually means it was started outside keyward, that it is a program the user set up to read the value through `keyward run`, as above, and gets `cap://NAME#masked`, or that the secret is bound to another program, which `keyward run` says on stderr. Say which rather than looking for the value.",
-		"A binding `keyward mcp` does not check: if `keyward bindings` lists the server's secret, the server needs a secret of its own, which only the user can add.",
+		"A binding `keyward mcp` does not check: if `keyward bindings` lists the server's secret but not the program its `keyward run` starts, the server needs a secret of its own: ask the user for one.",
 		"An MCP server that stops starting may have been refused by `keyward run`. For an MCP server, `keyward mcp` shows the fix; leave applying it to the user, who can run `keyward mcp wrap`.",
 		"When keyward reports a leaked value, tell the user to rotate it; do not open the file or line it names, or print the named program's command line.",
 		"Only the user decides a value is not a secret: never add `# keyward:ignore` yourself, and do not open a line keyward lists to judge it.",

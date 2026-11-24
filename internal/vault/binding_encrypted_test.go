@@ -124,6 +124,10 @@ func TestEncryptedLeavesANewerKeywardsBindingsAlone(t *testing.T) {
 		if _, err := s.Get("token"); err == nil || !strings.Contains(err.Error(), "does not understand") {
 			t.Errorf("%s: Get = %v, want it to say the binding is not understood", binding, err)
 		}
+		// Changing its bindings says the same, not that the value was tampered with.
+		if err := s.Unbind("token", gh()); err == nil || !strings.Contains(err.Error(), "does not understand") {
+			t.Errorf("%s: Unbind = %v, want it to say the binding is not understood", binding, err)
+		}
 	}
 }
 

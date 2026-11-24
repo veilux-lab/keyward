@@ -176,6 +176,35 @@ func TestRunNeverGivesABoundSecretToAScript(t *testing.T) {
 	}
 }
 
+// A secret bound to curl, refused in a script, gets the direct form with its own
+// variable's name, ready to run.
+func TestRunShowsTheDirectCurlFormForTheVariable(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin", "API_TOKEN=cap://tok"}
+	h := newHarness(t, "", map[string]string{"tok": token}, env)
+	bindProgram(t, h, "tok", progPath(t, "curl"))
+	script := `printf 'header = "Authorization: Bearer %s"\n' "$API_TOKEN" | curl -sS -K - https://example.invalid`
+	if code := h.cli.Run([]string{"run", "--only", "API_TOKEN", "--", "sh", "-c", script}); code != 2 {
+		t.Fatalf("exit %d, want 2: %s", code, h.err())
+	}
+	if !strings.Contains(h.err(), "--variable %API_TOKEN") || !strings.Contains(h.err(), "{{API_TOKEN}}") {
+		t.Errorf("want the curl form with API_TOKEN filled in:\n%s", h.err())
+	}
+}
+
+// A bound program started directly whose own words start a script, as find
+// -exec sh -c does, is told that, not to start the program directly, which it was.
+func TestRunExplainsAScriptInABoundProgramsWords(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
+	h := newHarness(t, "", map[string]string{"tok": token}, env)
+	bindProgram(t, h, "tok", progPath(t, "find"))
+	if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "find", ".", "-exec", "sh", "-c", "echo x", ";"}); code != 2 {
+		t.Fatalf("exit %d, want 2: %s", code, h.err())
+	}
+	if strings.Contains(h.err(), "Start find directly") || !strings.Contains(h.err(), "its words start a script") {
+		t.Errorf("want the message to say find's words start a script:\n%s", h.err())
+	}
+}
+
 // Without --only, a script runs with the bound secret left as its reference.
 func TestRunLeavesBoundSecretUnresolvedForAScript(t *testing.T) {
 	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}

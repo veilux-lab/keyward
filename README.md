@@ -64,10 +64,10 @@ keyward help                              # commands and options
   secret to the program that uses it, `keyward bind github-token --program gh`,
   and `keyward run` gives it only to `gh` started directly: not to a `sh -c`
   script, another program, or one started with a `DYLD_` variable set. Named in
-  `--only` there, it is refused; otherwise it stays a `cap://` reference, and
-  `keyward run` says so. `keyward bindings` lists bindings; `keyward bind` and
-  `keyward unbind` ask for "yes" in a terminal and first name any MCP server
-  they would stop. A binding catches mistakes, not an agent working around it:
+  `--only` there, it is refused; without `--only`, it stays a `cap://` reference,
+  and `keyward run` says so. `keyward bindings` lists bindings; `keyward bind` and
+  `keyward unbind` ask for "yes" in a terminal and first name the MCP servers
+  `keyward mcp` can see that they would stop. A binding catches mistakes, not an agent working around it:
   the bound program passes the secret to whatever it runs, as `gh` does to its
   browser, pager, aliases and extensions. See [bindings](docs/details.md#bindings).
 - When a command's output goes to an agent, a pipe or a file rather than a

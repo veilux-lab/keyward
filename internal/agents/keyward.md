@@ -106,8 +106,9 @@ reference, not a broken value.
   which rather than looking for the value. An MCP server that stops starting may
   have been refused by `keyward run`. For an MCP server, `keyward mcp` shows the
   fix; leave applying it to the user, who can run `keyward mcp wrap`. A binding
-  `keyward mcp` does not check: if `keyward bindings` lists the server's secret,
-  the server needs a secret of its own, which only the user can add.
+  `keyward mcp` does not check: if `keyward bindings` lists the server's secret
+  but not the program its `keyward run` starts, the server needs a secret of its
+  own: ask the user for one.
 - When keyward reports a leaked value, tell the user to rotate it; do not open the
   file or line it names, or print the named program's command line.
 - Only the user decides a value is not a secret: never add `# keyward:ignore`

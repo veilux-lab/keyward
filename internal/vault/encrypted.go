@@ -299,6 +299,10 @@ func (e *Encrypted) reseal(op, name string, change func([]Binding) []Binding) er
 		}
 	}
 	entry := f.Entries[key]
+	if !allKnown(entry.Bindings) {
+		// Its value is sealed with fields this keyward cannot reproduce.
+		return fmt.Errorf("vault %s %q: it is bound in a way this keyward does not understand; update keyward", op, key)
+	}
 	next := change(entry.Bindings)
 	if slices.Equal(next, entry.Bindings) {
 		return nil

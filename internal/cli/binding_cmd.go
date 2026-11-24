@@ -61,19 +61,29 @@ func (c *CLI) bind(args []string) int {
 	if err != nil {
 		return c.fail("keyward bind: %v", err)
 	}
-	after := append(slices.Clone(current), bindings...)
-	c.warnStoppedServers(name, current, after)
-	var lines []string
-	for _, p := range programNames(after) {
-		if slices.Contains(programNames(current), p) {
-			p += " (already bound)"
-		}
-		lines = append(lines, p)
-	}
-	if code := c.confirmBindingChange("bind", fmt.Sprintf("Give %s only to these programs, started directly?", name), slices.Compact(lines)); code != exitOK {
+	if code := c.refuseNewer("bind", name, current); code != exitOK {
 		return code
 	}
+	var added []vault.Binding
 	for _, b := range bindings {
+		if !slices.Contains(current, b) && !slices.Contains(added, b) {
+			added = append(added, b)
+		}
+	}
+	if len(added) == 0 {
+		fmt.Fprintf(c.Stdout, "%s already goes only to: %s; nothing changed.\n", name, strings.Join(programNames(current), ", "))
+		return exitOK
+	}
+	c.warnStoppedServers(name, current, append(slices.Clone(current), added...))
+	var lines []string
+	for _, p := range programNames(current) {
+		lines = append(lines, p+" (already bound)")
+	}
+	lines = append(lines, programNames(added)...)
+	if code := c.confirmBindingChange("bind", fmt.Sprintf("Give %s only to these programs, started directly?", name), lines); code != exitOK {
+		return code
+	}
+	for _, b := range added {
 		if err := c.Binder.Bind(name, b); err != nil {
 			return c.fail("keyward bind: %v", err)
 		}
@@ -122,6 +132,9 @@ func (c *CLI) unbind(args []string) int {
 	if len(current) == 0 {
 		return c.cancel(fmt.Sprintf("keyward unbind: %s is not bound, so it may already go to any program.", name))
 	}
+	if code := c.refuseNewer("unbind", name, current); code != exitOK {
+		return code
+	}
 	remove := current
 	if !*all {
 		remove = nil
@@ -159,6 +172,16 @@ func (c *CLI) unbind(args []string) int {
 		fmt.Fprintf(c.Stdout, "%s is no longer bound; it may be given to any program again.\n", name)
 	default:
 		fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(now), ", "))
+	}
+	return exitOK
+}
+
+// refuseNewer refuses to change a secret bound in a way this keyward does not
+// understand, as a newer keyward binds, before anyone is asked: its value is
+// sealed with what this one cannot reproduce.
+func (c *CLI) refuseNewer(command, name string, current []vault.Binding) int {
+	if slices.ContainsFunc(current, func(b vault.Binding) bool { return !b.Known() }) {
+		return c.fail("keyward %s: %s is bound in a way this keyward does not understand; update keyward to change it", command, name)
 	}
 	return exitOK
 }
@@ -206,11 +229,15 @@ func (c *CLI) warnStoppedServers(name string, before, after []vault.Binding) {
 	refs := mcpconfig.References(doctor.DefaultPaths(c.Home, c.Workdir))
 	var stopped []string
 	for _, w := range mcpconfig.WrappedServers(servers, refs) {
-		if !slices.Contains(w.Secrets, name) || len(w.Command) == 0 || mcpconfig.Gone(w.Project) {
+		if !slices.Contains(w.Secrets, name) || mcpconfig.Gone(w.Project) {
 			continue
 		}
-		if (len(before) == 0 || reaches(before, w.Command)) && !reaches(after, w.Command) {
-			stopped = append(stopped, fmt.Sprintf("  %s (%s, %s)", w.Name, w.Client, c.tilde(w.Config)))
+		where := fmt.Sprintf("  %s (%s, %s)", w.Name, w.Client, c.tilde(w.Config))
+		switch {
+		case w.Unread:
+			stopped = append(stopped, where+": keyward could not read how it starts")
+		case len(w.Command) > 0 && (len(before) == 0 || reaches(before, w.Command)) && !reaches(after, w.Command):
+			stopped = append(stopped, where)
 		}
 	}
 	if len(stopped) > 0 {

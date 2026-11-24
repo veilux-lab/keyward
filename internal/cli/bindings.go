@@ -83,7 +83,7 @@ func (c *CLI) bindingResolveKeys(args, env, only []string) (keys, notes []string
 		if !ok || len(all[secret]) == 0 {
 			continue // a malformed reference, which resolve reports, or one free to go
 		}
-		reason, fix := withheld(secret, all[secret], args, env)
+		reason, fix := withheld(v, secret, all[secret], args, env)
 		if reason == "" {
 			continue
 		}
@@ -99,9 +99,9 @@ func (c *CLI) bindingResolveKeys(args, env, only []string) (keys, notes []string
 	return slices.DeleteFunc(resolve.Variables(env, nil), func(v string) bool { return slices.Contains(exclude, v) }), notes, "", nil
 }
 
-// withheld says why secret, bound as bindings say, may not go to the command argv
-// starts with env, and what to do instead, or returns "" if it may.
-func withheld(secret string, bindings []vault.Binding, argv, env []string) (reason, fix string) {
+// withheld says why variable's secret, bound as bindings say, may not go to the
+// command argv starts with env, and what to do instead, or returns "" if it may.
+func withheld(variable, secret string, bindings []vault.Binding, argv, env []string) (reason, fix string) {
 	var programs []string
 	for _, b := range bindings {
 		if !b.Known() {
@@ -110,18 +110,22 @@ func withheld(secret string, bindings []vault.Binding, argv, env []string) (reas
 		programs = append(programs, b.Program)
 	}
 	where, first := strings.Join(programs, ", "), path.Base(programs[0])
-	if _, _, script := shell.Command(argv); script {
+	program := argv[0]
+	if p, err := programPath(program); err == nil {
+		program = p
+	}
+	if name, _, script := shell.Command(argv); script {
+		if path.Base(program) != name && slices.Contains(programs, program) {
+			// Started directly, as it should be, but its own words run a script.
+			return "goes only to " + where + ", never to a script, and its words start a script", "Run " + path.Base(program) + " without a shell script among its words."
+		}
 		fix = fmt.Sprintf("Start %s directly, one call per keyward run, with loops, pipes and redirects outside it.", first)
 		if slices.ContainsFunc(programs, func(p string) bool { return path.Base(p) == "curl" }) {
-			fix += "\n  curl 8.3 or later reads the value itself: curl --variable %VAR --expand-header 'Authorization: Bearer {{VAR}}' URL"
+			fix += fmt.Sprintf("\n  curl 8.3 or later reads the value itself: curl --variable %%%s --expand-header 'Authorization: Bearer {{%s}}' URL", variable, variable)
 		}
 		return "goes only to " + where + ", never to a script", fix
 	}
 	if !reaches(bindings, argv) {
-		program := argv[0]
-		if p, err := programPath(program); err == nil {
-			program = p
-		}
 		return "goes only to " + where + ", not to " + program, fmt.Sprintf("Start %s directly; keyward bindings lists where each secret may go.", first)
 	}
 	if names := loaders(env); len(names) > 0 {
