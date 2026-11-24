@@ -140,12 +140,24 @@ func (e *Encrypted) Get(name string) (Secret, error) {
 		}
 		entry = f.Entries[key]
 	}
+	if !allKnown(entry.Bindings) {
+		return Secret{}, fmt.Errorf("vault get %q: it is bound in a way this keyward does not understand; update keyward", key)
+	}
 	plain, err := e.open(entry.Value, key, entry.Bindings)
 	if err != nil {
 		return Secret{}, fmt.Errorf("vault get %q: %w", key, err)
 	}
 	defer clear(plain)
 	return NewSecret(plain), nil
+}
+
+func allKnown(bindings []Binding) bool {
+	for _, b := range bindings {
+		if !b.Known() {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *Encrypted) Put(name string, value Secret, note string) error {
@@ -542,9 +554,13 @@ func (e *Encrypted) write(f *vaultFile) error {
 	// vault that has no bindings, and reads one again if the last is removed.
 	f.Version = vaultVersion
 	for _, entry := range f.Entries {
+		if !allKnown(entry.Bindings) {
+			// Rewriting would drop the fields this keyward does not know, and the value
+			// sealed with them would never open again.
+			return fmt.Errorf("%s holds bindings from a newer keyward, so this one will not change it; update keyward", e.Path)
+		}
 		if len(entry.Bindings) > 0 {
 			f.Version = vaultVersionBinding
-			break
 		}
 	}
 	data, err := json.Marshal(f)

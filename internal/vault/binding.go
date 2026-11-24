@@ -1,6 +1,9 @@
 package vault
 
-import "sort"
+import (
+	"encoding/json"
+	"sort"
+)
 
 // Binding kinds. Only BindingProgram is enforced by this keyward; a kind it does
 // not know allows nothing (see Binding.Known).
@@ -25,13 +28,52 @@ type Binding struct {
 	Kind string `json:"kind"`
 	// Program is the absolute path a program binding allows, empty otherwise.
 	Program string `json:"program,omitempty"`
+
+	// unknown marks a binding read with fields this keyward does not know, as a
+	// later version may write.
+	unknown bool
 }
 
-// Known reports whether this keyward understands the binding's kind. An unknown
-// kind — a host binding read by a keyward too old to enforce it — allows
-// nothing, so callers fail closed rather than hand the secret anywhere.
+// Known reports whether this keyward understands the binding. One it does not,
+// of a kind or with fields a later keyward wrote, allows nothing, so callers
+// fail closed rather than hand the secret anywhere.
 func (b Binding) Known() bool {
-	return b.Kind == BindingProgram
+	return b.Kind == BindingProgram && !b.unknown
+}
+
+// UnmarshalJSON reads a binding and remembers whether it had fields this keyward
+// does not know, which decoding would otherwise drop with the restriction they
+// add.
+func (b *Binding) UnmarshalJSON(data []byte) error {
+	type plain Binding // without this method, so decoding does not recurse
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*b = Binding(p)
+	for name := range fields {
+		b.unknown = b.unknown || name != "kind" && name != "program"
+	}
+	return nil
+}
+
+// MarshalJSON keeps a binding this keyward does not understand marked so as it
+// crosses the daemon's socket, since decoding dropped the fields that made it so.
+// A known binding marshals as before, so the associated data it is sealed with
+// does not change.
+func (b Binding) MarshalJSON() ([]byte, error) {
+	type plain Binding
+	if !b.unknown {
+		return json.Marshal(plain(b))
+	}
+	return json.Marshal(struct {
+		plain
+		Unknown bool `json:"unknown"`
+	}{plain(b), true})
 }
 
 // canonicalBindings returns bindings sorted and deduplicated. This is the form

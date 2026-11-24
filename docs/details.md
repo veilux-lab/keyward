@@ -84,8 +84,9 @@ reach, and `keyward run` enforces it.
 Bind a secret with `keyward bind NAME --program gh`, repeating `--program` for
 more than one. `keyward unbind NAME --program gh`, or `--all`, removes bindings,
 and `keyward bindings` lists them without values. Changing a binding needs a
-terminal and a typed "yes", so an agent or a pipe cannot change where a secret
-may go; the agent guide tells agents never to run `bind` or `unbind`.
+typed "yes" in a terminal, which keeps a pipe or an agent's ordinary command from
+changing it, though not a program that runs keyward in a pseudo-terminal; the
+agent guide tells agents never to run `bind` or `unbind`.
 
 `keyward run` gives a bound secret only to a program it starts directly whose
 path the secret is bound to:
@@ -100,10 +101,14 @@ path the secret is bound to:
   run something else, by changing `PATH` or defining a function. A launcher such
   as `env`, `sudo` or `xargs` is the program `keyward run` starts, so it does not
   get the secret either.
+- A program started with a `DYLD_` variable set, such as `DYLD_INSERT_LIBRARIES`,
+  does not get a bound secret, even the program it is bound to: the variable
+  makes it load other code, which would get the secret with it.
 - A bound secret named in `--only` that the command may not have is refused,
   naming the secret and where it may go. One not named in `--only` is left as its
-  `cap://` reference, so `keyward run -- npm test` keeps working when an unrelated
-  bound secret is in the environment.
+  `cap://` reference, which `keyward run` says in one line, so
+  `keyward run -- npm test` keeps working when an unrelated bound secret is in
+  the environment.
 
 So start the bound program itself, one call per `keyward run`, with loops, pipes
 and redirects outside it; output that reaches a pipe or a file is still masked.
@@ -112,13 +117,18 @@ For a tool that seeks in its output, use its own output option, as
 script:
 `keyward run --only API_TOKEN -- curl -sS --variable %API_TOKEN --expand-header 'Authorization: Bearer {{API_TOKEN}}' URL`.
 
-Bind a token whose program sends it only where it belongs, as `gh` sends
-`GITHUB_TOKEN` only to GitHub. Bound to curl, a shell, an interpreter such as
-`python3`, `npx` or a launcher, a secret can still go anywhere that program
-reaches. An MCP server that gets a secret through `keyward run` stops getting it
-once the secret is bound, unless `keyward run` starts the server as a bound
-program: `keyward bind` names such servers before it asks, so give each its own
-secret first.
+Bind a token to the program that uses it, but know that the bound program
+still passes it to whatever it runs: `gh` to the browser, pager and editor its
+settings or environment name, and to its aliases and extensions; curl, a shell,
+an interpreter such as `python3`, `npx` or a launcher can send it anywhere. So a
+binding catches mistakes, such as a script that sends a token to the wrong
+place, not an agent set on getting around it.
+
+An MCP server that gets a secret through `keyward run` stops starting once the
+secret is bound, unless `keyward run` starts the server as a bound program.
+`keyward bind` and `keyward unbind` name such servers before they ask, and
+`keyward mcp` does not check bindings, so give each such server a secret of its
+own first.
 
 A binding is part of the value's seal: the associated data that AES-GCM
 authenticates is the secret's name together with its canonical bindings. Editing
@@ -128,11 +138,11 @@ the first binding is set and returns to version 1 when the last is removed, so a
 older keyward still reads a vault with no bindings. A binding of a kind this
 keyward does not understand, written by a later version, allows no program.
 
-This stops a mistaken or tricked `keyward run` from handing a secret to a program
-of an attacker's choosing even though the agent never sees the value. It does not
-stop a program the secret is bound to from doing what it likes with it, nor
-malware running as you, which can replace a bound program, as Homebrew's folders
-are writable by you, or ask the daemon for a value directly.
+This stops a mistaken `keyward run` from handing a secret to the wrong program.
+It does not stop a program the secret is bound to from doing what it likes with
+it, or being told to by its settings, nor malware running as you, which can
+replace a bound program, as Homebrew's folders are writable by you, or ask the
+daemon for a value directly.
 
 ## MCP servers
 

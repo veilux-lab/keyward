@@ -184,6 +184,160 @@ func TestBindWarnsAboutMCPServersItWouldStop(t *testing.T) {
 	speaksToTheReader(t, h.err())
 }
 
+// prompted returns what a command printed before asking for "yes", failing if it
+// never asked.
+func prompted(t *testing.T, h *harness) string {
+	t.Helper()
+	before, _, ok := strings.Cut(h.err(), "Enter a value")
+	if !ok {
+		t.Fatalf("did not ask for yes:\n%s", h.err())
+	}
+	return before
+}
+
+// The question names the exact paths a yes binds, since PATH may find another
+// program than the one you meant.
+func TestBindAsksWithThePathsItWillStore(t *testing.T) {
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Interactive = true
+	bindProgram(t, h, "tok", "/elsewhere/gh")
+	if code := h.cli.Run([]string{"bind", "tok", "--program", "printenv"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	question := prompted(t, h)
+	for _, want := range []string{progPath(t, "printenv"), "/elsewhere/gh"} {
+		if !strings.Contains(question, want) {
+			t.Errorf("the question does not show %s:\n%s", want, question)
+		}
+	}
+}
+
+// Removing some bindings narrows where a secret goes, and removing the last
+// lets it go anywhere; the question says which, and what is left.
+func TestUnbindAsksWhatChanges(t *testing.T) {
+	pe := progPath(t, "printenv")
+	for _, tc := range []struct {
+		args       []string
+		want, deny string
+	}{
+		{[]string{"unbind", "tok", "--program", "/elsewhere/gh"}, "Stop giving tok to", "any program"},
+		{[]string{"unbind", "tok", "--all"}, "Let tok go to any program again?", "Stop giving"},
+	} {
+		h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+		h.cli.Interactive = true
+		for _, p := range []string{pe, "/elsewhere/gh"} {
+			bindProgram(t, h, "tok", p)
+		}
+		if code := h.cli.Run(tc.args); code != 0 {
+			t.Fatalf("%v: exit %d: %s", tc.args, code, h.err())
+		}
+		question := prompted(t, h)
+		if !strings.Contains(question, tc.want) || strings.Contains(question, tc.deny) || !strings.Contains(question, "/elsewhere/gh") {
+			t.Errorf("%v: want %q naming /elsewhere/gh:\n%s", tc.args, tc.want, question)
+		}
+	}
+}
+
+// writeServers writes a Claude Code config holding servers, as JSON.
+func writeServers(t *testing.T, servers string) string {
+	t.Helper()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(servers), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// Narrowing a binding can stop a server that runs the program being removed, so
+// unbind names it before asking, as bind does.
+func TestUnbindWarnsAboutMCPServersItWouldStop(t *testing.T) {
+	home := writeServers(t, `{"mcpServers": {"printing-server": {"command": "keyward", "args": ["run", "--only", "T", "--", "printenv", "T"], "env": {"T": "cap://tok"}}}}`)
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Home, h.cli.Workdir, h.cli.Interactive = home, t.TempDir(), true
+	for _, p := range []string{progPath(t, "printenv"), "/elsewhere/gh"} {
+		bindProgram(t, h, "tok", p)
+	}
+	if code := h.cli.Run([]string{"unbind", "tok", "--program", "printenv"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if !strings.Contains(prompted(t, h), "printing-server") {
+		t.Errorf("unbind did not name the server it stops:\n%s", h.err())
+	}
+}
+
+// Only a server that gets the secret now and would not afterwards is named: one
+// already stopped by an earlier binding, or in a project whose folder is gone,
+// is not, while one whose script starts keyward run is.
+func TestBindWarnsOnlyAboutServersItWouldStop(t *testing.T) {
+	home := writeServers(t, `{"mcpServers": {
+		"already-stopped": {"command": "keyward", "args": ["run", "--only", "T", "--", "printenv", "T"], "env": {"T": "cap://tok"}},
+		"login-shell": {"command": "zsh", "args": ["-lc", "keyward run --only T -- uvx some-server"], "env": {"T": "cap://tok"}}},
+		"projects": {"/nonexistent/keyward-test-project": {"mcpServers": {
+		"gone-project": {"command": "keyward", "args": ["run", "--only", "T", "--", "uvx", "x"], "env": {"T": "cap://tok"}}}}}}`)
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Home, h.cli.Workdir, h.cli.Interactive = home, t.TempDir(), true
+	bindProgram(t, h, "tok", "/elsewhere/gh")
+	if code := h.cli.Run([]string{"bind", "tok", "--program", "true"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if question := prompted(t, h); strings.Contains(question, "already-stopped") || strings.Contains(question, "gone-project") {
+		t.Errorf("named a server this bind does not stop:\n%s", question)
+	}
+
+	// Unbound, every server that uses the secret gets it, so the first binding
+	// stops both, including the one that starts keyward run from its script.
+	h = newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Home, h.cli.Workdir, h.cli.Interactive = home, t.TempDir(), true
+	if code := h.cli.Run([]string{"bind", "tok", "--program", "true"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	question := prompted(t, h)
+	if !strings.Contains(question, "login-shell") || !strings.Contains(question, "already-stopped") || strings.Contains(question, "gone-project") {
+		t.Errorf("want login-shell and already-stopped named, not gone-project:\n%s", question)
+	}
+}
+
+// A config keyward cannot read is said so, rather than taken for one with no
+// servers to stop.
+func TestBindSaysWhichMCPConfigsItCouldNotRead(t *testing.T) {
+	home := writeServers(t, `{not json`)
+	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+	h.cli.Home, h.cli.Workdir, h.cli.Interactive = home, t.TempDir(), true
+	if code := h.cli.Run([]string{"bind", "tok", "--program", "printenv"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if !strings.Contains(prompted(t, h), "Could not read an MCP config") {
+		t.Errorf("did not say the config could not be read:\n%s", h.err())
+	}
+}
+
+// unbind names what it cannot remove instead of asking for a yes to nothing.
+func TestUnbindNamesWhatIsNotThere(t *testing.T) {
+	for _, tc := range []struct {
+		bound []string
+		args  []string
+		want  string
+	}{
+		{nil, []string{"unbind", "tok", "--all"}, "tok is not bound"},
+		{[]string{"/elsewhere/gh"}, []string{"unbind", "tok", "--program", "/elsewhere/gh", "--program", "/elsewhere/curl"}, "/elsewhere/curl"},
+	} {
+		h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)
+		h.cli.Interactive = true
+		for _, p := range tc.bound {
+			bindProgram(t, h, "tok", p)
+		}
+		if code := h.cli.Run(tc.args); code != 1 {
+			t.Errorf("%v: exit %d, want 1", tc.args, code)
+		}
+		if !strings.Contains(h.err(), tc.want) || strings.Contains(h.err(), "Enter a value") {
+			t.Errorf("%v: want %q and no prompt:\n%s", tc.args, tc.want, h.err())
+		}
+		if got := bindingsOf(t, h, "tok"); len(got) != len(tc.bound) {
+			t.Errorf("%v: bindings changed to %v", tc.args, got)
+		}
+	}
+}
+
 // With no MCP server using the secret there is nothing to warn about.
 func TestBindDoesNotWarnWithoutMCPServers(t *testing.T) {
 	h := newHarness(t, "yes\n", map[string]string{"tok": token}, nil)

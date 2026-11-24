@@ -2,6 +2,8 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,6 +28,34 @@ func TestDaemonStructuredActivityOmitsRejectedInputs(t *testing.T) {
 	}
 	if strings.Contains(events.String(), "private-value") || !strings.Contains(events.String(), "token") {
 		t.Fatal("request inputs leaked or successful name was omitted")
+	}
+}
+
+// A binding from a newer keyward, with a field this one does not know, must
+// still read as not understood after crossing the socket, or keyward run would
+// take it for an ordinary program binding.
+func TestBindingFromANewerKeywardStaysUnknownOverTheSocket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.vault")
+	store := &vault.Encrypted{Path: path, Keys: vault.NewMemory()}
+	value := vault.NewSecret([]byte("v"))
+	defer value.Destroy()
+	if err := store.Put("token", value, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Bind("token", vault.Binding{Kind: vault.BindingProgram, Program: "/opt/homebrew/bin/gh"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	data = []byte(strings.Replace(string(data), `"program":"/opt/homebrew/bin/gh"`, `"program":"/opt/homebrew/bin/gh","sha256":"ab"`, 1))
+	os.WriteFile(path, data, 0o600)
+
+	c := start(t, &daemon.Server{Store: store})
+	all, err := c.Bindings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := all["token"]; len(got) != 1 || got[0].Known() {
+		t.Errorf("bindings over the socket = %v, want one this keyward does not understand", got)
 	}
 }
 

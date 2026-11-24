@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/veilux-lab/keyward/internal/vault"
@@ -88,6 +89,41 @@ func TestEncryptedBindMissingDoesNotCreateAKey(t *testing.T) {
 	}
 	if _, err := os.Stat(s.Path); err == nil {
 		t.Error("Bind of a missing secret created a vault file")
+	}
+}
+
+// A vault holding a binding from a newer keyward is never rewritten by this one,
+// which would drop the fields it does not know and leave that value sealed under
+// associated data nothing can reproduce. Reading the bound value says why.
+func TestEncryptedLeavesANewerKeywardsBindingsAlone(t *testing.T) {
+	for _, binding := range []string{
+		`{"kind":"program","program":"/opt/homebrew/bin/gh","sha256":"ab"}`,
+		`{"kind":"host","host":"api.github.com"}`,
+	} {
+		s, _, _ := encrypted(t)
+		put(t, s, "token", "v")
+		if err := s.Bind("token", gh()); err != nil {
+			t.Fatal(err)
+		}
+		var file map[string]json.RawMessage
+		data, _ := os.ReadFile(s.Path)
+		json.Unmarshal(data, &file)
+		var entries map[string]map[string]json.RawMessage
+		json.Unmarshal(file["entries"], &entries)
+		entries["token"]["bindings"] = json.RawMessage("[" + binding + "]")
+		file["entries"], _ = json.Marshal(entries)
+		newer, _ := json.Marshal(file)
+		os.WriteFile(s.Path, newer, 0o600)
+
+		if err := s.Put("other", vault.NewSecret([]byte("w")), ""); err == nil || !strings.Contains(err.Error(), "newer keyward") {
+			t.Errorf("%s: Put = %v, want a refusal naming a newer keyward", binding, err)
+		}
+		if after, _ := os.ReadFile(s.Path); string(after) != string(newer) {
+			t.Errorf("%s: the vault was rewritten", binding)
+		}
+		if _, err := s.Get("token"); err == nil || !strings.Contains(err.Error(), "does not understand") {
+			t.Errorf("%s: Get = %v, want it to say the binding is not understood", binding, err)
+		}
 	}
 }
 

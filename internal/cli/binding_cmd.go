@@ -61,8 +61,16 @@ func (c *CLI) bind(args []string) int {
 	if err != nil {
 		return c.fail("keyward bind: %v", err)
 	}
-	c.warnStoppedServers(name, append(slices.Clone(current), bindings...))
-	if code := c.confirmBindingChange("bind", name); code != exitOK {
+	after := append(slices.Clone(current), bindings...)
+	c.warnStoppedServers(name, current, after)
+	var lines []string
+	for _, p := range programNames(after) {
+		if slices.Contains(programNames(current), p) {
+			p += " (already bound)"
+		}
+		lines = append(lines, p)
+	}
+	if code := c.confirmBindingChange("bind", fmt.Sprintf("Give %s only to these programs, started directly?", name), slices.Compact(lines)); code != exitOK {
 		return code
 	}
 	for _, b := range bindings {
@@ -72,17 +80,17 @@ func (c *CLI) bind(args []string) int {
 	}
 	// The whole list, not just what this call added, which a secret already bound
 	// would understate.
-	after, err := c.bindingsOf(name)
-	if err != nil {
-		return c.fail("keyward bind: %v", err)
+	if now, err := c.bindingsOf(name); err == nil {
+		fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(now), ", "))
+	} else {
+		fmt.Fprintf(c.Stdout, "Bound. keyward bindings lists where %s may go.\n", name)
 	}
-	fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(after), ", "))
 	return exitOK
 }
 
 // unbind removes bindings: --all removes every one, leaving the secret free to
-// go to any program; --program removes those named. It needs a terminal and a
-// "yes", since removing a binding widens where a secret may go.
+// go to any program; --program removes those named, which narrows where it may
+// go while others are left. Either needs a terminal and a "yes".
 func (c *CLI) unbind(args []string) int {
 	fs := flag.NewFlagSet("unbind", flag.ContinueOnError)
 	fs.SetOutput(c.Stderr)
@@ -111,19 +119,30 @@ func (c *CLI) unbind(args []string) int {
 	if err != nil {
 		return c.fail("keyward unbind: %v", err)
 	}
+	if len(current) == 0 {
+		return c.cancel(fmt.Sprintf("keyward unbind: %s is not bound, so it may already go to any program.", name))
+	}
 	remove := current
 	if !*all {
 		remove = nil
 		for _, p := range programs {
-			if b := (vault.Binding{Kind: vault.BindingProgram, Program: unbindPath(p)}); slices.Contains(current, b) {
-				remove = append(remove, b)
+			b := vault.Binding{Kind: vault.BindingProgram, Program: unbindPath(p)}
+			if !slices.Contains(current, b) {
+				return c.fail("keyward unbind: %s is not bound to %s; keyward bindings lists where it may go", name, b.Program)
 			}
+			remove = append(remove, b)
 		}
 	}
-	if len(remove) == 0 {
-		return c.cancel(fmt.Sprintf("keyward unbind: %s has none of those bindings; keyward bindings lists them.", name))
+	left := slices.DeleteFunc(slices.Clone(current), func(b vault.Binding) bool { return slices.Contains(remove, b) })
+	question := fmt.Sprintf("Let %s go to any program again?", name)
+	lines := []string{"It is bound to: " + strings.Join(programNames(current), ", ")}
+	if len(left) > 0 {
+		// Narrowing can stop an MCP server that runs a program being removed.
+		c.warnStoppedServers(name, current, left)
+		question = fmt.Sprintf("Stop giving %s to these programs?", name)
+		lines = append(programNames(remove), "It will still go only to: "+strings.Join(programNames(left), ", "))
 	}
-	if code := c.confirmBindingChange("unbind", name); code != exitOK {
+	if code := c.confirmBindingChange("unbind", question, lines); code != exitOK {
 		return code
 	}
 	for _, b := range remove {
@@ -132,14 +151,14 @@ func (c *CLI) unbind(args []string) int {
 		}
 	}
 	// What is left, which a secret with other bindings still has.
-	left, err := c.bindingsOf(name)
+	now, err := c.bindingsOf(name)
 	switch {
 	case err != nil:
 		fmt.Fprintf(c.Stdout, "Removed. keyward bindings lists what %s has left.\n", name)
-	case len(left) == 0:
+	case len(now) == 0:
 		fmt.Fprintf(c.Stdout, "%s is no longer bound; it may be given to any program again.\n", name)
 	default:
-		fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(left), ", "))
+		fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(now), ", "))
 	}
 	return exitOK
 }
@@ -166,7 +185,7 @@ func programNames(bindings []vault.Binding) []string {
 // removed; a bare name is resolved as bind resolved it.
 func unbindPath(p string) string {
 	if filepath.IsAbs(p) {
-		return p
+		return filepath.Clean(p)
 	}
 	if abs, err := programPath(p); err == nil {
 		return abs
@@ -175,23 +194,28 @@ func unbindPath(p string) string {
 }
 
 // warnStoppedServers names the MCP servers that get name through keyward run
-// but would not under bindings, as keyward run gives a bound secret only to a
-// bound program it starts directly, before anyone says yes to stopping them.
-func (c *CLI) warnStoppedServers(name string, bindings []vault.Binding) {
+// under the bindings before, which none is, but not under after, as keyward run
+// gives a bound secret only to a bound program it starts directly, before anyone
+// says yes to stopping them.
+func (c *CLI) warnStoppedServers(name string, before, after []vault.Binding) {
 	if c.Home == "" {
 		return
 	}
-	servers, _ := c.loadAll()
+	servers, errs := c.loadAll()
+	c.reportUnreadable(errs)
 	refs := mcpconfig.References(doctor.DefaultPaths(c.Home, c.Workdir))
 	var stopped []string
 	for _, w := range mcpconfig.WrappedServers(servers, refs) {
-		if slices.Contains(w.Secrets, name) && len(w.Command) > 0 && !reaches(bindings, w.Command) {
+		if !slices.Contains(w.Secrets, name) || len(w.Command) == 0 || mcpconfig.Gone(w.Project) {
+			continue
+		}
+		if (len(before) == 0 || reaches(before, w.Command)) && !reaches(after, w.Command) {
 			stopped = append(stopped, fmt.Sprintf("  %s (%s, %s)", w.Name, w.Client, c.tilde(w.Config)))
 		}
 	}
 	if len(stopped) > 0 {
-		fmt.Fprintln(c.Stderr, c.errs(yellow, "These MCP servers would stop getting "+name+", because keyward run starts them as a script or another program:\n"+
-			strings.Join(stopped, "\n")+"\n  Give each a secret of its own before you bind this one."))
+		fmt.Fprintln(c.Stderr, c.errs(yellow, "These MCP servers would stop working, as keyward run would no longer give them "+name+":\n"+
+			strings.Join(stopped, "\n")+"\n  Give each a secret of its own first."))
 	}
 }
 
@@ -206,17 +230,17 @@ func (c *CLI) refuseNonTerminal(verb string) bool {
 	return true
 }
 
-// confirmBindingChange reads a typed "yes". Callers have already checked the
-// secret exists, so no one confirms a name that is not there.
-func (c *CLI) confirmBindingChange(verb, name string) int {
-	action := map[string]string{"bind": "Change where", "unbind": "Remove the restriction on where"}[verb]
-	if _, err := fmt.Fprintf(c.Stderr, "\n%s %s may go?\n  %s\n\n  Enter a value: ",
-		action, name, c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord))); err != nil {
+// confirmBindingChange asks question, with lines saying what changes, and reads
+// a typed "yes". Callers have already checked what it names exists, so no one
+// confirms a change to nothing.
+func (c *CLI) confirmBindingChange(command, question string, lines []string) int {
+	if _, err := fmt.Fprintf(c.Stderr, "\n%s\n  %s\n  %s\n\n  Enter a value: ",
+		question, strings.Join(lines, "\n  "), c.errs(bold, fmt.Sprintf("Only %q will be accepted.", confirmWord))); err != nil {
 		return exitFailure
 	}
 	ok, err := c.readConfirmation()
 	if err != nil {
-		return c.fail("keyward %s: could not read confirmation", verb)
+		return c.fail("keyward %s: could not read confirmation", command)
 	}
 	if !ok {
 		return c.cancel("Aborted. Bindings were not changed.")

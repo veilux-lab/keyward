@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 )
 
@@ -48,6 +49,25 @@ func TestBindingKnown(t *testing.T) {
 	}
 	if (Binding{Kind: "host", Program: ""}).Known() {
 		t.Error("a host binding is not known to this keyward and must fail closed")
+	}
+}
+
+// A later keyward may add fields to a binding, such as a checksum pin. Read here,
+// such a binding is not one this keyward understands, so it allows nothing
+// rather than quietly losing the restriction the field adds.
+func TestBindingWithFieldsItDoesNotKnowIsNotKnown(t *testing.T) {
+	for data, known := range map[string]bool{
+		`{"kind":"program","program":"/usr/bin/gh"}`:               true,
+		`{"kind":"program","program":"/usr/bin/gh","sha256":"ab"}`: false,
+		`{"kind":"host","host":"api.github.com"}`:                  false,
+	} {
+		var b Binding
+		if err := json.Unmarshal([]byte(data), &b); err != nil {
+			t.Fatalf("%s: %v", data, err)
+		}
+		if b.Known() != known {
+			t.Errorf("%s: Known() = %v, want %v", data, b.Known(), known)
+		}
 	}
 }
 

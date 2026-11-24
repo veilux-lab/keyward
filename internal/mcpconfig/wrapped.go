@@ -15,13 +15,21 @@ type Wrapped struct {
 }
 
 // WrappedServers returns the servers that are on and start through keyward run,
-// each with the secrets it resolves and the command keyward run starts, so
-// keyward bind can say which would stop getting a secret it binds.
+// directly or from their own script, as zsh -lc "keyward run ..." does, each
+// with the secrets it resolves and the command keyward run starts, so keyward
+// bind can say which would stop getting a secret it binds.
 func WrappedServers(servers []Server, refs map[string]string) []Wrapped {
 	var out []Wrapped
 	for _, s := range servers {
-		if s.disabled || !runsThroughKeyward(s) {
+		if s.disabled {
 			continue
+		}
+		if !runsThroughKeyward(s) {
+			run, ok := scriptedRun(s)
+			if !ok {
+				continue
+			}
+			s = run
 		}
 		var secrets []string
 		for _, v := range resolves(s, refs) {

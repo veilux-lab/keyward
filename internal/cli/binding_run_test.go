@@ -76,6 +76,10 @@ func TestRunRefusesBoundSecretToAnotherProgram(t *testing.T) {
 			t.Errorf("message lacks %q:\n%s", want, h.err())
 		}
 	}
+	// It does not suggest binding whatever ran, which could be a launcher or a shell.
+	if strings.Contains(h.err(), "--program") {
+		t.Errorf("message suggests binding the program that ran:\n%s", h.err())
+	}
 	speaksToTheReader(t, h.err())
 }
 
@@ -96,6 +100,51 @@ func TestRunLeavesBoundSecretUnresolvedWithoutOnly(t *testing.T) {
 	}
 	if !contains(h.exec.env, "OTHER=othervalue") {
 		t.Error("the unbound secret should still resolve")
+	}
+	// One line says why, so a command that fails on cap://tok is not a mystery.
+	if !strings.Contains(h.err(), "TOKEN stays cap://tok") || !strings.Contains(h.err(), "/elsewhere/gh") {
+		t.Errorf("want one line saying TOKEN stays unresolved and where tok may go:\n%s", h.err())
+	}
+	if strings.Contains(h.err(), "OTHER") {
+		t.Errorf("the note names the unbound OTHER:\n%s", h.err())
+	}
+}
+
+// DYLD_INSERT_LIBRARIES makes the program load other code, which would get the
+// secret with it, so a bound secret does not go to a program started with any
+// DYLD_ variable set, even the one it is bound to.
+func TestRunWithholdsABoundSecretWhenDYLDIsSet(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok", "DYLD_INSERT_LIBRARIES=/tmp/x.dylib"}
+	h := newHarness(t, "", map[string]string{"tok": token}, env)
+	bindProgram(t, h, "tok", progPath(t, "printenv"))
+	if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "printenv", "TOKEN"}); code != 2 {
+		t.Fatalf("exit %d, want 2: %s", code, h.err())
+	}
+	if h.exec.calls != 0 || !strings.Contains(h.err(), "DYLD_INSERT_LIBRARIES") {
+		t.Errorf("want a refusal naming DYLD_INSERT_LIBRARIES; calls %d:\n%s", h.exec.calls, h.err())
+	}
+	speaksToTheReader(t, h.err())
+
+	h = newHarness(t, "", map[string]string{"tok": token}, env)
+	bindProgram(t, h, "tok", progPath(t, "printenv"))
+	if code := h.cli.Run([]string{"run", "--", "printenv"}); code != 0 {
+		t.Fatalf("without --only: exit %d: %s", code, h.err())
+	}
+	if !contains(h.exec.env, "TOKEN=cap://tok") || !strings.Contains(h.err(), "DYLD_INSERT_LIBRARIES") {
+		t.Errorf("want TOKEN left unresolved, saying why:\n%s", h.err())
+	}
+}
+
+// An unbound secret is untouched by DYLD_ variables: bindings change nothing for
+// a secret nobody bound.
+func TestRunIgnoresDYLDForAnUnboundSecret(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok", "DYLD_LIBRARY_PATH=/tmp/lib"}
+	h := newHarness(t, "", map[string]string{"tok": token}, env)
+	if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "printenv", "TOKEN"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err())
+	}
+	if !contains(h.exec.env, "TOKEN="+token) {
+		t.Error("an unbound secret should resolve whatever DYLD_ holds")
 	}
 }
 
@@ -190,8 +239,13 @@ func TestRunRefusesASecretBoundInAWayItDoesNotUnderstand(t *testing.T) {
 	if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "printenv", "TOKEN"}); code != 2 {
 		t.Fatalf("exit %d, want 2: %s", code, h.err())
 	}
-	if h.exec.calls != 0 || !strings.Contains(h.err(), "does not understand") {
-		t.Errorf("want a refusal naming the unknown binding; calls %d:\n%s", h.exec.calls, h.err())
+	if h.exec.calls != 0 || !strings.Contains(h.err(), "does not understand") || !strings.Contains(h.err(), "Update keyward") {
+		t.Errorf("want a refusal naming the unknown binding and the fix; calls %d:\n%s", h.exec.calls, h.err())
+	}
+	// unbind cannot remove a binding a newer keyward wrote: this one will not
+	// rewrite that vault.
+	if strings.Contains(h.err(), "unbind") {
+		t.Errorf("message suggests unbind, which cannot remove it:\n%s", h.err())
 	}
 	speaksToTheReader(t, h.err())
 }

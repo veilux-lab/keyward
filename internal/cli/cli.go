@@ -168,8 +168,8 @@ commands:
   copy <name>            put a secret on the clipboard for 30 seconds (asks first)
   ls                     list stored names
   rm <name>              remove a secret
-  bind | unbind <name>   limit where a secret may go, or undo it (asks first)
-  bindings               list secrets and where they may go
+  bind | unbind <name>   give a secret only to some programs, or undo it (asks first)
+  bindings               list bound secrets and where they may go
   doctor [file...]       check references, plaintext and exposed secrets, backups, and setup
   restore <file>...      put the values back into files (asks first)
   backups [rm|recover]   list, remove, or recover migrate's backups
@@ -183,7 +183,8 @@ commands:
 options:
   --dry-run              migrate, restore, uninstall: show what would change, and stop
   --force                add: replace an existing secret
-  --all                  backups rm: remove every backup
+  --all                  backups rm, unbind: remove every backup, or every binding
+  --program P            bind, unbind: a program the secret may go to
   --purge                uninstall: also delete the vault and its Keychain key
   --only VAR,...         run: resolve only these variables
   --no-mask              run: do not hide the values in the command's output
@@ -529,7 +530,7 @@ func (c *CLI) run(args []string) int {
 	}
 	// Bindings first: they limit which programs a secret may reach, which --only
 	// cannot, and a secret they leave unresolved is no value a script could leak.
-	keys, refusal, err := c.bindingResolveKeys(args, env, only)
+	keys, notes, refusal, err := c.bindingResolveKeys(args, env, only)
 	if err != nil {
 		return c.fail("keyward run: %v", err)
 	}
@@ -543,6 +544,12 @@ func (c *CLI) run(args []string) int {
 	if !allowCommandLine && c.refuseScript(args, resolve.Variables(env, keys)) {
 		c.refused = true
 		return exitUsage
+	}
+	if len(notes) > 0 {
+		// A command that fails on a cap:// reference should not leave you guessing.
+		stop := catchSIGPIPE()
+		fmt.Fprintln(c.Stderr, strings.Join(notes, "\n"))
+		stop()
 	}
 	result, err := resolve.New(c.Store).EnvOnly(env, keys)
 	if err != nil {
