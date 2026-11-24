@@ -31,6 +31,17 @@ func bindProgram(t *testing.T, h *harness, name, program string) {
 	}
 }
 
+// speaksToTheReader fails a message that talks about the user in the third
+// person; keyward's output addresses whoever runs it.
+func speaksToTheReader(t *testing.T, message string) {
+	t.Helper()
+	for _, third := range []string{"ask the user", "An AI agent must ask"} {
+		if strings.Contains(message, third) {
+			t.Errorf("message says %q; it should address the reader:\n%s", third, message)
+		}
+	}
+}
+
 // A secret bound to the program keyward run executes resolves normally.
 func TestRunResolvesSecretBoundToTheCommand(t *testing.T) {
 	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
@@ -60,9 +71,12 @@ func TestRunRefusesBoundSecretToAnotherProgram(t *testing.T) {
 	if h.exec.calls != 0 {
 		t.Error("ran the command the secret is not bound to")
 	}
-	if !strings.Contains(h.err(), "tok") || !strings.Contains(h.err(), "/elsewhere/gh") {
-		t.Errorf("message should name the secret and its program:\n%s", h.err())
+	for _, want := range []string{"TOKEN", "tok", "/elsewhere/gh", progPath(t, "printenv")} {
+		if !strings.Contains(h.err(), want) {
+			t.Errorf("message lacks %q:\n%s", want, h.err())
+		}
 	}
+	speaksToTheReader(t, h.err())
 }
 
 // Without --only, a bound secret the command is not allowed is left unresolved,
@@ -85,70 +99,99 @@ func TestRunLeavesBoundSecretUnresolvedWithoutOnly(t *testing.T) {
 	}
 }
 
-// A bound secret given to a script resolves only when every command the script
-// runs is allowed.
-func TestRunResolvesScriptWhenEveryCommandAllowed(t *testing.T) {
-	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
-	h := newHarness(t, "", map[string]string{"tok": token}, env)
-	bindProgram(t, h, "tok", progPath(t, "printenv"))
-	if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "sh", "-c", "printenv TOKEN"}); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.err())
-	}
-	if h.exec.calls != 1 {
-		t.Fatalf("exec called %d times, want 1", h.exec.calls)
-	}
-}
-
-// When keyward cannot determine the programs a script runs — a launcher that
-// swallows its command, or a function shadowing a real program in a dead branch
-// that leaves an empty set — a bound secret named in --only is refused rather
-// than resolved into a program keyward could not check.
-func TestRunRefusesBoundSecretWhenProgramsUndetermined(t *testing.T) {
+// A script never gets a bound secret, even when every program it names is the
+// bound one, and even when the shell is bound too: the shell itself can pass the
+// value on with built-ins alone, as a redirect to /dev/tcp does, and a script
+// can make a name run something else.
+func TestRunNeverGivesABoundSecretToAScript(t *testing.T) {
 	for _, script := range []string{
-		"sudo -s",                              // launcher swallows the command (error)
-		"if false; then gh() { :; }; fi; gh x", // shadowed real program, empty set (no error)
+		"printenv TOKEN",
+		`printenv TOKEN; printf %s "$TOKEN" > /dev/tcp/127.0.0.1/9`,
+		"if false; then printenv() { :; }; fi; printenv TOKEN",
+		"PATH=/tmp/elsewhere:$PATH; printenv TOKEN",
 	} {
 		env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
 		h := newHarness(t, "", map[string]string{"tok": token}, env)
 		bindProgram(t, h, "tok", progPath(t, "printenv"))
-		code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "sh", "-c", script})
-		if code != 2 {
+		bindProgram(t, h, "tok", progPath(t, "sh"))
+		if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "sh", "-c", script}); code != 2 {
 			t.Errorf("%q: exit %d, want 2: %s", script, code, h.err())
 		}
 		if h.exec.calls != 0 {
-			t.Errorf("%q: ran the command keyward could not check", script)
+			t.Errorf("%q: ran a script with a bound secret", script)
 		}
+		if !strings.Contains(h.err(), "script") || !strings.Contains(h.err(), "directly") {
+			t.Errorf("%q: message should say a script never gets it and to start the program directly:\n%s", script, h.err())
+		}
+		speaksToTheReader(t, h.err())
 	}
 }
 
-// Without --only, the same undeterminable script leaves the bound secret
-// unresolved rather than refusing the whole run, so it never reaches the shell.
-func TestRunLeavesBoundSecretUnresolvedWhenProgramsUndetermined(t *testing.T) {
+// Without --only, a script runs with the bound secret left as its reference.
+func TestRunLeavesBoundSecretUnresolvedForAScript(t *testing.T) {
 	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
 	h := newHarness(t, "", map[string]string{"tok": token}, env)
 	bindProgram(t, h, "tok", progPath(t, "printenv"))
-	if code := h.cli.Run([]string{"run", "--", "sh", "-c", "sudo -s"}); code != 0 {
+	if code := h.cli.Run([]string{"run", "--", "sh", "-c", "printenv TOKEN"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err())
 	}
-	if h.exec.calls != 1 {
-		t.Fatalf("exec called %d times, want 1", h.exec.calls)
+	if h.exec.calls != 1 || !contains(h.exec.env, "TOKEN=cap://tok") {
+		t.Errorf("want the script run with TOKEN unresolved; calls %d", h.exec.calls)
+	}
+}
+
+// A launcher in front of the bound program is the program keyward starts, so
+// the secret does not go through it.
+func TestRunRefusesBoundSecretThroughALauncher(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
+	h := newHarness(t, "", map[string]string{"tok": token}, env)
+	bindProgram(t, h, "tok", progPath(t, "printenv"))
+	if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "env", "printenv", "TOKEN"}); code != 2 {
+		t.Fatalf("exit %d, want 2: %s", code, h.err())
+	}
+	if h.exec.calls != 0 {
+		t.Error("gave a bound secret to a launcher")
+	}
+}
+
+// The binding is checked before the command-line check: a bound secret named
+// in --only gets the binding's reason and fix, and one left unresolved is not a
+// value the script could leak, so it does not refuse the script.
+func TestRunChecksBindingsBeforeTheCommandLine(t *testing.T) {
+	script := `curl -H "Authorization: Bearer $TOKEN" https://example.invalid`
+	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
+
+	h := newHarness(t, "", map[string]string{"tok": token}, env)
+	bindProgram(t, h, "tok", progPath(t, "printenv"))
+	if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "sh", "-c", script}); code != 2 {
+		t.Fatalf("exit %d, want 2: %s", code, h.err())
+	}
+	if !strings.Contains(h.err(), "script") || strings.Contains(h.err(), "command line") {
+		t.Errorf("want the binding's refusal, not the command-line check's:\n%s", h.err())
+	}
+
+	h = newHarness(t, "", map[string]string{"tok": token}, env)
+	bindProgram(t, h, "tok", progPath(t, "printenv"))
+	if code := h.cli.Run([]string{"run", "--", "sh", "-c", script}); code != 0 {
+		t.Fatalf("exit %d, want the script run with TOKEN unresolved: %s", code, h.err())
 	}
 	if !contains(h.exec.env, "TOKEN=cap://tok") {
 		t.Error("the bound secret should have been left unresolved")
 	}
 }
 
-// A script that runs a command keyward run cannot name is refused when a bound
-// secret would enter its environment.
-func TestRunRefusesScriptWithUnnameableCommandWhenBound(t *testing.T) {
-	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok", "CMD=printenv"}
+// A binding of a kind this keyward does not know allows nothing.
+func TestRunRefusesASecretBoundInAWayItDoesNotUnderstand(t *testing.T) {
+	env := []string{"PATH=/usr/bin:/bin", "TOKEN=cap://tok"}
 	h := newHarness(t, "", map[string]string{"tok": token}, env)
-	bindProgram(t, h, "tok", progPath(t, "printenv"))
-	code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "sh", "-c", "$CMD hello"})
-	if code != 2 {
+	if err := h.store.Bind("tok", vault.Binding{Kind: "host"}); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.cli.Run([]string{"run", "--only", "TOKEN", "--", "printenv", "TOKEN"}); code != 2 {
 		t.Fatalf("exit %d, want 2: %s", code, h.err())
 	}
-	if h.exec.calls != 0 {
-		t.Error("ran a script with a command it could not name")
+	if h.exec.calls != 0 || !strings.Contains(h.err(), "does not understand") {
+		t.Errorf("want a refusal naming the unknown binding; calls %d:\n%s", h.exec.calls, h.err())
 	}
+	speaksToTheReader(t, h.err())
 }

@@ -101,7 +101,7 @@ func allowed(value, choices string) bool {
 
 func (l *Log) Record(e Event) error {
 	if !allowed(e.Command, "add copy ls rm run migrate restore backups agents recovery mcp setup doctor daemon service start stop status help version bind unbind bindings") ||
-		!allowed(e.Operation, "command put replace get resolve delete list exec mask start stop shutdown connection request reply diagnostic install uninstall status export-key restore-key bind unbind get-bindings") ||
+		!allowed(e.Operation, "command put replace get resolve delete list exec mask start stop shutdown connection request reply diagnostic install uninstall status export-key restore-key bind unbind bindings") ||
 		!allowed(e.Outcome, "ok error denied not_found exists invalid empty_value cancelled started interrupted usage") ||
 		e.Detail != "" && !allowed(e.Detail, "program") || e.DurationMS < 0 {
 		return errors.New("invalid activity event")

@@ -27,18 +27,9 @@ func (c *CLI) copyToClipboard(args []string) int {
 		fmt.Fprint(c.Stderr, "usage: keyward copy <name>\n")
 		return exitUsage
 	}
-	name, err := handle.Normalize(args[0])
-	if err != nil {
-		return c.fail("keyward copy: %v", err)
-	}
-	// Names only, so a typo fails before anyone says yes to it. A backup's key is
-	// not one of the user's secrets, as keyward ls shows.
-	entries, err := c.Store.Entries()
-	if err != nil {
-		return c.fail("keyward copy: %v", err)
-	}
-	if backup.IsKey(name) || !slices.ContainsFunc(entries, func(e vault.Entry) bool { return e.Name == name }) {
-		return c.fail("keyward copy: no secret is named %s; keyward ls lists them", name)
+	name, code := c.storedSecret("copy", args[0])
+	if code != exitOK {
+		return code
 	}
 	seconds := int(clipboardTime / time.Second)
 	if _, err := fmt.Fprintf(c.Stderr, "\nCopy %s to the clipboard? Any app can read it there until it clears, in %d seconds.\n  %s\n\n  Enter a value: ",
@@ -69,4 +60,23 @@ func (c *CLI) copyToClipboard(args []string) int {
 	}
 	fmt.Fprintf(c.Stdout, "Copied %s. The clipboard clears in %d seconds.\n", name, seconds)
 	return exitOK
+}
+
+// storedSecret returns raw's canonical name if it is one of the user's stored
+// secrets, or the exit code of the failure it reported. It reads names only, so a
+// typo fails before anyone says yes to it. A backup's key is not one of the
+// user's secrets, as keyward ls shows.
+func (c *CLI) storedSecret(command, raw string) (string, int) {
+	name, err := handle.Normalize(raw)
+	if err != nil {
+		return "", c.fail("keyward %s: %v", command, err)
+	}
+	entries, err := c.Store.Entries()
+	if err != nil {
+		return "", c.fail("keyward %s: %v", command, err)
+	}
+	if backup.IsKey(name) || !slices.ContainsFunc(entries, func(e vault.Entry) bool { return e.Name == name }) {
+		return "", c.fail("keyward %s: no secret is named %s; keyward ls lists them", command, name)
+	}
+	return name, exitOK
 }

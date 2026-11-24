@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,137 +26,60 @@ func programPath(name string) (string, error) {
 	return filepath.Abs(found)
 }
 
-// bindingResolveKeys decides which referenced variables keyward run may resolve,
-// given where the command would send their values.
-//
-// It returns the variables to resolve, or a refusal message when a secret the
-// caller named with --only may not reach this command. A bound secret the
-// command is not allowed is left unresolved when --only was not given, so an
-// unrelated command keeps working; refused when it was, since the caller asked
-// for it here. keys is only (every reference when nil) when nothing is bound, so
-// a setup without bindings behaves exactly as before.
-func (c *CLI) bindingResolveKeys(args, env, only []string) (keys []string, refusal string, err error) {
-	candidates := resolve.Variables(env, only)
-	if len(candidates) == 0 || c.Binder == nil {
-		return only, "", nil
+// reaches reports whether a secret with these bindings may go to the command
+// argv starts: only to a bound program keyward run starts directly, never to a
+// shell's script, which can pass a value on in ways keyward cannot follow, as a
+// redirect to /dev/tcp does. A binding of a kind this keyward does not know
+// allows nothing.
+func reaches(bindings []vault.Binding, argv []string) bool {
+	if _, _, script := shell.Command(argv); script {
+		return false
 	}
-
-	type bound struct {
-		variable string
-		secret   string
-		bindings []vault.Binding
+	program := argv[0]
+	if p, err := programPath(program); err == nil {
+		program = p
 	}
-	var boundVars []bound
-	for _, v := range candidates {
-		secret, ok := referencedSecret(env, v)
-		if !ok {
-			continue // a malformed reference; resolve reports it
-		}
-		// Read through the binder, not the activity-wrapped store, so a check of
-		// where a secret may go is not logged as if the user listed secrets.
-		bs, err := c.Binder.GetBindings(secret)
-		if errors.Is(err, vault.ErrNotFound) {
-			continue // resolve reports a reference with nothing behind it
-		}
-		if err != nil {
-			return nil, "", err
-		}
-		if len(bs) > 0 {
-			boundVars = append(boundVars, bound{v, secret, bs})
-		}
-	}
-	if len(boundVars) == 0 {
-		return only, "", nil
-	}
-
-	targets, terr := c.targetPrograms(args)
-	// cannotCheck means keyward could not determine the programs this command runs:
-	// a command it cannot name, a script construct it cannot read, or an empty set
-	// (a launcher that consumed the command, or only builtins). Either way it must
-	// not guess the secret is safe — an empty set would otherwise be vacuously
-	// allowed, which is how a hidden program would receive a bound secret unchecked.
-	cannotCheck := terr != nil || len(targets) == 0
-
-	var exclude []string
-	for _, b := range boundVars {
-		if !cannotCheck && bindingAllows(b.bindings, targets) {
-			continue
-		}
-		if only != nil {
-			if cannotCheck {
-				return nil, cannotCheckRefusal(b.secret, terr), nil
-			}
-			return nil, refuseBinding(b.variable, b.secret, b.bindings, targets), nil
-		}
-		// Not named with --only: leave it unresolved rather than refuse the whole
-		// run, so an unrelated command keeps working.
-		exclude = append(exclude, b.variable)
-	}
-	if only != nil || len(exclude) == 0 {
-		return only, "", nil
-	}
-	keys = slices.DeleteFunc(resolve.Variables(env, nil), func(v string) bool { return slices.Contains(exclude, v) })
-	return keys, "", nil
-}
-
-// cannotCheckRefusal explains that a bound secret is withheld because keyward
-// could not confirm where this command would send it.
-func cannotCheckRefusal(secret string, terr error) string {
-	reason := "keyward could not identify any program it runs"
-	if terr != nil {
-		reason = terr.Error()
-	}
-	return fmt.Sprintf("keyward run: %s is bound, but %s, so keyward will not hand it over.\n"+
-		"  Run the bound program directly, not through a wrapper or script keyward cannot read.", secret, reason)
-}
-
-// targetPrograms is the set of programs the command would run, as absolute
-// paths. For a shell's script it is every external command the script runs; a
-// command keyward cannot name is an error. For anything else it is the one
-// program keyward run executes.
-func (c *CLI) targetPrograms(args []string) ([]string, error) {
-	if name, script, ok := shell.Command(args); ok {
-		names, err := shell.Programs(name, script)
-		if err != nil {
-			return nil, err
-		}
-		paths := make([]string, 0, len(names))
-		for _, n := range names {
-			// A program not found on PATH cannot match any binding; keep the name
-			// so it fails the check rather than passing silently.
-			if p, err := programPath(n); err == nil {
-				paths = append(paths, p)
-			} else {
-				paths = append(paths, n)
-			}
-		}
-		return paths, nil
-	}
-	p, err := programPath(args[0])
-	if err != nil {
-		return nil, err
-	}
-	return []string{p}, nil
-}
-
-// bindingAllows reports whether a secret with these bindings may reach every one
-// of targets. An unknown binding kind allows nothing, so it fails closed.
-func bindingAllows(bindings []vault.Binding, targets []string) bool {
-	allowed := make(map[string]bool, len(bindings))
+	allowed := false
 	for _, b := range bindings {
 		if !b.Known() {
 			return false
 		}
-		if b.Kind == vault.BindingProgram {
-			allowed[b.Program] = true
-		}
+		allowed = allowed || b.Program == program
 	}
-	for _, t := range targets {
-		if !allowed[t] {
-			return false
-		}
+	return allowed
+}
+
+// bindingResolveKeys decides which referenced variables keyward run may resolve
+// for args. A bound secret the command may not have is refused when --only names
+// it, since the caller asked for it here, and otherwise left unresolved, so an
+// unrelated command keeps working. With nothing bound it returns only, so a
+// setup without bindings behaves as before.
+func (c *CLI) bindingResolveKeys(args, env, only []string) (keys []string, refusal string, err error) {
+	vars := resolve.Variables(env, only)
+	if len(vars) == 0 || c.Binder == nil {
+		return only, "", nil
 	}
-	return true
+	// One request for all of them, through the binder rather than the activity-
+	// wrapped store, so checking where secrets may go is not logged as a list.
+	all, err := c.Binder.Bindings()
+	if err != nil {
+		return nil, "", err
+	}
+	var exclude []string
+	for _, v := range vars {
+		secret, ok := referencedSecret(env, v)
+		if !ok || len(all[secret]) == 0 || reaches(all[secret], args) {
+			continue // a malformed reference, which resolve reports, or one free to go
+		}
+		if only != nil {
+			return nil, refuseBinding(v, secret, all[secret], args), nil
+		}
+		exclude = append(exclude, v)
+	}
+	if len(exclude) == 0 {
+		return only, "", nil
+	}
+	return slices.DeleteFunc(resolve.Variables(env, nil), func(v string) bool { return slices.Contains(exclude, v) }), "", nil
 }
 
 // referencedSecret returns the secret name that env sets key to, if key holds a
@@ -176,33 +99,32 @@ func referencedSecret(env []string, key string) (string, bool) {
 	return "", false
 }
 
-// refuseBinding says why a bound secret may not reach this command, naming the
-// secret, where it may go, and the program that runs here.
-func refuseBinding(variable, secret string, bindings []vault.Binding, targets []string) string {
+// refuseBinding says why variable's secret may not go to the command argv
+// starts, and how to run the program it is bound to instead.
+func refuseBinding(variable, secret string, bindings []vault.Binding, argv []string) string {
 	var programs []string
 	for _, b := range bindings {
-		if b.Kind == vault.BindingProgram {
-			programs = append(programs, b.Program)
+		if !b.Known() {
+			return fmt.Sprintf("keyward run: %s holds %s, which is bound in a way this keyward does not understand, so it goes to no program.\n"+
+				"  Update keyward, or remove the binding yourself in a terminal: keyward unbind %s --all", variable, secret, secret)
 		}
+		programs = append(programs, b.Program)
 	}
-	var blocked []string
-	for _, t := range targets {
-		if !slices.Contains(programs, t) {
-			blocked = append(blocked, t)
+	where := strings.Join(programs, ", ")
+	if _, _, script := shell.Command(argv); script {
+		message := fmt.Sprintf("keyward run: %s holds %s, which goes only to %s, never to a script.\n"+
+			"  Start %s directly, one call per keyward run, with loops, pipes and redirects outside it.",
+			variable, secret, where, path.Base(programs[0]))
+		if slices.ContainsFunc(programs, func(p string) bool { return path.Base(p) == "curl" }) {
+			message += fmt.Sprintf("\n  curl 8.3 or later reads the value itself: curl --variable %%%s --expand-header 'Authorization: Bearer {{%s}}' URL", variable, variable)
 		}
+		return message
 	}
-	// No blocked program but still not allowed means a binding kind this keyward
-	// does not understand, which allows nothing. (Phase 1 writes none of these.)
-	if len(blocked) == 0 {
-		return fmt.Sprintf("keyward run: %s is bound to %s in a way this keyward does not understand, so it may go nowhere.\n"+
-			"  Update keyward, or remove the binding in a terminal: keyward unbind %s --all", variable, secret, secret)
+	program := argv[0]
+	if p, err := programPath(program); err == nil {
+		program = p
 	}
-	where := "nothing"
-	if len(programs) > 0 {
-		where = "only " + strings.Join(programs, ", ")
-	}
-	return fmt.Sprintf("keyward run: %s is bound to %s, which may go to %s, but this command runs %s.\n"+
-		"  To allow it, bind the secret to that program in a terminal: keyward bind %s --program %s\n"+
-		"  An AI agent must not run keyward bind; ask the user to.",
-		variable, secret, where, strings.Join(blocked, ", "), secret, strings.Join(blocked, " --program "))
+	return fmt.Sprintf("keyward run: %s holds %s, which goes only to %s, not to %s.\n"+
+		"  Start %s directly. To let another program have it, bind that one yourself in a terminal: keyward bind %s --program PROGRAM",
+		variable, secret, where, program, path.Base(programs[0]), secret)
 }

@@ -36,8 +36,8 @@ type response struct {
 	Changed bool `json:"changed,omitempty"`
 	// Exposures answers exposures, by secret name and process.
 	Exposures []exposure.Exposure `json:"exposures,omitempty"`
-	// Bindings answers get-bindings.
-	Bindings []vault.Binding `json:"bindings,omitempty"`
+	// Bindings answers bindings: each bound secret's bindings, by name.
+	Bindings map[string][]vault.Binding `json:"bindings,omitempty"`
 
 	// Code is empty on success. Message carries the error text, which by the
 	// Store contract never contains a value.

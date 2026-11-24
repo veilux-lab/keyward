@@ -4,9 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
-	"github.com/veilux-lab/keyward/internal/handle"
+	"github.com/veilux-lab/keyward/internal/doctor"
+	"github.com/veilux-lab/keyward/internal/mcpconfig"
 	"github.com/veilux-lab/keyward/internal/vault"
 )
 
@@ -41,9 +43,9 @@ func (c *CLI) bind(args []string) int {
 	if c.refuseNonTerminal("bind") {
 		return exitUsage
 	}
-	name, err := handle.Normalize(names[0])
-	if err != nil {
-		return c.fail("keyward bind: %v", err)
+	name, code := c.storedSecret("bind", names[0])
+	if code != exitOK {
+		return code
 	}
 	// Resolve the programs before asking, so the prompt shows the exact paths
 	// that will be stored, and a typo fails before anyone says yes.
@@ -55,10 +57,11 @@ func (c *CLI) bind(args []string) int {
 		}
 		bindings = append(bindings, vault.Binding{Kind: vault.BindingProgram, Program: abs})
 	}
-	// The secret must exist before anyone confirms binding it.
-	if _, err := c.Binder.GetBindings(name); err != nil {
+	current, err := c.bindingsOf(name)
+	if err != nil {
 		return c.fail("keyward bind: %v", err)
 	}
+	c.warnStoppedServers(name, append(slices.Clone(current), bindings...))
 	if code := c.confirmBindingChange("bind", name); code != exitOK {
 		return code
 	}
@@ -67,14 +70,84 @@ func (c *CLI) bind(args []string) int {
 			return c.fail("keyward bind: %v", err)
 		}
 	}
-	// Report the whole allowlist, not just what this call added, so an already
-	// bound secret is not misstated as reachable by fewer programs than it is.
-	current, err := c.Binder.GetBindings(name)
+	// The whole list, not just what this call added, which a secret already bound
+	// would understate.
+	after, err := c.bindingsOf(name)
 	if err != nil {
 		return c.fail("keyward bind: %v", err)
 	}
-	fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(current), ", "))
+	fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(after), ", "))
 	return exitOK
+}
+
+// unbind removes bindings: --all removes every one, leaving the secret free to
+// go to any program; --program removes those named. It needs a terminal and a
+// "yes", since removing a binding widens where a secret may go.
+func (c *CLI) unbind(args []string) int {
+	fs := flag.NewFlagSet("unbind", flag.ContinueOnError)
+	fs.SetOutput(c.Stderr)
+	var programs programList
+	all := fs.Bool("all", false, "remove every binding")
+	fs.Var(&programs, "program", "a program binding to remove (repeatable)")
+	names, err := parse(fs, args)
+	if err != nil {
+		return exitUsage
+	}
+	if len(names) != 1 || *all == (len(programs) > 0) {
+		fmt.Fprint(c.Stderr, "usage: keyward unbind <name> (--program <program> ... | --all)\n")
+		return exitUsage
+	}
+	if c.Binder == nil {
+		return c.fail("keyward unbind: unavailable without the keyward daemon")
+	}
+	if c.refuseNonTerminal("unbind") {
+		return exitUsage
+	}
+	name, code := c.storedSecret("unbind", names[0])
+	if code != exitOK {
+		return code
+	}
+	current, err := c.bindingsOf(name)
+	if err != nil {
+		return c.fail("keyward unbind: %v", err)
+	}
+	remove := current
+	if !*all {
+		remove = nil
+		for _, p := range programs {
+			if b := (vault.Binding{Kind: vault.BindingProgram, Program: unbindPath(p)}); slices.Contains(current, b) {
+				remove = append(remove, b)
+			}
+		}
+	}
+	if len(remove) == 0 {
+		return c.cancel(fmt.Sprintf("keyward unbind: %s has none of those bindings; keyward bindings lists them.", name))
+	}
+	if code := c.confirmBindingChange("unbind", name); code != exitOK {
+		return code
+	}
+	for _, b := range remove {
+		if err := c.Binder.Unbind(name, b); err != nil {
+			return c.fail("keyward unbind: %v", err)
+		}
+	}
+	// What is left, which a secret with other bindings still has.
+	left, err := c.bindingsOf(name)
+	switch {
+	case err != nil:
+		fmt.Fprintf(c.Stdout, "Removed. keyward bindings lists what %s has left.\n", name)
+	case len(left) == 0:
+		fmt.Fprintf(c.Stdout, "%s is no longer bound; it may be given to any program again.\n", name)
+	default:
+		fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(programNames(left), ", "))
+	}
+	return exitOK
+}
+
+// bindingsOf returns name's bindings, none if it may go to any program.
+func (c *CLI) bindingsOf(name string) ([]vault.Binding, error) {
+	all, err := c.Binder.Bindings()
+	return all[name], err
 }
 
 // programNames lists the program paths of bindings, for a message.
@@ -86,77 +159,6 @@ func programNames(bindings []vault.Binding) []string {
 		}
 	}
 	return out
-}
-
-// unbind removes bindings. --all removes every one, leaving the secret
-// unrestricted; otherwise it removes the named programs. It needs a terminal
-// and a "yes", since removing a binding widens where a secret may go.
-func (c *CLI) unbind(args []string) int {
-	fs := flag.NewFlagSet("unbind", flag.ContinueOnError)
-	fs.SetOutput(c.Stderr)
-	var programs programList
-	all := fs.Bool("all", false, "remove every binding")
-	fs.Var(&programs, "program", "a program binding to remove (repeatable)")
-	names, err := parse(fs, args)
-	if err != nil {
-		return exitUsage
-	}
-	if len(names) != 1 || (*all == (len(programs) > 0)) {
-		fmt.Fprint(c.Stderr, "usage: keyward unbind <name> (--program <program> ... | --all)\n")
-		return exitUsage
-	}
-	if c.Binder == nil {
-		return c.fail("keyward unbind: unavailable without the keyward daemon")
-	}
-	if c.refuseNonTerminal("unbind") {
-		return exitUsage
-	}
-	name, err := handle.Normalize(names[0])
-	if err != nil {
-		return c.fail("keyward unbind: %v", err)
-	}
-	current, err := c.Binder.GetBindings(name)
-	if err != nil {
-		return c.fail("keyward unbind: %v", err)
-	}
-	var remove []vault.Binding
-	if *all {
-		remove = current
-	} else {
-		for _, p := range programs {
-			remove = append(remove, vault.Binding{Kind: vault.BindingProgram, Program: unbindPath(p)})
-		}
-	}
-	if len(remove) == 0 {
-		return c.cancel(fmt.Sprintf("keyward unbind: %s has no bindings to remove.", name))
-	}
-	if code := c.confirmBindingChange("unbind", name); code != exitOK {
-		return code
-	}
-	for _, b := range remove {
-		if err := c.Binder.Unbind(name, b); err != nil {
-			return c.fail("keyward unbind: %v", err)
-		}
-	}
-	// Report the resulting state, not a bare "unbound": a secret may still have
-	// other bindings, and claiming it is unrestricted when it is not would mislead.
-	switch left := programNames(mustBindings(c, name)); {
-	case len(left) == 0:
-		fmt.Fprintf(c.Stdout, "%s is no longer bound; it may be given to any program again.\n", name)
-	default:
-		fmt.Fprintf(c.Stdout, "%s may now be given only to: %s\n", name, strings.Join(left, ", "))
-	}
-	return exitOK
-}
-
-// mustBindings reads name's bindings for a closing message, treating an error as
-// none rather than failing after the change has already been made.
-func mustBindings(c *CLI, name string) []vault.Binding {
-	bindings, err := c.Binder.GetBindings(name)
-	if err != nil {
-		return nil
-	}
-	return bindings
 }
 
 // unbindPath matches how bind stored a program: an absolute path is taken as
@@ -172,6 +174,27 @@ func unbindPath(p string) string {
 	return p
 }
 
+// warnStoppedServers names the MCP servers that get name through keyward run
+// but would not under bindings, as keyward run gives a bound secret only to a
+// bound program it starts directly, before anyone says yes to stopping them.
+func (c *CLI) warnStoppedServers(name string, bindings []vault.Binding) {
+	if c.Home == "" {
+		return
+	}
+	servers, _ := c.loadAll()
+	refs := mcpconfig.References(doctor.DefaultPaths(c.Home, c.Workdir))
+	var stopped []string
+	for _, w := range mcpconfig.WrappedServers(servers, refs) {
+		if slices.Contains(w.Secrets, name) && len(w.Command) > 0 && !reaches(bindings, w.Command) {
+			stopped = append(stopped, fmt.Sprintf("  %s (%s, %s)", w.Name, w.Client, c.tilde(w.Config)))
+		}
+	}
+	if len(stopped) > 0 {
+		fmt.Fprintln(c.Stderr, c.errs(yellow, "These MCP servers would stop getting "+name+", because keyward run starts them as a script or another program:\n"+
+			strings.Join(stopped, "\n")+"\n  Give each a secret of its own before you bind this one."))
+	}
+}
+
 // refuseNonTerminal refuses a binding change from an agent or a pipe, which must
 // not change where a secret may go; a change needs a terminal, as copy does.
 func (c *CLI) refuseNonTerminal(verb string) bool {
@@ -179,7 +202,7 @@ func (c *CLI) refuseNonTerminal(verb string) bool {
 		return false
 	}
 	c.refused = true
-	fmt.Fprintln(c.Stderr, c.errs(red, fmt.Sprintf("keyward %s: run it yourself in a terminal, not through an AI agent or a pipe. An AI agent must ask you to run it.", verb)))
+	fmt.Fprintln(c.Stderr, c.errs(red, fmt.Sprintf("keyward %s: run it yourself in a terminal, not through an AI agent or a pipe, so only you can change where a secret may go.", verb)))
 	return true
 }
 
@@ -220,10 +243,9 @@ func (c *CLI) bindings(args []string) int {
 		any = true
 		fmt.Fprintln(c.Stdout, e.Name)
 		for _, b := range e.Bindings {
-			switch {
-			case b.Kind == vault.BindingProgram:
+			if b.Known() {
 				fmt.Fprintf(c.Stdout, "    program  %s\n", b.Program)
-			default:
+			} else {
 				fmt.Fprintf(c.Stdout, "    %s  (this keyward does not understand this binding)\n", b.Kind)
 			}
 		}

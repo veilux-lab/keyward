@@ -225,28 +225,24 @@ func (e *Encrypted) Delete(name string) error {
 	return fmt.Errorf("vault delete %q: %w", key, ErrNotFound)
 }
 
-// GetBindings returns name's bindings, reading only metadata, so it never asks
-// for the key. A legacy item not yet moved in has no bindings.
-func (e *Encrypted) GetBindings(name string) ([]Binding, error) {
-	key, err := normalize(name)
-	if err != nil {
-		return nil, err
-	}
+// Bindings reads only the file's metadata, so it never asks for the key. A
+// legacy item not yet moved in has no bindings.
+func (e *Encrypted) Bindings() (map[string][]Binding, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	f, err := e.read()
 	if err != nil {
-		return nil, fmt.Errorf("vault bindings %q: %w", key, err)
+		return nil, fmt.Errorf("vault bindings: %w", err)
 	}
+	out := map[string][]Binding{}
 	if f != nil {
-		if entry, ok := f.Entries[key]; ok {
-			return entry.Bindings, nil
+		for name, entry := range f.Entries {
+			if len(entry.Bindings) > 0 {
+				out[name] = entry.Bindings
+			}
 		}
 	}
-	if e.legacyHas(key) {
-		return nil, nil
-	}
-	return nil, fmt.Errorf("vault bindings %q: %w", key, ErrNotFound)
+	return out, nil
 }
 
 // Bind adds a binding to name; Unbind removes one. Both re-seal the value, since

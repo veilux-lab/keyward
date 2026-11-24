@@ -78,32 +78,47 @@ what `trap` code writes.
 ## Bindings
 
 `--only` limits which secrets a command gets, but nothing limits where a secret
-goes once a command has it. A binding does: it says which programs a secret may
+goes once a command has it. A binding does: it names the programs a secret may
 reach, and `keyward run` enforces it.
 
-Bind a secret to a program with `keyward bind NAME --program gh`, repeating
-`--program` for more than one. `keyward unbind NAME --program gh`, or
-`--all`, removes bindings; `keyward bindings` lists them without values.
-Changing a binding needs a terminal and a typed "yes", so an agent or a pipe
-cannot change where a secret may go; the agent guide tells agents never to run
-`bind` or `unbind`.
+Bind a secret with `keyward bind NAME --program gh`, repeating `--program` for
+more than one. `keyward unbind NAME --program gh`, or `--all`, removes bindings,
+and `keyward bindings` lists them without values. Changing a binding needs a
+terminal and a typed "yes", so an agent or a pipe cannot change where a secret
+may go; the agent guide tells agents never to run `bind` or `unbind`.
 
-When `keyward run` resolves a bound secret, it checks the program it is about to
-run against the binding:
+`keyward run` gives a bound secret only to a program it starts directly whose
+path the secret is bound to:
 
 - The program is matched by the absolute path your `PATH` finds when you bind it,
   without following symlinks. A fake `gh` earlier on `PATH` does not match
   `/opt/homebrew/bin/gh`, and matching the path rather than the Cellar target
   keeps the binding working across Homebrew upgrades.
+- A `sh -c` script never gets a bound secret, whatever programs it names, even
+  when the shell itself is bound. The shell can pass the value on with built-ins
+  alone, as a redirect to `/dev/tcp` does, and a script can make a program's name
+  run something else, by changing `PATH` or defining a function. A launcher such
+  as `env`, `sudo` or `xargs` is the program `keyward run` starts, so it does not
+  get the secret either.
 - A bound secret named in `--only` that the command may not have is refused,
-  naming the secret and where it may go. One not named in `--only` is left
-  unresolved instead, so `keyward run -- npm test` keeps working when an unrelated
+  naming the secret and where it may go. One not named in `--only` is left as its
+  `cap://` reference, so `keyward run -- npm test` keeps working when an unrelated
   bound secret is in the environment.
-- For a `sh -c` script, every external command the script runs must be allowed,
-  since each inherits the secret from the environment. Launchers such as `sudo`
-  and `env`, and nested shells, are transparent — the program after them is the
-  one checked. A command the script names only as it runs, such as `$CMD` or
-  `eval`'s code, cannot be checked and is refused.
+
+So start the bound program itself, one call per `keyward run`, with loops, pipes
+and redirects outside it; output that reaches a pipe or a file is still masked.
+For a tool that seeks in its output, use its own output option, as
+`pg_dump -Fc -f db.dump db`. curl 8.3 or later can read a value itself, with no
+script:
+`keyward run --only API_TOKEN -- curl -sS --variable %API_TOKEN --expand-header 'Authorization: Bearer {{API_TOKEN}}' URL`.
+
+Bind a token whose program sends it only where it belongs, as `gh` sends
+`GITHUB_TOKEN` only to GitHub. Bound to curl, a shell, an interpreter such as
+`python3`, `npx` or a launcher, a secret can still go anywhere that program
+reaches. An MCP server that gets a secret through `keyward run` stops getting it
+once the secret is bound, unless `keyward run` starts the server as a bound
+program: `keyward bind` names such servers before it asks, so give each its own
+secret first.
 
 A binding is part of the value's seal: the associated data that AES-GCM
 authenticates is the secret's name together with its canonical bindings. Editing
@@ -111,13 +126,13 @@ or removing a binding in the vault file by hand therefore makes the value fail t
 decrypt, rather than quietly unbinding it. The vault file stays version 1 until
 the first binding is set and returns to version 1 when the last is removed, so an
 older keyward still reads a vault with no bindings. A binding of a kind this
-keyward does not understand — a host or MCP-server binding written by a later
-version — allows no program, failing closed.
+keyward does not understand, written by a later version, allows no program.
 
 This stops a mistaken or tricked `keyward run` from handing a secret to a program
 of an attacker's choosing even though the agent never sees the value. It does not
 stop a program the secret is bound to from doing what it likes with it, nor
-malware running as you, which can read the vault key and bind a program itself.
+malware running as you, which can replace a bound program, as Homebrew's folders
+are writable by you, or ask the daemon for a value directly.
 
 ## MCP servers
 

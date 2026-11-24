@@ -428,11 +428,42 @@ func Run(t *testing.T, newStore func(t *testing.T) vault.Store) {
 		if err := b.Unbind(name, curl); err != nil {
 			t.Fatalf("Unbind last: %v", err)
 		}
-		if got, err := b.GetBindings(name); err != nil || got != nil {
-			t.Errorf("GetBindings after removing the last = %v, %v, want nil", got, err)
+		all, err := b.Bindings()
+		if err != nil {
+			t.Fatalf("Bindings: %v", err)
+		}
+		if got, ok := all[name]; ok {
+			t.Errorf("Bindings after removing the last holds %v, want the secret absent", got)
 		}
 		if got, err := s.Get(name); err != nil || string(got.Bytes()) != "v" {
 			t.Fatalf("Get after Unbind = %q, %v, want the stored value", got.Bytes(), err)
+		}
+	})
+
+	// keyward run reads every binding in one request, so a run that resolves many
+	// references costs one lookup, not one per secret.
+	t.Run("BindingsListsOnlyBoundSecrets", func(t *testing.T) {
+		s := newStore(t)
+		b := binder(t, s)
+		bound, free := reserve(t, s, "listed-bound"), reserve(t, s, "listed-free")
+		for _, name := range []string{bound, free} {
+			if err := s.Put(name, vault.NewSecret([]byte("v")), ""); err != nil {
+				t.Fatalf("Put %s: %v", name, err)
+			}
+		}
+		gh := vault.Binding{Kind: vault.BindingProgram, Program: "/usr/bin/gh"}
+		if err := b.Bind(bound, gh); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		all, err := b.Bindings()
+		if err != nil {
+			t.Fatalf("Bindings: %v", err)
+		}
+		if got := all[bound]; len(got) != 1 || got[0] != gh {
+			t.Errorf("Bindings()[%s] = %v, want [%v]", bound, got, gh)
+		}
+		if got, ok := all[free]; ok {
+			t.Errorf("Bindings() lists the unbound %s as %v", free, got)
 		}
 	})
 

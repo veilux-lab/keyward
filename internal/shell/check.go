@@ -586,12 +586,6 @@ type checker struct {
 	resolved  map[string]taint          // the variables keyward run resolves
 	mentioned bool                      // the script names a resolved variable, as a word
 	kept      bool                      // the command read may be exec with only redirections, which last
-
-	// collecting turns the walk into Programs: it records the external programs
-	// the script runs rather than following values, and treats anything it
-	// cannot read or name as an error, so an unknown command fails closed.
-	collecting bool
-	programs   map[string]bool
 }
 
 // spend counts n steps of work, and reports whether the check may go on.
@@ -605,7 +599,7 @@ func (c *checker) spend(n int) bool {
 // a check that stopped early cannot know where its value went, or text names
 // one that holds a value.
 func (c *checker) cannotRead(p *process, text string, why unreadable) {
-	if c.err == nil && (c.collecting || c.mentioned || p.names(text)) {
+	if c.err == nil && (c.mentioned || p.names(text)) {
 		c.err = why
 	}
 }
@@ -1523,15 +1517,6 @@ func (c *checker) named(p *process, name string, args []arg, env map[string]tain
 	case "trap":
 		c.trap(p, rest)
 		return nil
-	case ".", "source":
-		// source runs a script from a file in the current shell, inheriting the
-		// environment. The value check treats that as a known gap (docs/details),
-		// but Programs cannot let it pass: the file may run any program with the
-		// secret, so collecting refuses rather than record nothing.
-		if c.collecting && len(rest) > 0 {
-			c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: %s runs a script from a file keyward cannot read", args[0].word.Pos().Line(), name), toWrite})
-		}
-		return nil
 	case "noglob", "nocorrect":
 		if len(rest) > 0 {
 			return c.run(p, rest, env, in)
@@ -1702,12 +1687,6 @@ func (c *checker) builtin(p *process, name string, args []arg, in stream) taint 
 		}
 	case "mapfile", "readarray":
 		names, values := operands(rest, "CcdnOsu")
-		// bash evaluates -C CALLBACK as shell code while reading, so it can run a
-		// program with the secret; collecting refuses what it cannot follow.
-		if cb, ok := values['C']; c.collecting && ok && cb != "" {
-			c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: %s runs its -C callback as code keyward cannot read", args[0].word.Pos().Line(), name), toWrite})
-			return nil
-		}
 		t := in.taint
 		if fd, err := strconv.Atoi(values['u']); err == nil {
 			t = t.union(p.fds[fd])
@@ -1716,15 +1695,6 @@ func (c *checker) builtin(p *process, name string, args []arg, in stream) taint 
 			names = []string{"MAPFILE"}
 		}
 		p.assign(names[0], t)
-	case "compgen":
-		// compgen -C CMD / -F FUNC runs a command or function to generate
-		// completions, so it can run a program with the secret; collecting refuses.
-		if c.collecting {
-			_, values := operands(rest, "ABCFGWXPSo")
-			if values['C'] != "" || values['F'] != "" {
-				c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: compgen runs its -C/-F completion as code keyward cannot read", args[0].word.Pos().Line()), toWrite})
-			}
-		}
 	case "getopts":
 		// getopts copies the argument of an option it reads into OPTARG.
 		if len(rest) > 2 {
@@ -1990,14 +1960,6 @@ func (c *checker) program(p *process, args []arg, env map[string]taint, in strea
 		return nil
 	}
 	if l.at == len(args) {
-		if c.collecting && l.last != "" {
-			// Launchers consumed the whole command with no program left to run:
-			// either one this cannot name (env -S, sudo -s, sudo -i) or env alone
-			// exposing the environment. Collecting cannot confirm where the secret
-			// goes, so it refuses rather than record nothing and leave it unchecked.
-			c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: %s runs or exposes the environment in a way keyward cannot read", args[0].word.Pos().Line(), l.last), toName})
-			return nil
-		}
 		if l.last == "env" {
 			return joinedEnv(environ()) // env alone prints its environment
 		}
@@ -2005,20 +1967,11 @@ func (c *checker) program(p *process, args []arg, env map[string]taint, in strea
 	}
 	prog := args[l.at]
 	if !prog.isLit {
-		// A name made as the script runs cannot be checked against bindings.
-		if c.collecting {
-			c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: a command named as the script runs cannot be named", prog.word.Pos().Line()), toName})
-		}
 		return nil
 	}
 	name := path.Base(prog.lit)
 	if shells[name] {
 		return c.nested(p, args[l.at:], environ(), in)
-	}
-	if c.collecting {
-		// A launcher (sudo, env) and a shell pass the environment through to the
-		// program after them, which is the one recorded; both are transparent.
-		c.programs[prog.lit] = true
 	}
 	for i, a := range args[l.at+1:] {
 		// A shell given a script among another program's words, as in
@@ -2113,13 +2066,6 @@ func (c *checker) nested(p *process, args []arg, env map[string]taint, in stream
 		c.report(in.taint, shell, true, args[0].word, args[0].word, adviceFor(use{program: shell, vars: in.taint.names()}))
 	case fromStdin && in.literal:
 		return c.script(child, in.text, in.line, stream{})
-	}
-	// Reached when the inner shell's script could not be followed to a known set
-	// of programs: a non-literal -c argument, a bare shell, or one reading its
-	// script from a pipe or a file. Collecting cannot let that pass — the shell
-	// may run any program with the secret — so it refuses, as eval does.
-	if c.collecting {
-		c.cannotRead(p, "", unreadable{fmt.Sprintf("line %d: %s runs a script keyward cannot read", args[0].word.Pos().Line(), shell), toWrite})
 	}
 	return nil
 }
@@ -2574,11 +2520,11 @@ var (
 		"nice":       {short: "n", long: []string{"adjustment"}},
 		"nohup":      {},
 		"stdbuf":     {short: "ioe", long: []string{"input", "output", "error"}},
-		"sudo":       {short: "ugpCDhrtTUR", long: []string{"user", "group", "prompt", "close-from", "chdir", "chroot", "host", "role", "type", "command-timeout", "other-user"}},
+		"sudo":       {short: "ugpCDhrtTU", long: []string{"user", "group", "prompt", "close-from", "chdir", "host", "role", "type", "command-timeout", "other-user"}},
 		"time":       {short: "fo", long: []string{"format", "output"}},
 		"timeout":    {short: "ks", long: []string{"kill-after", "signal"}},
 		"watch":      {short: "nq", long: []string{"interval", "equexit"}},
-		"xargs":      {short: "aEdIJLnPRsS", long: []string{"arg-file", "delimiter", "max-lines", "max-args", "max-procs", "max-chars"}},
+		"xargs":      {short: "aEdIJLnPRs", long: []string{"arg-file", "delimiter", "max-lines", "max-args", "max-procs", "max-chars"}},
 	}
 
 	// transformers are programs whose output is made of their input, so it holds

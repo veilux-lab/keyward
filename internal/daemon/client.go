@@ -103,9 +103,15 @@ func (c *Client) Unbind(name string, binding vault.Binding) error {
 	return err
 }
 
-func (c *Client) GetBindings(name string) ([]vault.Binding, error) {
-	resp, err := c.do(request{Op: "get-bindings", Name: name})
-	return resp.Bindings, err
+func (c *Client) Bindings() (map[string][]vault.Binding, error) {
+	resp, err := c.do(request{Op: "bindings"})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Bindings == nil {
+		return map[string][]vault.Binding{}, nil // omitted on the wire when nothing is bound
+	}
+	return resp.Bindings, nil
 }
 
 // ExportKey returns the vault key, for a recovery code.

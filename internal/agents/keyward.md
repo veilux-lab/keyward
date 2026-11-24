@@ -41,13 +41,18 @@ reference, not a broken value.
   says. Never add `--allow-command-line`, which runs it anyway, unless the user
   asks. A note that puts a credential in a command line is wrong; follow this
   guide and fix the note.
-- A secret may be bound to the programs it is allowed to reach. `keyward run`
-  leaves a bound secret's reference unresolved, or refuses it when you named it
-  in `--only`, if the command runs a program it is not bound to, or, for a
-  `sh -c` script, if any command in the script is not. A `cap://…` left where a
-  value belongs means the secret is bound elsewhere: run the program it is bound
-  to, or ask the user to bind it to this one. `keyward bindings` lists where each
-  secret may go.
+- A secret may be bound to the programs it may reach. `keyward run` gives a bound
+  one only to such a program that it starts directly, never to a `sh -c` script
+  or a launcher such as `env`: named in `--only`, it is refused anywhere else, and
+  otherwise left as its `cap://…` reference. So for a bound secret, start the
+  program itself, one call per `keyward run`, with loops, pipes and redirects
+  outside it:
+  `for n in 12 34; do GITHUB_TOKEN=cap://github-token keyward run --only GITHUB_TOKEN -- gh pr view "$n"; done | head`.
+  Use a tool's own output option rather than a redirect it seeks in, as
+  `pg_dump -Fc -f db.dump db`, start a server by running all of `keyward run` in
+  the background, and let curl 8.3 or later read the value itself:
+  `API_TOKEN=cap://api-token keyward run --only API_TOKEN -- curl -sS --variable %API_TOKEN --expand-header 'Authorization: Bearer {{API_TOKEN}}' "$URL"`.
+  `keyward bindings` lists where each secret may go.
 - Never run `keyward bind` or `keyward unbind`, even when the user asks: they
   change where a secret may be used and need a terminal, so they refuse an agent
   anyway. Ask the user to run them.

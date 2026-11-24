@@ -145,7 +145,7 @@ func (s *Server) handle(conn net.Conn) {
 		op = "status"
 	case "entries":
 		op = "list"
-	case "get", "put", "replace", "delete", "export-key", "restore-key", "exposures", "bind", "unbind", "get-bindings":
+	case "get", "put", "replace", "delete", "export-key", "restore-key", "exposures", "bind", "unbind", "bindings":
 	default:
 		op = "request"
 	}
@@ -190,15 +190,15 @@ func (s *Server) dispatch(req request) response {
 		if entries, err = s.Store.Entries(); err == nil {
 			return response{Entries: entries}
 		}
-	case "bind", "unbind", "get-bindings":
+	case "bind", "unbind", "bindings":
 		binder, ok := s.Store.(vault.Binder)
 		if !ok {
 			err = errors.New("this daemon's store does not hold bindings")
 			break
 		}
-		if req.Op == "get-bindings" {
-			var bindings []vault.Binding
-			if bindings, err = binder.GetBindings(req.Name); err == nil {
+		if req.Op == "bindings" {
+			var bindings map[string][]vault.Binding
+			if bindings, err = binder.Bindings(); err == nil {
 				return response{Bindings: bindings}
 			}
 			break

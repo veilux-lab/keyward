@@ -467,10 +467,14 @@ func (c *CLI) daemon(args []string) int {
 // parent and hides the resolved values in that output, unless --no-mask, or no
 // value it resolved is worth hiding.
 //
+// A secret bound to programs goes only to one of them that it starts directly,
+// never to a script: named in --only, it is refused anywhere else; otherwise it
+// is left unresolved.
+//
 // Before resolving, unless --allow-command-line, it refuses a shell's script, as
-// in sh -c SCRIPT, that would put one of those values in another program's
-// command line, where other programs and security logs can read it. The check
-// needs only the variables' names, so a refused command never reads the vault.
+// in sh -c SCRIPT, that would put one of the values it resolves in another
+// program's command line, where other programs and security logs can read it.
+// Both checks need only names, so a refused command never reads a value.
 //
 // Resolution happens before anything is executed. If any reference fails, nothing
 // runs — a command started with a literal cap:// value where a credential belongs
@@ -523,18 +527,21 @@ func (c *CLI) run(args []string) int {
 			return exitUsage
 		}
 	}
-	if !allowCommandLine && c.refuseScript(args, resolve.Variables(env, only)) {
-		c.refused = true
-		return exitUsage
-	}
-	// Bindings limit which programs a secret may reach, which --only cannot.
+	// Bindings first: they limit which programs a secret may reach, which --only
+	// cannot, and a secret they leave unresolved is no value a script could leak.
 	keys, refusal, err := c.bindingResolveKeys(args, env, only)
 	if err != nil {
 		return c.fail("keyward run: %v", err)
 	}
 	if refusal != "" {
 		c.refused = true
+		stop := catchSIGPIPE() // Run records the refusal after this write
 		fmt.Fprintln(c.Stderr, refusal)
+		stop()
+		return exitUsage
+	}
+	if !allowCommandLine && c.refuseScript(args, resolve.Variables(env, keys)) {
+		c.refused = true
 		return exitUsage
 	}
 	result, err := resolve.New(c.Store).EnvOnly(env, keys)

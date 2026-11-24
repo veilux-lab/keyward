@@ -36,7 +36,7 @@ keyward migrate --dry-run ~/.zshrc        # preview; hides values and token-like
 keyward migrate ~/.zshrc                  # move a file's secrets; asks for "yes"
 keyward run --only API_TOKEN -- npm test  # run a command with the values it names
 keyward ls                                # stored names
-keyward bind api-token --program curl     # limit where a secret may go; asks for "yes"
+keyward bind github-token --program gh    # give a secret only to gh; asks for "yes"
 keyward bindings                          # where each secret may go
 keyward copy api-token                    # put a value on the clipboard; asks for "yes"
 keyward doctor                            # check your setup
@@ -60,15 +60,16 @@ keyward help                              # commands and options
   `printf` is built into the shell, so it has no command line of its own.
   `--allow-command-line` runs the script anyway.
 - `--only` limits which secrets a command gets, but not where they go. Bind a
-  secret to the programs it may reach: `keyward bind github-token --program gh`.
-  Then `keyward run` gives it only to `gh` — leaving the `cap://` reference
-  unresolved for any other command, or refusing it when you named it in `--only`
-  — and hands it to a `sh -c` script only when every command the script runs is
-  bound. `keyward unbind` removes a binding; `keyward bindings` lists them.
-  Changing a binding runs only in a terminal, like `keyward copy`. This stops a
-  tricked agent from sending a secret somewhere of its choosing even though it
-  never sees the value; it cannot stop a program the secret is bound to from
-  misusing it. See [bindings](docs/details.md#bindings).
+  secret to the program that should use it, `keyward bind github-token --program gh`,
+  and `keyward run` gives it only to `gh` started directly, never to a `sh -c`
+  script, which could pass it on, or to any other program. Named in `--only`
+  anywhere else, it is refused; otherwise it is left as its `cap://` reference.
+  `keyward bindings` lists bindings. `keyward bind` and `keyward unbind` need a
+  terminal and a typed "yes", like `keyward copy`, and `bind` first names any MCP
+  server that uses the secret and would stop getting it. Bind a token whose
+  program sends it only where it belongs, as `gh` does: bound to curl, a shell,
+  `python3`, `npx` or `env`, it can still go anywhere they reach. See
+  [bindings](docs/details.md#bindings).
 - When a command's output goes to an agent, a pipe or a file rather than a
   terminal, `keyward run` shows `cap://name#masked` in place of each value it gave
   the command, also when JSON-, URL- or base64-encoded, and says so. A program

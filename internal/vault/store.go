@@ -67,8 +67,10 @@ type Binder interface {
 	// not present; unbinding the last one leaves the secret unrestricted.
 	Unbind(name string, binding Binding) error
 
-	// GetBindings returns the bindings of name, or nil for unrestricted.
-	GetBindings(name string) ([]Binding, error)
+	// Bindings returns the bindings of every bound secret, by name; a secret not in
+	// it is unrestricted. One call, so keyward run reads them all in one request.
+	// It reads no value, so it never needs the vault key.
+	Bindings() (map[string][]Binding, error)
 }
 
 // Store holds secret values keyed by name.

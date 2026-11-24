@@ -138,18 +138,15 @@ func (s *Memory) rebind(name string, change func([]Binding) []Binding) error {
 	return nil
 }
 
-// GetBindings returns name's bindings, or nil for an unrestricted secret.
-func (s *Memory) GetBindings(name string) ([]Binding, error) {
-	key, err := normalize(name)
-	if err != nil {
-		return nil, err
-	}
+// Bindings implements Binder.
+func (s *Memory) Bindings() (map[string][]Binding, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if _, ok := s.m[key]; !ok {
-		return nil, fmt.Errorf("%q: %w", key, ErrNotFound)
+	out := make(map[string][]Binding, len(s.bindings))
+	for name, bindings := range s.bindings {
+		out[name] = slices.Clone(bindings)
 	}
-	return s.bindings[key], nil
+	return out, nil
 }
 
 // Entries implements Store.
