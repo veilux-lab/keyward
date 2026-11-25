@@ -45,7 +45,10 @@ type Client struct {
 	checked bool
 }
 
-var _ vault.Store = (*Client)(nil)
+var (
+	_ vault.Store  = (*Client)(nil)
+	_ vault.Binder = (*Client)(nil)
+)
 
 // Ping checks availability without reading any secret.
 func (c *Client) Ping() error {
@@ -88,6 +91,27 @@ func (c *Client) Delete(name string) error {
 func (c *Client) Entries() ([]vault.Entry, error) {
 	resp, err := c.do(request{Op: "entries"})
 	return resp.Entries, err
+}
+
+func (c *Client) Bind(name string, binding vault.Binding) error {
+	_, err := c.do(request{Op: "bind", Name: name, Binding: &binding})
+	return err
+}
+
+func (c *Client) Unbind(name string, binding vault.Binding) error {
+	_, err := c.do(request{Op: "unbind", Name: name, Binding: &binding})
+	return err
+}
+
+func (c *Client) Bindings() (map[string][]vault.Binding, error) {
+	resp, err := c.do(request{Op: "bindings"})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Bindings == nil {
+		return map[string][]vault.Binding{}, nil // omitted on the wire when nothing is bound
+	}
+	return resp.Bindings, nil
 }
 
 // ExportKey returns the vault key, for a recovery code.

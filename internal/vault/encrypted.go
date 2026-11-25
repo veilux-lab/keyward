@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"syscall"
@@ -72,8 +73,11 @@ func MoveLegacy(home, service string) error {
 }
 
 const (
-	masterKey    = "master"
-	vaultVersion = 1
+	masterKey = "master"
+	// A vault stays version 1 until its first binding is set, so an older keyward
+	// can still read it until then; once any entry is bound it becomes version 2.
+	vaultVersion        = 1
+	vaultVersionBinding = 2
 )
 
 // checkText is sealed into every file, so a wrong key fails before any value is read.
@@ -85,14 +89,30 @@ type vaultFile struct {
 	Entries map[string]sealedEntry `json:"entries"`
 }
 
-// Names and notes stay readable, as Keychain attributes were; only values are sealed.
+// Names, notes and bindings stay readable, as Keychain attributes were; only
+// values are sealed. Bindings are stored canonical, the form sealed into the
+// value, so a hand-edit that reorders them does not silently unbind.
 type sealedEntry struct {
-	Note  string `json:"note,omitempty"`
-	Value []byte `json:"value"`
+	Note     string    `json:"note,omitempty"`
+	Bindings []Binding `json:"bindings,omitempty"`
+	Value    []byte    `json:"value"`
 }
 
-// aad binds a sealed value to its name, so swapping entries in the file fails.
-func aad(name string) []byte { return []byte("keyward-vault-v1:" + name) }
+// aad binds a sealed value to its name and its bindings, so swapping entries in
+// the file fails, and so does removing or changing a binding by hand. With no
+// binding it is exactly what it was before bindings existed, so values already
+// in a vault still decrypt.
+func aad(name string, bindings []Binding) []byte {
+	base := "keyward-vault-v1:" + name
+	c := canonicalBindings(bindings)
+	if len(c) == 0 {
+		return []byte(base)
+	}
+	// A name cannot hold a NUL (handle.Normalize forbids it), so the separator
+	// cannot be mistaken for part of the name.
+	j, _ := json.Marshal(c)
+	return append([]byte(base+"\x00"), j...)
+}
 
 func (e *Encrypted) Get(name string) (Secret, error) {
 	key, err := normalize(name)
@@ -120,12 +140,24 @@ func (e *Encrypted) Get(name string) (Secret, error) {
 		}
 		entry = f.Entries[key]
 	}
-	plain, err := e.open(entry.Value, key)
+	if !allKnown(entry.Bindings) {
+		return Secret{}, fmt.Errorf("vault get %q: it is bound in a way this keyward does not understand; update keyward", key)
+	}
+	plain, err := e.open(entry.Value, key, entry.Bindings)
 	if err != nil {
 		return Secret{}, fmt.Errorf("vault get %q: %w", key, err)
 	}
 	defer clear(plain)
 	return NewSecret(plain), nil
+}
+
+func allKnown(bindings []Binding) bool {
+	for _, b := range bindings {
+		if !b.Known() {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *Encrypted) Put(name string, value Secret, note string) error {
@@ -142,7 +174,7 @@ func (e *Encrypted) Put(name string, value Secret, note string) error {
 	if _, ok := f.Entries[key]; ok || e.legacyHas(key) {
 		return fmt.Errorf("vault put %q: %w", key, ErrExists)
 	}
-	f.Entries[key] = sealedEntry{Note: SanitizeNote(note), Value: e.seal(value.Bytes(), key)}
+	f.Entries[key] = sealedEntry{Note: SanitizeNote(note), Value: e.seal(value.Bytes(), key, nil)}
 	if err := e.write(f); err != nil {
 		return fmt.Errorf("vault put %q: %w", key, err)
 	}
@@ -150,6 +182,7 @@ func (e *Encrypted) Put(name string, value Secret, note string) error {
 }
 
 // Replace writes the new value without reading a legacy one, so it never asks.
+// Bindings are preserved: add --force replaces a value, not where it may go.
 func (e *Encrypted) Replace(name string, value Secret, note string) error {
 	key, err := checkPut(name, value)
 	if err != nil {
@@ -161,12 +194,13 @@ func (e *Encrypted) Replace(name string, value Secret, note string) error {
 	if err != nil {
 		return fmt.Errorf("vault replace %q: %w", key, err)
 	}
-	_, inFile := f.Entries[key]
+	existing, inFile := f.Entries[key]
 	inLegacy := !inFile && e.legacyHas(key)
 	if !inFile && !inLegacy {
 		return fmt.Errorf("vault replace %q: %w", key, ErrNotFound)
 	}
-	f.Entries[key] = sealedEntry{Note: SanitizeNote(note), Value: e.seal(value.Bytes(), key)}
+	// Bindings are preserved: replacing a value does not change where it may go.
+	f.Entries[key] = sealedEntry{Note: SanitizeNote(note), Bindings: existing.Bindings, Value: e.seal(value.Bytes(), key, existing.Bindings)}
 	if err := e.write(f); err != nil {
 		return fmt.Errorf("vault replace %q: %w", key, err)
 	}
@@ -203,6 +237,89 @@ func (e *Encrypted) Delete(name string) error {
 	return fmt.Errorf("vault delete %q: %w", key, ErrNotFound)
 }
 
+// Bindings reads only the file's metadata, so it never asks for the key. A
+// legacy item not yet moved in has no bindings.
+func (e *Encrypted) Bindings() (map[string][]Binding, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	f, err := e.read()
+	if err != nil {
+		return nil, fmt.Errorf("vault bindings: %w", err)
+	}
+	out := map[string][]Binding{}
+	if f != nil {
+		for name, entry := range f.Entries {
+			if len(entry.Bindings) > 0 {
+				out[name] = entry.Bindings
+			}
+		}
+	}
+	return out, nil
+}
+
+// Bind adds a binding to name; Unbind removes one. Both re-seal the value, since
+// the bindings are part of its associated data.
+func (e *Encrypted) Bind(name string, binding Binding) error {
+	return e.reseal("bind", name, func(bindings []Binding) []Binding {
+		return canonicalBindings(append(slices.Clone(bindings), binding))
+	})
+}
+
+func (e *Encrypted) Unbind(name string, binding Binding) error {
+	return e.reseal("unbind", name, func(bindings []Binding) []Binding {
+		return canonicalBindings(slices.DeleteFunc(slices.Clone(bindings), func(b Binding) bool { return b == binding }))
+	})
+}
+
+// reseal re-encrypts name's value under the bindings that change returns. It
+// needs the key, since the value must be opened and sealed again, but no value
+// leaves the process. A change that leaves the bindings as they were does not
+// rewrite the file, so a repeated bind is cheap and idempotent.
+func (e *Encrypted) reseal(op, name string, change func([]Binding) []Binding) error {
+	key, err := normalize(name)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	// Before the vault exists there is nothing to bind, and creating a key here
+	// would seal later values with one a copied-in vault cannot share (as Get).
+	if f, err := e.read(); err == nil && f == nil && !e.legacyHas(key) {
+		return fmt.Errorf("vault %s %q: %w", op, key, ErrNotFound)
+	}
+	f, err := e.unlock()
+	if err != nil {
+		return fmt.Errorf("vault %s %q: %w", op, key, err)
+	}
+	if _, ok := f.Entries[key]; !ok {
+		if moved, err := e.adopt(f, key); err != nil {
+			return fmt.Errorf("vault %s %q: %w", op, key, err)
+		} else if !moved {
+			return fmt.Errorf("vault %s %q: %w", op, key, ErrNotFound)
+		}
+	}
+	entry := f.Entries[key]
+	if !allKnown(entry.Bindings) {
+		// Its value is sealed with fields this keyward cannot reproduce.
+		return fmt.Errorf("vault %s %q: it is bound in a way this keyward does not understand; update keyward", op, key)
+	}
+	next := change(entry.Bindings)
+	if slices.Equal(next, entry.Bindings) {
+		return nil
+	}
+	plain, err := e.open(entry.Value, key, entry.Bindings)
+	if err != nil {
+		return fmt.Errorf("vault %s %q: %w", op, key, err)
+	}
+	defer clear(plain)
+	entry.Bindings, entry.Value = next, e.seal(plain, key, next)
+	f.Entries[key] = entry
+	if err := e.write(f); err != nil {
+		return fmt.Errorf("vault %s %q: %w", op, key, err)
+	}
+	return nil
+}
+
 // Entries lists the file and any legacy items not yet moved, without the key.
 func (e *Encrypted) Entries() ([]Entry, error) {
 	e.mu.Lock()
@@ -216,7 +333,7 @@ func (e *Encrypted) Entries() ([]Entry, error) {
 	if f != nil {
 		for name, entry := range f.Entries {
 			seen[name] = true
-			entries = append(entries, Entry{Name: name, Note: entry.Note})
+			entries = append(entries, Entry{Name: name, Note: entry.Note, Bindings: entry.Bindings})
 		}
 	}
 	if e.Legacy != nil {
@@ -255,13 +372,13 @@ func (e *Encrypted) unlock() (*vaultFile, error) {
 	// Checked on every use, not only when the key is first read: a vault copied
 	// over while the daemon runs must not be mixed with values under another key.
 	if f != nil {
-		if _, err := open(e.gcm, f.Check, aad("")); err != nil {
+		if _, err := open(e.gcm, f.Check, aad("", nil)); err != nil {
 			e.gcm = nil
 			return nil, e.mismatch()
 		}
 	}
 	if f == nil {
-		f = &vaultFile{Version: vaultVersion, Check: e.seal(checkText, ""), Entries: map[string]sealedEntry{}}
+		f = &vaultFile{Version: vaultVersion, Check: e.seal(checkText, "", nil), Entries: map[string]sealedEntry{}}
 	}
 	if !e.migrated {
 		e.migrated = true
@@ -351,7 +468,7 @@ func (e *Encrypted) take(f *vaultFile, entry Entry) error {
 		return err
 	}
 	defer secret.Destroy()
-	f.Entries[entry.Name] = sealedEntry{Note: entry.Note, Value: e.seal(secret.Bytes(), entry.Name)}
+	f.Entries[entry.Name] = sealedEntry{Note: entry.Note, Value: e.seal(secret.Bytes(), entry.Name, nil)}
 	return nil
 }
 
@@ -373,14 +490,14 @@ func (e *Encrypted) commit(f *vaultFile, moved []string) error {
 	return nil
 }
 
-func (e *Encrypted) seal(plain []byte, name string) []byte {
+func (e *Encrypted) seal(plain []byte, name string, bindings []Binding) []byte {
 	nonce := make([]byte, e.gcm.NonceSize())
 	rand.Read(nonce)
-	return e.gcm.Seal(nonce, nonce, plain, aad(name))
+	return e.gcm.Seal(nonce, nonce, plain, aad(name, bindings))
 }
 
-func (e *Encrypted) open(sealed []byte, name string) ([]byte, error) {
-	plain, err := open(e.gcm, sealed, aad(name))
+func (e *Encrypted) open(sealed []byte, name string, bindings []Binding) ([]byte, error) {
+	plain, err := open(e.gcm, sealed, aad(name, bindings))
 	if err != nil {
 		return nil, fmt.Errorf("the stored value was modified or does not match the vault key")
 	}
@@ -422,8 +539,8 @@ func (e *Encrypted) read() (*vaultFile, error) {
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("%s is unreadable: %w", e.Path, err)
 	}
-	if f.Version != vaultVersion {
-		return nil, fmt.Errorf("%s has version %d; this keyward reads version %d", e.Path, f.Version, vaultVersion)
+	if f.Version != vaultVersion && f.Version != vaultVersionBinding {
+		return nil, fmt.Errorf("%s has version %d; this keyward reads versions %d and %d", e.Path, f.Version, vaultVersion, vaultVersionBinding)
 	}
 	if f.Entries == nil {
 		f.Entries = map[string]sealedEntry{}
@@ -436,6 +553,19 @@ func (e *Encrypted) write(f *vaultFile) error {
 	dir := filepath.Dir(e.Path)
 	if err := ensurePrivateDir(dir); err != nil {
 		return err
+	}
+	// Version 2 only once something is bound, so an older keyward can still read a
+	// vault that has no bindings, and reads one again if the last is removed.
+	f.Version = vaultVersion
+	for _, entry := range f.Entries {
+		if !allKnown(entry.Bindings) {
+			// Rewriting would drop the fields this keyward does not know, and the value
+			// sealed with them would never open again.
+			return fmt.Errorf("%s holds bindings from a newer keyward, so this one will not change it; update keyward", e.Path)
+		}
+		if len(entry.Bindings) > 0 {
+			f.Version = vaultVersionBinding
+		}
 	}
 	data, err := json.Marshal(f)
 	if err != nil {

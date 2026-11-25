@@ -56,6 +56,7 @@ func newHarness(t *testing.T, stdin string, seed map[string]string, environ []st
 	}
 	h.cli = &cli.CLI{
 		Store:   store,
+		Binder:  store,
 		Backups: backup.Dir{Path: filepath.Join(t.TempDir(), "backups")},
 		Ledger:  ledger.Ledger{Path: filepath.Join(t.TempDir(), "ledger.json")},
 		Stdin:   strings.NewReader(stdin),
@@ -209,7 +210,7 @@ func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 	if commands < 0 || options < commands || examples < options {
 		t.Fatalf("help lacks commands, options, and examples sections in that order:\n%s", out)
 	}
-	for _, want := range []string{"migrate <file>", "run -- <command>", "copy <name>", "mcp [wrap|unwrap]", "agents [link|unlink]", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run --only GITHUB_TOKEN -- gh pr list", "--only VAR", "--no-mask", "--allow-command-line"} {
+	for _, want := range []string{"migrate <file>", "run -- <command>", "copy <name>", "mcp [wrap|unwrap]", "agents [link|unlink]", "status | stop | start", "uninstall", "--dry-run", "--force", "github-token", "keyward run --only GITHUB_TOKEN -- gh pr list", "--only VAR", "--no-mask", "--allow-command-line", "--program P", "bind | unbind <name>"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q", want)
 		}
@@ -220,8 +221,8 @@ func TestHelpListsCommandsOptionsAndExamplesOnly(t *testing.T) {
 			t.Errorf("help still shows %q", unwanted)
 		}
 	}
-	if lines := strings.Count(out, "\n"); lines > 36 {
-		t.Errorf("help is %d lines, want at most 36", lines)
+	if lines := strings.Count(out, "\n"); lines > 39 {
+		t.Errorf("help is %d lines, want at most 39", lines)
 	}
 }
 

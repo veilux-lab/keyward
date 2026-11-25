@@ -88,6 +88,7 @@ func main() {
 	client := managedClient(home, socket, service, homebrewExecutable)
 	c := &cli.CLI{
 		Store:          client,
+		Binder:         client,
 		Recovery:       client,
 		RecoveryMarker: vaultPath + ".recovery-shown",
 		Interactive:    term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())),

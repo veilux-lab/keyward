@@ -79,6 +79,28 @@ func TestPrivateStructuredEventsAndRejectedInputs(t *testing.T) {
 	}
 }
 
+// Every operation the daemon records is one the log accepts, or the daemon's log
+// drops it and says logging is unavailable. Detail carries only a binding kind.
+func TestTheLogAcceptsWhatTheDaemonRecords(t *testing.T) {
+	l, err := activity.New(config(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []activity.Event{
+		{Command: "daemon", Operation: "exposures", Outcome: "ok"},
+		{Command: "daemon", Operation: "bindings", Outcome: "ok"},
+		{Command: "daemon", Operation: "bind", Name: "github-token", Detail: "program", Outcome: "ok"},
+		{Command: "bind", Operation: "command", Outcome: "denied"},
+	} {
+		if err := l.Record(e); err != nil {
+			t.Errorf("the log rejects %+v: %v", e, err)
+		}
+	}
+	if err := l.Record(activity.Event{Command: "daemon", Operation: "bind", Detail: "/opt/homebrew/bin/gh", Outcome: "ok"}); err == nil {
+		t.Error("the log accepts a Detail that is not a binding kind")
+	}
+}
+
 func TestRotationRetentionAndTotalCap(t *testing.T) {
 	c := config(t)
 	c.RotateBytes, c.MaxBytes = 500, 1200

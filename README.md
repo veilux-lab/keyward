@@ -36,6 +36,8 @@ keyward migrate --dry-run ~/.zshrc        # preview; hides values and token-like
 keyward migrate ~/.zshrc                  # move a file's secrets; asks for "yes"
 keyward run --only API_TOKEN -- npm test  # run a command with the values it names
 keyward ls                                # stored names
+keyward bind github-token --program gh    # give a secret only to gh; asks for "yes"
+keyward bindings                          # where each secret may go
 keyward copy api-token                    # put a value on the clipboard; asks for "yes"
 keyward doctor                            # check your setup
 keyward help                              # commands and options
@@ -43,7 +45,8 @@ keyward help                              # commands and options
 
 - Start anything that needs a secret through `keyward run`; anything else sees
   only the `cap://` reference. Name the variables a command needs with `--only`;
-  without it, `keyward run` resolves every reference in its environment. Don't
+  without it, `keyward run` resolves every reference in its environment but a
+  bound one the command may not have. Don't
   start your editor that way, or everything inside it gets the values.
 - To keep typing a command as before, alias it in your shell's startup file,
   such as `~/.zshrc` or `~/.bashrc`, naming what it needs:
@@ -57,6 +60,16 @@ keyward help                              # commands and options
   `printf 'header = "Authorization: Bearer %s"\n' "$API_TOKEN" | curl -K - ...`.
   `printf` is built into the shell, so it has no command line of its own.
   `--allow-command-line` runs the script anyway.
+- `--only` limits which secrets a command gets, but not where they go. Bind a
+  secret to the program that uses it, `keyward bind github-token --program gh`,
+  and `keyward run` gives it only to `gh` started directly: not to a `sh -c`
+  script, another program, or one started with a `DYLD_` variable set. Named in
+  `--only` there, it is refused; without `--only`, it stays a `cap://` reference,
+  and `keyward run` says so. `keyward bindings` lists bindings; `keyward bind` and
+  `keyward unbind` ask for "yes" in a terminal and first name the MCP servers
+  `keyward mcp` can see that they would stop. A binding catches mistakes, not an agent working around it:
+  the bound program passes the secret to whatever it runs, as `gh` does to its
+  browser, pager, aliases and extensions. See [bindings](docs/details.md#bindings).
 - When a command's output goes to an agent, a pipe or a file rather than a
   terminal, `keyward run` shows `cap://name#masked` in place of each value it gave
   the command, also when JSON-, URL- or base64-encoded, and says so. A program

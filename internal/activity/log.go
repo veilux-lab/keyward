@@ -66,9 +66,12 @@ func FromEnv(home string, getenv func(string) string) (Config, error) {
 // Fields are deliberately limited; argv, environment, values, and error text
 // have no place in an event.
 type Event struct {
-	Command    string `json:"command"`
-	Operation  string `json:"operation"`
-	Name       string `json:"name,omitempty"`
+	Command   string `json:"command"`
+	Operation string `json:"operation"`
+	Name      string `json:"name,omitempty"`
+	// Detail qualifies the operation without naming a value: the kind of binding
+	// a bind or unbind changed. One controlled token, never free text.
+	Detail     string `json:"detail,omitempty"`
 	Outcome    string `json:"outcome"`
 	DurationMS int64  `json:"duration_ms,omitempty"`
 }
@@ -97,9 +100,10 @@ func allowed(value, choices string) bool {
 }
 
 func (l *Log) Record(e Event) error {
-	if !allowed(e.Command, "add copy ls rm run migrate restore backups agents recovery mcp setup doctor daemon service start stop status help version") ||
-		!allowed(e.Operation, "command put replace get resolve delete list exec mask start stop shutdown connection request reply diagnostic install uninstall status export-key restore-key") ||
-		!allowed(e.Outcome, "ok error denied not_found exists invalid empty_value cancelled started interrupted usage") || e.DurationMS < 0 {
+	if !allowed(e.Command, "add copy ls rm run migrate restore backups agents recovery mcp setup doctor daemon service start stop status help version bind unbind bindings") ||
+		!allowed(e.Operation, "command put replace get resolve delete list exec mask start stop shutdown connection request reply diagnostic install uninstall status export-key restore-key exposures bind unbind bindings") ||
+		!allowed(e.Outcome, "ok error denied not_found exists invalid empty_value cancelled started interrupted usage") ||
+		e.Detail != "" && !allowed(e.Detail, "program") || e.DurationMS < 0 {
 		return errors.New("invalid activity event")
 	}
 	name, err := handle.Normalize(e.Name)

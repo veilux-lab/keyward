@@ -137,6 +137,6 @@ func opens(key []byte, f *vaultFile) error {
 	if err != nil {
 		return err
 	}
-	_, err = open(gcm, f.Check, aad(""))
+	_, err = open(gcm, f.Check, aad("", nil))
 	return err
 }

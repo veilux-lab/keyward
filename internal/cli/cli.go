@@ -130,6 +130,10 @@ type CLI struct {
 	// Service manages the signed installation and login agent.
 	Service func(action string) (string, error)
 
+	// Binder reads and changes secret bindings; nil without a daemon. run reads
+	// through it rather than the activity-wrapped store, so checking where a
+	// secret may go is not logged as a list; bind and unbind change through it.
+	Binder vault.Binder
 	// Recovery exports and restores the vault key; nil without a daemon.
 	Recovery vault.KeyRecovery
 	// RecoveryMarker records that a recovery code was shown, ending the reminders.
@@ -164,6 +168,8 @@ commands:
   copy <name>            put a secret on the clipboard for 30 seconds (asks first)
   ls                     list stored names
   rm <name>              remove a secret
+  bind | unbind <name>   give a secret only to some programs, or undo it (asks first)
+  bindings               list bound secrets and where they may go
   doctor [file...]       check references, plaintext and exposed secrets, backups, and setup
   restore <file>...      put the values back into files (asks first)
   backups [rm|recover]   list, remove, or recover migrate's backups
@@ -177,7 +183,8 @@ commands:
 options:
   --dry-run              migrate, restore, uninstall: show what would change, and stop
   --force                add: replace an existing secret
-  --all                  backups rm: remove every backup
+  --all                  backups rm, unbind: remove every backup, or every binding
+  --program P            bind, unbind: a program the secret may go to
   --purge                uninstall: also delete the vault and its Keychain key
   --only VAR,...         run: resolve only these variables
   --no-mask              run: do not hide the values in the command's output
@@ -213,7 +220,7 @@ func (c *CLI) Run(args []string) int {
 		command = "help"
 	}
 	switch command {
-	case "add", "copy", "ls", "rm", "run", "migrate", "restore", "backups", "agents", "recovery", "mcp", "setup", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
+	case "add", "copy", "ls", "rm", "run", "bind", "unbind", "bindings", "migrate", "restore", "backups", "agents", "recovery", "mcp", "setup", "doctor", "daemon", "service", "start", "stop", "status", "help", "version":
 	default:
 		return c.dispatch(args)
 	}
@@ -267,6 +274,12 @@ func (c *CLI) dispatch(args []string) int {
 		return c.remove(args[1:])
 	case "run":
 		return c.run(args[1:])
+	case "bind":
+		return c.bind(args[1:])
+	case "unbind":
+		return c.unbind(args[1:])
+	case "bindings":
+		return c.bindings(args[1:])
 	case "migrate":
 		return c.migrate(args[1:])
 	case "restore":
@@ -455,10 +468,14 @@ func (c *CLI) daemon(args []string) int {
 // parent and hides the resolved values in that output, unless --no-mask, or no
 // value it resolved is worth hiding.
 //
+// A secret bound to programs goes only to one of them that it starts directly,
+// never to a script: named in --only, it is refused anywhere else; otherwise it
+// is left unresolved.
+//
 // Before resolving, unless --allow-command-line, it refuses a shell's script, as
-// in sh -c SCRIPT, that would put one of those values in another program's
-// command line, where other programs and security logs can read it. The check
-// needs only the variables' names, so a refused command never reads the vault.
+// in sh -c SCRIPT, that would put one of the values it resolves in another
+// program's command line, where other programs and security logs can read it.
+// Both checks need only names, so a refused command never reads a value.
 //
 // Resolution happens before anything is executed. If any reference fails, nothing
 // runs — a command started with a literal cap:// value where a credential belongs
@@ -511,11 +528,30 @@ func (c *CLI) run(args []string) int {
 			return exitUsage
 		}
 	}
-	if !allowCommandLine && c.refuseScript(args, resolve.Variables(env, only)) {
+	// Bindings first: they limit which programs a secret may reach, which --only
+	// cannot, and a secret they leave unresolved is no value a script could leak.
+	keys, notes, refusal, err := c.bindingResolveKeys(args, env, only)
+	if err != nil {
+		return c.fail("keyward run: %v", err)
+	}
+	if refusal != "" {
+		c.refused = true
+		stop := catchSIGPIPE() // Run records the refusal after this write
+		fmt.Fprintln(c.Stderr, refusal)
+		stop()
+		return exitUsage
+	}
+	if !allowCommandLine && c.refuseScript(args, resolve.Variables(env, keys)) {
 		c.refused = true
 		return exitUsage
 	}
-	result, err := resolve.New(c.Store).EnvOnly(env, only)
+	if len(notes) > 0 {
+		// A command that fails on a cap:// reference should not leave you guessing.
+		stop := catchSIGPIPE()
+		fmt.Fprintln(c.Stderr, strings.Join(notes, "\n"))
+		stop()
+	}
+	result, err := resolve.New(c.Store).EnvOnly(env, keys)
 	if err != nil {
 		return c.failResolve(err)
 	}

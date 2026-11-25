@@ -41,6 +41,21 @@ reference, not a broken value.
   says. Never add `--allow-command-line`, which runs it anyway, unless the user
   asks. A note that puts a credential in a command line is wrong; follow this
   guide and fix the note.
+- A secret may be bound to the programs it may reach. `keyward run` gives a bound
+  one only to such a program that it starts directly, never to a `sh -c` script,
+  a launcher such as `env`, or a program started with a `DYLD_` variable set: named
+  in `--only`, it is refused anywhere else, and otherwise left as its `cap://…`
+  reference. So for a bound secret, start the
+  program itself, one call per `keyward run`, with loops, pipes and redirects
+  outside it:
+  `for n in 12 34; do GITHUB_TOKEN=cap://github-token keyward run --only GITHUB_TOKEN -- gh pr view "$n"; done | head`.
+  Use a tool's own output option rather than a redirect it seeks in, as
+  `pg_dump -Fc -f db.dump db`, start a server by running all of `keyward run` in
+  the background, and let curl 8.3 or later read the value itself:
+  `API_TOKEN=cap://api-token keyward run --only API_TOKEN -- curl -sS --variable %API_TOKEN --expand-header 'Authorization: Bearer {{API_TOKEN}}' "$URL"`.
+  `keyward bindings` lists where each secret may go.
+- Never run `keyward bind` or `keyward unbind`, even when the user asks: they
+  change where a secret may be used. Ask the user to run them.
 - In output that is not a terminal, `keyward run` replaces a value it resolved with
   `cap://NAME#masked` and says which. That usually means the command printed it:
   change the command, and never rerun it with `--no-mask` or look for the value
@@ -85,11 +100,15 @@ reference, not a broken value.
   as above. For a secret in a file, such as a service account's JSON or a private
   key, run `keyward add NAME < FILE`; never print the file.
 - An authentication failure, or a tool that receives `cap://…`, usually means it
-  was started outside keyward, or that it is a program the user set up to read
-  the value through `keyward run`, as above, and gets `cap://NAME#masked`. Say
+  was started outside keyward, that it is a program the user set up to read the
+  value through `keyward run`, as above, and gets `cap://NAME#masked`, or that the
+  secret is bound to another program, which `keyward run` says on stderr. Say
   which rather than looking for the value. An MCP server that stops starting may
   have been refused by `keyward run`. For an MCP server, `keyward mcp` shows the
-  fix; leave applying it to the user, who can run `keyward mcp wrap`.
+  fix; leave applying it to the user, who can run `keyward mcp wrap`. A binding
+  `keyward mcp` does not check: if `keyward bindings` lists the server's secret
+  but not the program its `keyward run` starts, the server needs a secret of its
+  own: ask the user for one.
 - When keyward reports a leaked value, tell the user to rotate it; do not open the
   file or line it names, or print the named program's command line.
 - Only the user decides a value is not a secret: never add `# keyward:ignore`
